@@ -1,8 +1,32 @@
-<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>com.flowguard.filter</string>
-<key>CFBundleName</key><string>FlowGuard Filter</string>
-<key>CFBundlePackageType</key><string>SYSX</string>
-<key>CFBundleVersion</key><string>1</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>NetworkExtension</key><dict><key>NEProviderClasses</key><dict><key>com.apple.networkextension.filter-data</key><string>FlowGuardExtension.FilterDataProvider</string></dict><key>NEMachServiceName</key><string>$(TeamIdentifierPrefix)com.flowguard.filter</string></dict>
-</dict></plist>
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>FlowGuardSystemExtension</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.flowguard.filter</string>
+	<key>CFBundleName</key>
+	<string>FlowGuard Filter</string>
+	<key>CFBundlePackageType</key>
+	<string>SYSX</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>NSSystemExtensionUsageDescription</key>
+	<string>Applies local app connection rules.</string>
+	<key>NetworkExtension</key>
+	<dict>
+		<key>NEMachServiceName</key>
+		<string>$(TeamIdentifierPrefix)com.flowguard.filter</string>
+		<key>NEProviderClasses</key>
+		<dict>
+			<key>com.apple.networkextension.filter-data</key>
+			<string>FlowGuardFilterDataProvider</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

@@ -1,8 +1,10 @@
 import {useSyncExternalStore} from 'react';
 import {invoke,isTauri} from '@tauri-apps/api/core';
 import {listen} from '@tauri-apps/api/event';
-import type {Command, Connection, Document, Snapshot} from './types';
+import type {Command, Connection, Document, Rule, Snapshot} from './types';
 import {validRules} from './rules';
+import {defaultExtension} from './enforcement';
+import {groupApplications} from './applications';
 export const native=isTauri();
 const storageKey='flowguard-preview-v1';
 const listeners=new Set<()=>void>();
@@ -16,7 +18,7 @@ function emit(value:Snapshot){if(snapshot&&value.revision<snapshot.revision)retu
 function preview(){
  let document:Document={rules:[],preferences:{locale:'ja',view:'map',panel:'right',mode:'demo'}};
  try {const stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored&&validRules(stored.rules)) {document.rules=stored.rules;if(['ja','en','zh-CN'].includes(stored.preferences?.locale))document.preferences.locale=stored.preferences.locale;}}catch{/* Corrupt preview storage is isolated from desktop documents. */}
- const connections=sampleConnections();emit({revision:0,document,connections,history:connections,selectedId:connections[0].id,firewall:{enabled:null,enforcement:'unavailable',observer:'demo',error:null},lastObserved:null,layout:connections.map((c,i)=>({id:c.id,y:72+i*100}))});
+ const connections=sampleConnections();emit({revision:0,extension:{...defaultExtension},document,connections,applications:groupApplications(connections),history:connections,selectedId:connections[0].id,firewall:{enabled:null,enforcement:'unavailable',observer:'demo',error:null},lastObserved:null,layout:connections.map((c,i)=>({id:c.id,y:72+i*100}))});
 }
 let initPromise:Promise<void>|undefined;
 export function initialize(){
@@ -25,9 +27,10 @@ export function initialize(){
 }
 export function useSnapshot(){return useSyncExternalStore(fn=>{listeners.add(fn);return()=>listeners.delete(fn);},()=>snapshot);}
 export function useStartupError(){return useSyncExternalStore(fn=>{listeners.add(fn);return()=>listeners.delete(fn);},()=>startupError);}
-export async function dispatch(command:Command){
- if(native){emit(await invoke<Snapshot>('dispatch',{command}));return;}
+export async function dispatch(command:Command, expectedRules:Rule[]=snapshot?.document.rules??[]){
+ if(native){const next=await invoke<Snapshot>('dispatch',{command,expectedRules});emit(next);return next;}
  if(!snapshot)throw Error('not_ready');
+ if(['saveRule','deleteRule','restoreRules'].includes(command.type)&&JSON.stringify(expectedRules)!==JSON.stringify(snapshot.document.rules))throw Error('edit_conflict');
  const next:Snapshot=structuredClone(snapshot);const doc=next.document;
  switch(command.type){
  case 'select':if(!next.connections.some(c=>c.id===command.id))throw Error('connection_expired');next.selectedId=command.id;break;
@@ -44,7 +47,14 @@ export async function dispatch(command:Command){
  case 'deleteRule':doc.rules=doc.rules.filter(r=>r.id!==command.id);break;
  case 'restoreRules':if(!validRules(command.rules))throw Error('invalid_backup');doc.rules=command.rules;break;
  }
- localStorage.setItem(storageKey,JSON.stringify(doc));next.revision++;emit(next);
+ localStorage.setItem(storageKey,JSON.stringify(doc));next.revision++;emit(next);return next;
 }
 export async function floatPanel(){if(native){emit(await invoke<Snapshot>('float_panel'));}else{throw Error('desktop_required');}}
 export async function dockPanel(panel:'left'|'right'){if(native)emit(await invoke<Snapshot>('dock_panel',{panel}));else await dispatch({type:'setPanel',panel});}
+
+export interface ExtensionPackageStatus {packaged:boolean;bridgeAvailable:boolean;status:string}
+export async function extensionPackageStatus():Promise<ExtensionPackageStatus>{return native?invoke<ExtensionPackageStatus>('extension_package_status'):{packaged:false,bridgeAvailable:false,status:'not_packaged'};}
+
+export async function activateExtension(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('activate_extension'));}
+export async function applyExtensionRules(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('sync_extension_rules'));}
+export async function refreshExtension(){if(!native)return;emit(await invoke<Snapshot>('refresh_extension'));}

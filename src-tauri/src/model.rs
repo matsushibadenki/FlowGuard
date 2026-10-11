@@ -74,10 +74,58 @@ pub struct NodeLayout {
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ApplicationGroup {
+    pub id: String,
+    pub app: String,
+    pub app_key: String,
+    pub connection_ids: Vec<String>,
+    pub process_ids: Vec<u32>,
+    pub destinations: Vec<String>,
+}
+pub fn group_applications(connections: &[Connection]) -> Vec<ApplicationGroup> {
+    let mut groups = std::collections::BTreeMap::<String, ApplicationGroup>::new();
+    for c in connections {
+        let id = if c.app_key.is_empty() {
+            format!("unknown:{}", c.pid)
+        } else {
+            c.app_key.clone()
+        };
+        let group = groups
+            .entry(id.clone())
+            .or_insert_with(|| ApplicationGroup {
+                id,
+                app: c.app.clone(),
+                app_key: c.app_key.clone(),
+                connection_ids: vec![],
+                process_ids: vec![],
+                destinations: vec![],
+            });
+        group.connection_ids.push(c.id.clone());
+        if !group.process_ids.contains(&c.pid) {
+            group.process_ids.push(c.pid);
+        }
+        let destination = format!("{}:{}", c.destination, c.port);
+        if !group.destinations.contains(&destination) {
+            group.destinations.push(destination);
+        }
+    }
+    let mut result: Vec<_> = groups.into_values().collect();
+    result.sort_by(|a, b| {
+        b.connection_ids
+            .len()
+            .cmp(&a.connection_ids.len())
+            .then(a.id.cmp(&b.id))
+    });
+    result
+}
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     pub revision: u64,
+    pub extension: crate::enforcement::ExtensionStatus,
     pub document: Document,
     pub connections: Vec<Connection>,
+    pub applications: Vec<ApplicationGroup>,
     pub history: Vec<Connection>,
     pub selected_id: Option<String>,
     pub firewall: FirewallStatus,
@@ -165,6 +213,31 @@ pub fn demo_connections() -> Vec<Connection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn grouping_uses_executable_not_display_name_and_keeps_unknown_processes_separate() {
+        let mut connections = demo_connections();
+        let mut duplicate = connections[0].clone();
+        duplicate.id = "second-safari".into();
+        duplicate.pid = 123;
+        connections.push(duplicate);
+        let mut impostor = connections[0].clone();
+        impostor.id = "different-binary".into();
+        impostor.app_key = "/tmp/Safari".into();
+        connections.push(impostor);
+        let mut unknown = connections[0].clone();
+        unknown.app_key.clear();
+        unknown.pid = 91;
+        unknown.id = "unknown-91".into();
+        connections.push(unknown.clone());
+        unknown.pid = 92;
+        unknown.id = "unknown-92".into();
+        connections.push(unknown);
+        let groups = group_applications(&connections);
+        assert_eq!(groups.len(), 7);
+        assert_eq!(groups[0].connection_ids.len(), 2);
+        assert_eq!(groups[0].process_ids.len(), 2);
+        assert_eq!(groups[0].destinations.len(), 1);
+    }
     #[test]
     fn rule_scope_includes_port_direction_and_source() {
         let c = demo_connections().remove(0);

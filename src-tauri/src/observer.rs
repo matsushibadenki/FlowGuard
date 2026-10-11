@@ -6,13 +6,38 @@ use std::{
 };
 
 // Fixed, read-only tools. No shell, sudo, arbitrary arguments, DNS lookups or packet payloads.
-fn run_bounded(binary: &str, args: &[&str]) -> Result<(bool, String), String> {
+pub(crate) fn run_bounded(binary: &str, args: &[&str]) -> Result<(bool, String), String> {
+    run_bounded_input(binary, args, None)
+}
+pub(crate) fn run_bounded_input(
+    binary: &str,
+    args: &[&str],
+    input: Option<Vec<u8>>,
+) -> Result<(bool, String), String> {
+    let deadline = if input.is_some() {
+        Duration::from_secs(12)
+    } else {
+        Duration::from_secs(6)
+    };
     let mut child = Command::new(binary)
         .args(args)
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| e.to_string())?;
+    if let Some(input) = input {
+        let mut pipe = child.stdin.take().ok_or("missing stdin")?;
+        // Closing stdin signals EOF; stdin content is bounded by the caller.
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = pipe.write_all(&input);
+        });
+    }
     let pipe = child.stdout.take().ok_or("missing stdout")?;
     // Read concurrently so a full pipe cannot deadlock the observer.
     let reader = std::thread::spawn(move || {
@@ -27,7 +52,7 @@ fn run_bounded(binary: &str, args: &[&str]) -> Result<(bool, String), String> {
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
             break status;
         }
-        if start.elapsed() > Duration::from_secs(5) {
+        if start.elapsed() > deadline {
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();

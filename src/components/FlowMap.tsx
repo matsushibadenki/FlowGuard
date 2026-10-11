@@ -14,7 +14,7 @@ export function FlowMap({snapshot,connections,t,select}:{snapshot:Snapshot;conne
  <div className="map-center"><div className="center-orbit"><Brand large/><strong>FlowGuard</strong><small>{t('firewallRules')}</small></div></div>
  <div className="map-destinations">{visible.map(c=><button key={c.id} className={`destination-node ${snapshot.selectedId===c.id?'selected':''}`} onClick={()=>select(c)}><span className="destination-icon">{c.destination.startsWith('192.168.')||c.destination.startsWith('127.')?<Network size={24} strokeWidth={1.5}/>:<Globe size={25} strokeWidth={1.5}/>}</span><span><strong title={c.destination}>{c.destination}</strong><small>{c.port} · {c.protocol}</small></span></button>)}</div>
  </div>}
- <div className="map-footer"><div className="legend">{(['allow','block','ask','none'] as const).map(a=><span key={a}><i className={`legend-dot ${a}`}/>{t(a==='none'?'noRule':`${a}Intent`)}</span>)}</div><Notice t={t} compact/></div>
+ <div className="map-footer"><div className="legend">{(['allow','block','ask','none'] as const).map(a=><span key={a}><i className={`legend-dot ${a}`}/>{t(a==='none'?'noRule':`${a}Intent`)}</span>)}</div><Notice snapshot={snapshot} t={t} compact/></div>
  {connections.length>6&&<p className="map-overflow">+{connections.length-6} · {t('moreConnections')}</p>}
  <details className="map-help"><summary>{t('learn')}</summary><p>{t('learnHelp')}</p></details></section>;
 }

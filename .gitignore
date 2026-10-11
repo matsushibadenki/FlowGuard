@@ -41,3 +41,10 @@ pnpm-debug.log*
 *~
 
 # Keep dependency lockfiles, source assets, and signing templates tracked.
+
+# Unsigned native extension staging bundles and Swift build caches
+/native/build/
+
+# Python packaging-tool caches
+__pycache__/
+*.pyc

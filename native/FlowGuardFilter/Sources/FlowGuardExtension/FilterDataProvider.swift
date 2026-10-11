@@ -5,7 +5,9 @@ import FlowGuardPolicy
 
 /// Extension source only. Not installed or activated by the desktop observer build.
 /// The host must provide authenticated rule IPC and an acknowledgement before marking rules active.
+@objc(FlowGuardFilterDataProvider)
 public final class FilterDataProvider: NEFilterDataProvider {
+    private var bridge: BridgeService?
     private let lock = NSLock()
     private var policy = Policy()
     private var pending: [UUID: NEFilterFlow] = [:]
@@ -19,9 +21,18 @@ public final class FilterDataProvider: NEFilterDataProvider {
     public override func startFilter(completionHandler: @escaping (Error?) -> Void) {
         let network = NENetworkRule(remoteNetwork: nil, remotePrefix: 0, localNetwork: nil, localPrefix: 0, protocol: .TCP, direction: .any)
         let settings = NEFilterSettings(rules: [NEFilterRule(networkRule: network, action: .filterData)], defaultAction: .allow)
-        apply(settings, completionHandler: completionHandler)
+        apply(settings) { [weak self] error in
+            guard let self, error == nil else { completionHandler(error); return }
+            let service = BridgeService { [weak self] rules in
+                guard let self else { throw NSError(domain: "FlowGuardBridge", code: 2) }
+                try self.replacePolicy(rules)
+            }
+            do { try service.start(); self.bridge = service; completionHandler(nil) }
+            catch { completionHandler(error) }
+        }
     }
     public override func stopFilter(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
+        bridge?.stop(); bridge = nil
         lock.lock(); let paused = Array(pending.values); pending.removeAll(); lock.unlock()
         for flow in paused { resumeFlow(flow, with: NEFilterNewFlowVerdict.allow()) }
         completionHandler()

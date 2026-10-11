@@ -80,3 +80,8 @@ FlowGuard visualizes established TCP connections and manages local firewall rule
 ## 简体中文
 
 FlowGuard将已建立的TCP连接可视化，并管理本地通信规则意图。当前版本**仅用于观测**：保存规则不会在系统中阻止通信，也不会弹出许可请求。运行 `npm ci` 和 `npm run tauri dev` 启动桌面应用，或运行 `npm run dev` 体验浏览器中的示例数据。Rust持有共享文档和会话状态，浮动详情面板订阅同一状态。经过签名的Network Extension集成及原生GPU画面呈现尚未完成。
+
+
+### Network Extensionの署名なしパッケージ
+
+`npm run tauri build -- --debug`の後、`npm run native:package`で拡張機能とSwiftホストブリッジを同梱した`native/build/FlowGuard.app`を生成できます。macOS 13以降用の検証パッケージです。署名・インストール・OS設定の変更は行いません。XPCの通信契約と更新処理は署名なしテストで検証していますが、実際の有効化・遮断は未実施です。詳細は[native/FlowGuardFilter/README.md](native/FlowGuardFilter/README.md)を参照してください。

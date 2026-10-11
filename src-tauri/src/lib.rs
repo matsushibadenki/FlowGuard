@@ -1,13 +1,157 @@
+mod enforcement;
+mod extension;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 mod model;
+mod native_runtime;
 mod observer;
 mod renderer;
 mod state;
-use model::{Command, Snapshot};
+use model::{Command, Rule, Snapshot};
 use state::SharedState;
 use tauri::{Emitter, Manager};
 
+#[tauri::command]
+fn extension_package_status() -> Result<extension::ExtensionPackageStatus, String> {
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    let contents = executable
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or("bundle_path_unavailable")?;
+    Ok(extension::package_status(contents))
+}
+#[tauri::command]
+async fn extension_bridge_status() -> Result<extension::BridgeStatus, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+        let contents = executable
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or("bundle_path_unavailable")?;
+        extension::bridge_status(contents)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+struct HostRuntime(Option<std::sync::Arc<native_runtime::NativeRuntime>>);
+static ACTIVATIONS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<u64, (tauri::AppHandle, u64)>>,
+> = std::sync::OnceLock::new();
+static NEXT_ACTIVATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+extern "C" fn lifecycle_callback(status: *const std::ffi::c_char, token: u64) {
+    let Some(status) = native_runtime::callback_status(status) else {
+        return;
+    };
+    let registry = ACTIVATIONS.get_or_init(Default::default);
+    let target = {
+        let Ok(mut entries) = registry.lock() else {
+            return;
+        };
+        let Some(target) = entries.get(&token).cloned() else {
+            return;
+        };
+        if status != "approval_required" {
+            entries.remove(&token);
+        }
+        target
+    };
+    let (app, operation) = target;
+    if let Ok(snapshot) = app.state::<SharedState>().extension_change(|extension, _| {
+        extension.lifecycle(operation, &status);
+    }) {
+        let _ = app.emit("state-changed", snapshot);
+    }
+}
+#[tauri::command]
+fn activate_extension(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let runtime = app
+        .state::<HostRuntime>()
+        .0
+        .clone()
+        .ok_or("native_runtime_unavailable")?;
+    let (operation, _, snapshot) = app.state::<SharedState>().begin_extension("activating")?;
+    let _ = app.emit("state-changed", &snapshot);
+    let token = NEXT_ACTIVATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    ACTIVATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "state_unavailable")?
+        .insert(token, (app.clone(), operation));
+    runtime.activate(lifecycle_callback, token);
+    app.state::<SharedState>().snapshot()
+}
+#[tauri::command]
+async fn sync_extension_rules(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let (operation, rules, snapshot) = app.state::<SharedState>().begin_extension("applying")?;
+    let _ = app.emit("state-changed", &snapshot);
+    let sent = rules.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+        let contents = executable
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or("bundle_path_unavailable")?;
+        extension::sync_rules(contents, &sent)
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|value| value);
+    let snapshot =
+        app.state::<SharedState>()
+            .extension_change(|extension, current| match result {
+                Ok(reply) => {
+                    extension.accepted(operation, reply.instance_id, reply.revision, rules, current)
+                }
+                Err(error) => extension.fail(operation, error),
+            })?;
+    app.emit("state-changed", &snapshot)
+        .map_err(|e| e.to_string())?;
+    Ok(snapshot)
+}
+#[tauri::command]
+async fn refresh_extension(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let (signed, generation) = {
+        let state = app.state::<SharedState>();
+        let s = state.inner.lock().map_err(|_| "state_unavailable")?;
+        (
+            s.extension.status.signed
+                && !s.extension.status.busy
+                && s.extension.status.stage != "restart_required",
+            s.extension.generation(),
+        )
+    };
+    if !signed {
+        return app.state::<SharedState>().snapshot();
+    }
+    let result = tauri::async_runtime::spawn_blocking(|| {
+        let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+        extension::bridge_status(
+            executable
+                .parent()
+                .and_then(|p| p.parent())
+                .ok_or("bundle_path_unavailable")?,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|value| value);
+    let snapshot = app
+        .state::<SharedState>()
+        .extension_change(|extension, _| {
+            if extension.generation() != generation {
+                return;
+            }
+            match result {
+                Ok(reply) => {
+                    extension.observed(&reply.instance_id, reply.revision, reply.status == "ready")
+                }
+                Err(error) => extension.disconnected(&error),
+            }
+        })?;
+    app.emit("state-changed", &snapshot)
+        .map_err(|e| e.to_string())?;
+    Ok(snapshot)
+}
 #[tauri::command]
 fn get_snapshot(state: tauri::State<SharedState>) -> Result<Snapshot, String> {
     state.snapshot()
@@ -17,11 +161,22 @@ fn dispatch(
     app: tauri::AppHandle,
     state: tauri::State<SharedState>,
     command: Command,
+    expected_rules: Vec<Rule>,
 ) -> Result<Snapshot, String> {
     if matches!(&command,Command::SetPanel{panel} if panel=="floating") {
         return Err("use_float_panel".into());
     }
-    let snap = state.dispatch(command)?;
+    let snap = match state.dispatch_checked(command, Some(&expected_rules)) {
+        Ok(snap) => snap,
+        Err(error) => {
+            if error == "edit_conflict" {
+                if let Ok(current) = state.snapshot() {
+                    let _ = app.emit("state-changed", current);
+                }
+            }
+            return Err(error);
+        }
+    };
     app.emit("state-changed", &snap)
         .map_err(|e| e.to_string())?;
     Ok(snap)
@@ -70,6 +225,26 @@ pub fn run() {
         .setup(|app| {
             let path = app.path().app_data_dir()?.join("document-v1.json");
             app.manage(SharedState::load(path).map_err(std::io::Error::other)?);
+            let executable = std::env::current_exe()?;
+            let contents = executable
+                .parent()
+                .and_then(|p| p.parent())
+                .ok_or_else(|| std::io::Error::other("bundle_path_unavailable"))?;
+            let package = extension::package_status(contents);
+            let runtime = native_runtime::NativeRuntime::load(contents)
+                .ok()
+                .map(std::sync::Arc::new);
+            let signed = runtime.as_ref().is_some_and(|runtime| runtime.signed());
+            app.state::<SharedState>()
+                .extension_change(|extension, _| {
+                    extension.configure(
+                        package.packaged && package.bridge_available,
+                        runtime.is_some(),
+                        signed,
+                    )
+                })
+                .map_err(std::io::Error::other)?;
+            app.manage(HostRuntime(runtime));
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 let (connections, firewall) = observer::observe();
@@ -78,6 +253,14 @@ pub fn run() {
                     .observed(connections, firewall)
                 {
                     let _ = handle.emit("state-changed", snapshot);
+                }
+                let should_poll = handle.state::<SharedState>().snapshot().is_ok_and(|s| {
+                    s.extension.signed
+                        && !s.extension.busy
+                        && s.extension.stage != "restart_required"
+                });
+                if should_poll {
+                    let _ = tauri::async_runtime::block_on(refresh_extension(handle.clone()));
                 }
                 std::thread::sleep(std::time::Duration::from_secs(5));
             });
@@ -101,6 +284,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            extension_package_status,
+            extension_bridge_status,
+            sync_extension_rules,
+            activate_extension,
+            refresh_extension,
             dispatch,
             float_panel,
             dock_panel

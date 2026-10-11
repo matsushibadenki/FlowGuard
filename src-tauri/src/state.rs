@@ -1,10 +1,12 @@
-use crate::{model::*, renderer};
+use crate::{enforcement::Enforcement, model::*, renderer};
 use std::{collections::HashSet, fs, path::PathBuf, sync::Mutex};
 pub struct SharedState {
     pub inner: Mutex<Session>,
     pub path: PathBuf,
+    _document_lock: fs::File,
 }
 pub struct Session {
+    pub extension: Enforcement,
     pub document: Document,
     pub demo: Vec<Connection>,
     pub connections: Vec<Connection>,
@@ -16,6 +18,20 @@ pub struct Session {
 }
 impl SharedState {
     pub fn load(path: PathBuf) -> Result<Self, String> {
+        let parent = path.parent().ok_or("missing_data_directory")?;
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        let mut options = fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        // Keep a separate, stable inode locked across atomic document replacement.
+        let document_lock = options
+            .open(path.with_extension("lock"))
+            .map_err(|e| e.to_string())?;
+        document_lock.try_lock().map_err(|_| "FlowGuard is already running for this document. Close the other instance and retry.".to_string())?;
         let document = if path.exists() {
             let bytes = fs::read(&path).map_err(|e| e.to_string())?;
             serde_json::from_slice::<Document>(&bytes)
@@ -38,7 +54,9 @@ impl SharedState {
         document.preferences.panel = "right".into(); // no floating window survives restart
         Ok(Self {
             path,
+            _document_lock: document_lock,
             inner: Mutex::new(Session {
+                extension: Enforcement::default(),
                 document,
                 demo: demo_connections(),
                 connections: vec![],
@@ -81,7 +99,24 @@ impl SharedState {
         fs::rename(temp, &self.path).map_err(|e| e.to_string())
     }
     pub fn dispatch(&self, command: Command) -> Result<Snapshot, String> {
+        self.dispatch_checked(command, None)
+    }
+    pub fn dispatch_checked(
+        &self,
+        command: Command,
+        expected_rules: Option<&[Rule]>,
+    ) -> Result<Snapshot, String> {
         let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if matches!(
+            &command,
+            Command::SaveRule { .. } | Command::DeleteRule { .. } | Command::RestoreRules { .. }
+        ) {
+            if let Some(expected) = expected_rules {
+                if expected != s.document.rules.as_slice() {
+                    return Err("edit_conflict".into());
+                }
+            }
+        }
         let previous = s.document.clone();
         let previous_selected = s.selected_id.clone();
         match command {
@@ -176,8 +211,36 @@ impl SharedState {
             s.selected_id = previous_selected;
             return Err(e);
         }
+        let rules = s.document.rules.clone();
+        s.extension.reconcile(&rules);
         s.revision += 1;
         Ok(s.snapshot())
+    }
+    pub fn extension_change(
+        &self,
+        change: impl FnOnce(&mut Enforcement, &[Rule]),
+    ) -> Result<Snapshot, String> {
+        let mut session = self.inner.lock().map_err(|_| "state_unavailable")?;
+        let rules = session.document.rules.clone();
+        change(&mut session.extension, &rules);
+        session.revision += 1;
+        Ok(session.snapshot())
+    }
+    pub fn begin_extension(&self, stage: &str) -> Result<(u64, Vec<Rule>, Snapshot), String> {
+        let mut session = self.inner.lock().map_err(|_| "state_unavailable")?;
+        let operation = session.extension.begin(stage)?;
+        session.revision += 1;
+        Ok((
+            operation,
+            session
+                .document
+                .rules
+                .iter()
+                .filter(|r| r.source == "live")
+                .cloned()
+                .collect(),
+            session.snapshot(),
+        ))
     }
     pub fn observed(
         &self,
@@ -226,7 +289,9 @@ impl Session {
         let layout = renderer::layout(&connections);
         Snapshot {
             revision: self.revision,
+            extension: self.extension.status.clone(),
             document: self.document.clone(),
+            applications: group_applications(&connections),
             connections,
             history: if self.document.preferences.mode == "demo" {
                 self.demo.clone()
@@ -270,8 +335,10 @@ mod tests {
             .unwrap();
         assert_eq!(snap.firewall.enforcement, "unavailable");
         assert_eq!(snap.document.rules.len(), 1);
+        let path = s.path.clone();
+        drop(s);
         assert_eq!(
-            SharedState::load(s.path.clone())
+            SharedState::load(path.clone())
                 .unwrap()
                 .snapshot()
                 .unwrap()
@@ -280,7 +347,50 @@ mod tests {
                 .action,
             "block"
         );
-        let _ = fs::remove_file(&s.path);
+        let _ = fs::remove_file(&path);
+    }
+    #[test]
+    fn duplicate_instance_is_rejected_and_lock_releases_on_exit() {
+        let s = state();
+        let path = s.path.clone();
+        assert!(SharedState::load(path.clone()).is_err());
+        drop(s);
+        assert!(SharedState::load(path.clone()).is_ok());
+        let _ = fs::remove_file(path.with_extension("lock"));
+    }
+    #[test]
+    fn stale_rule_edits_cannot_replace_newer_rules() {
+        let s = state();
+        s.dispatch(Command::SetMode {
+            mode: "demo".into(),
+        })
+        .unwrap();
+        let previous = s.snapshot().unwrap().document.rules;
+        s.dispatch_checked(
+            Command::SaveRule {
+                connection_id: "demo-0".into(),
+                action: "block".into(),
+                direction: "both".into(),
+            },
+            Some(&previous),
+        )
+        .unwrap();
+        assert_eq!(
+            s.dispatch_checked(Command::RestoreRules { rules: vec![] }, Some(&previous))
+                .err()
+                .unwrap(),
+            "edit_conflict"
+        );
+        let current = s.snapshot().unwrap().document.rules;
+        assert_eq!(current.len(), 1);
+        s.dispatch_checked(
+            Command::DeleteRule {
+                id: current[0].id.clone(),
+            },
+            Some(&current),
+        )
+        .unwrap();
+        assert!(s.snapshot().unwrap().document.rules.is_empty());
     }
     #[test]
     fn failed_persistence_rolls_back() {
