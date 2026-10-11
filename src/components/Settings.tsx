@@ -1,0 +1,11 @@
+import {Eye,LockKeyhole,Shield,PanelLeft,PanelRight} from 'lucide-react';
+import type {Locale,Snapshot} from '../core/types';
+import {dispatch,dockPanel,native} from '../core/store';
+import {type T} from './ui';
+export function Settings({snapshot,t,onError}:{snapshot:Snapshot;t:T;onError:(e:unknown)=>void}){
+ const p=snapshot.document.preferences;
+ return <div className="settings-view"><section className="surface settings-section"><h2>{t('display')}</h2><div className="setting-row"><label htmlFor="setting-language">{t('language')}</label><select id="setting-language" value={p.locale} onChange={e=>void dispatch({type:'setLocale',locale:e.target.value as Locale}).catch(onError)}><option value="ja">日本語</option><option value="en">English</option><option value="zh-CN">简体中文</option></select></div><div className="setting-row"><span>{t('source')}</span><div className="segmented"><button disabled={!native} aria-pressed={p.mode==='live'} onClick={()=>void dispatch({type:'setMode',mode:'live'}).catch(onError)}>{t('live')}</button><button aria-pressed={p.mode==='demo'} onClick={()=>void dispatch({type:'setMode',mode:'demo'}).catch(onError)}>{t('demo')}</button></div></div><div className="setting-row"><span>{t('panelPosition')}</span><div className="button-row"><button className="secondary-button" onClick={()=>void dockPanel('left').catch(onError)}><PanelLeft size={17}/>{t('dockLeft')}</button><button className="secondary-button" onClick={()=>void dockPanel('right').catch(onError)}><PanelRight size={17}/>{t('dockRight')}</button></div></div></section>
+ <section className="surface settings-section"><div className="settings-heading"><Shield size={22}/><h2>{t('macFirewall')}</h2></div><strong className="status-value">{t(snapshot.firewall.enabled===null?'unknown':snapshot.firewall.enabled?'enabled':'disabled')}</strong><p>{t('openSystem')}</p></section>
+ {[[Eye,'observation','coverageHelp'],[LockKeyhole,'privacy','privacyHelp'],[Shield,'extension','extensionHelp']] .map(([Icon,title,description])=><section className="surface settings-section" key={String(title)}><div className="settings-heading">{typeof Icon!=='string'&&<Icon size={22}/>}<h2>{t(title as 'observation')}</h2></div><p>{t(description as 'coverageHelp')}</p></section>)}
+ </div>;
+}

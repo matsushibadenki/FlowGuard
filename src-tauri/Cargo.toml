@@ -1,0 +1,26 @@
+[package]
+name = "flowguard"
+version = "0.1.0"
+description = "A visual macOS network observer and firewall rule workbench"
+authors = ["FlowGuard"]
+edition = "2021"
+
+[lib]
+name = "flowguard_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[features]
+default = []
+gpu = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+wgpu = { version = "27", default-features = false, features = ["metal", "wgsl", "std"], optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+pollster = { version = "0.4", optional = true }
