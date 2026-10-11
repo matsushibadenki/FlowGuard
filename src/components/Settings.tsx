@@ -1,7 +1,7 @@
 import {extensionLabel} from '../core/enforcement';
 import {Eye,LockKeyhole,Shield,PanelLeft,PanelRight} from 'lucide-react';
 import type {Locale,Snapshot} from '../core/types';
-import {dispatch,dockPanel,native,activateExtension,applyExtensionRules,refreshExtension} from '../core/store';
+import {dispatch,dockPanel,native,activateExtension,applyExtensionRules,refreshExtension,disableExtension} from '../core/store';
 import {type T} from './ui';
 export function Settings({snapshot,t,onError}:{snapshot:Snapshot;t:T;onError:(e:unknown)=>void}){
  const p=snapshot.document.preferences;
@@ -12,6 +12,7 @@ export function Settings({snapshot,t,onError}:{snapshot:Snapshot;t:T;onError:(e:
  <p>{t(!snapshot.extension.signed?'signatureHelp':snapshot.extension.stage==='stale'?'stalePolicyHelp':'appliedPolicyHelp')}</p>
  {snapshot.extension.error&&<p role="alert">{t(snapshot.extension.error==='unsupported_or_invalid_rules'?'askUnsupported':'extensionFailureHelp')}</p>}
  <div className="button-row extension-actions"><button className="secondary-button" disabled={!native||!snapshot.extension.packaged||!snapshot.extension.runtimeAvailable||snapshot.extension.busy||['ready','applied','stale','configuration_saved','restart_required'].includes(snapshot.extension.stage)} onClick={()=>void activateExtension().catch(onError)}>{t('activateExtension')}</button><button className="primary-button" disabled={!native||!snapshot.extension.signed||snapshot.extension.busy||!['ready','applied','stale','failed'].includes(snapshot.extension.stage)} onClick={()=>void applyExtensionRules().catch(onError)}>{t('applyLiveRules')}</button><button className="text-button" disabled={!native||snapshot.extension.busy||snapshot.extension.stage==='restart_required'} onClick={()=>void refreshExtension().catch(onError)}>{t('refreshExtension')}</button></div>
+ <p>{t('initialPolicyHelp')}</p><div className="button-row extension-actions"><button className="secondary-button" disabled={!native||!snapshot.extension.packaged||!snapshot.extension.runtimeAvailable||snapshot.extension.busy||snapshot.extension.stage==='removed'} onClick={()=>void disableExtension().catch(onError)}>{t('disableExtension')}</button><button className="secondary-button" disabled={!native||!snapshot.extension.packaged||!snapshot.extension.runtimeAvailable||snapshot.extension.busy||snapshot.extension.stage==='removed'} onClick={()=>void disableExtension(true).catch(onError)}>{t('removeExtension')}</button></div><p>{t('removeExtensionHelp')}</p>
  {snapshot.extension.providerRevision!==null&&<p>{t('providerRevision')}: {snapshot.extension.providerRevision} · {snapshot.extension.appliedRuleIds.length} {t('ruleCount')}</p>}
  </>}</section>)}
  </div>;

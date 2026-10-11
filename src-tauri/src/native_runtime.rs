@@ -13,7 +13,8 @@ pub struct NativeRuntime {
     #[cfg(target_os = "macos")]
     handle: *mut c_void,
     preflight: unsafe extern "C" fn() -> i32,
-    activate: unsafe extern "C" fn(Callback, u64),
+    activate: unsafe extern "C" fn(*const u8, u64, Callback, u64),
+    disable: unsafe extern "C" fn(i32, Callback, u64),
 }
 // Symbols are immutable; Swift dispatches signed lifecycle requests onto the main queue.
 unsafe impl Send for NativeRuntime {}
@@ -37,7 +38,7 @@ impl NativeRuntime {
             if abi.is_null()
                 || unsafe {
                     std::mem::transmute::<*mut c_void, unsafe extern "C" fn() -> i32>(abi)()
-                } != 1
+                } != 2
             {
                 unsafe {
                     dlclose(handle);
@@ -46,7 +47,8 @@ impl NativeRuntime {
             }
             let preflight = unsafe { dlsym(handle, c"flowguard_host_can_activate".as_ptr()) };
             let activate = unsafe { dlsym(handle, c"flowguard_host_activate".as_ptr()) };
-            if preflight.is_null() || activate.is_null() {
+            let disable = unsafe { dlsym(handle, c"flowguard_host_disable".as_ptr()) };
+            if preflight.is_null() || activate.is_null() || disable.is_null() {
                 unsafe {
                     dlclose(handle);
                 }
@@ -58,8 +60,14 @@ impl NativeRuntime {
                     std::mem::transmute::<*mut c_void, unsafe extern "C" fn() -> i32>(preflight)
                 },
                 activate: unsafe {
-                    std::mem::transmute::<*mut c_void, unsafe extern "C" fn(Callback, u64)>(
-                        activate,
+                    std::mem::transmute::<
+                        *mut c_void,
+                        unsafe extern "C" fn(*const u8, u64, Callback, u64),
+                    >(activate)
+                },
+                disable: unsafe {
+                    std::mem::transmute::<*mut c_void, unsafe extern "C" fn(i32, Callback, u64)>(
+                        disable,
                     )
                 },
             })
@@ -73,8 +81,11 @@ impl NativeRuntime {
     pub fn signed(&self) -> bool {
         unsafe { (self.preflight)() == 1 }
     }
-    pub fn activate(&self, callback: Callback, token: u64) {
-        unsafe { (self.activate)(callback, token) }
+    pub fn activate(&self, policy: &[u8], callback: Callback, token: u64) {
+        unsafe { (self.activate)(policy.as_ptr(), policy.len() as u64, callback, token) }
+    }
+    pub fn disable(&self, remove: bool, callback: Callback, token: u64) {
+        unsafe { (self.disable)(i32::from(remove), callback, token) }
     }
 }
 // Runtime stays loaded for the app lifetime: pending Swift callbacks must not point into unloaded code.
@@ -122,13 +133,22 @@ mod tests {
         assert!(!runtime.signed());
         let (sender, receiver) = std::sync::mpsc::channel();
         *REPLY.get_or_init(Default::default).lock().unwrap() = Some(sender);
-        runtime.activate(receive, 7);
+        runtime.activate(br#"{"rules":[]}"#, receive, 7);
         assert_eq!(
             receiver
                 .recv_timeout(std::time::Duration::from_secs(2))
                 .unwrap(),
             "signature_required"
         );
+        for remove in [false, true] {
+            runtime.disable(remove, receive, 7);
+            assert_eq!(
+                receiver
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .unwrap(),
+                "signature_required"
+            );
+        }
         *REPLY.get().unwrap().lock().unwrap() = None;
     }
 }

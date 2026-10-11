@@ -12,6 +12,29 @@ final class BridgeTests: XCTestCase {
         let status = receiver.status()
         return try JSONEncoder().encode(PolicyUpdate(requestID: UUID().uuidString, expectedInstanceID: instance ?? status.instanceID, expectedRevision: revision ?? status.revision, rules: rules))
     }
+    func testConfigurationOwnershipProtectsOtherProducts() {
+        XCTAssertTrue(FilterConfigurationOwnership.mayModify(hasConfiguration: true, providerIdentifier: "com.flowguard.filter", enabled: true))
+        XCTAssertTrue(FilterConfigurationOwnership.mayModify(hasConfiguration: false, providerIdentifier: nil, enabled: false))
+        XCTAssertFalse(FilterConfigurationOwnership.mayModify(hasConfiguration: false, providerIdentifier: nil, enabled: true))
+        for identifier in [nil, "com.other.filter"] {
+            XCTAssertFalse(FilterConfigurationOwnership.mayModify(hasConfiguration: true, providerIdentifier: identifier, enabled: false))
+        }
+    }
+    func testInitialPolicyValidatesBeforeProviderStartup() throws {
+        let valid = try rules()
+        let data = try JSONEncoder().encode(InitialPolicy(rules: valid))
+        let initial = try InitialPolicy.decode(data)
+        let decision = Policy(rules: initial.rules).decision(for: FlowIdentity(executable: "/Applications/Test.app/Contents/MacOS/Test", destination: "1.2.3.4", port: 443, direction: .outbound))
+        XCTAssertEqual(decision, .block)
+        XCTAssertTrue(try InitialPolicy.decode(Data("{\"rules\":[]}".utf8)).rules.isEmpty)
+    }
+    func testInvalidInitialPolicyNeverStartsWithAnEmptyFallback() throws {
+        for invalid in [try rules("ask"), try rules(source: "demo"), try rules() + rules()] {
+            XCTAssertThrowsError(try InitialPolicy.decode(JSONEncoder().encode(InitialPolicy(rules: invalid))))
+        }
+        XCTAssertThrowsError(try InitialPolicy.decode(Data("{}".utf8)))
+        XCTAssertThrowsError(try InitialPolicy.decode(Data(repeating: 0, count: 4 * 1024 * 1024 + 1)))
+    }
     func testReadyRequiredAndAcceptedRevision() throws {
         let receiver = PolicyReceiver(); var applied = 0
         XCTAssertEqual(receiver.replace(try payload(receiver, rules: rules())) { _ in applied += 1 }.error, "provider_unavailable")

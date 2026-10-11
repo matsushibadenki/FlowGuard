@@ -58,3 +58,5 @@ export async function extensionPackageStatus():Promise<ExtensionPackageStatus>{r
 export async function activateExtension(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('activate_extension'));}
 export async function applyExtensionRules(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('sync_extension_rules'));}
 export async function refreshExtension(){if(!native)return;emit(await invoke<Snapshot>('refresh_extension'));}
+
+export async function disableExtension(remove=false){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('disable_extension',{remove}));}

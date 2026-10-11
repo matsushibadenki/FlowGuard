@@ -8,7 +8,7 @@ describe('provider acknowledgement UI contract',()=>{
   const applied={...defaultExtension,stage:'applied',appliedRuleIds:['r']};
   expect(ruleApplied(rule,applied)).toBe(true);
   expect(ruleApplied({...rule,source:'demo'},applied)).toBe(false);
-  for(const stage of ['ready','configuration_saved','stale','failed','disconnected','applying'])expect(ruleApplied(rule,{...applied,stage})).toBe(false);
+  for(const stage of ['initial_sync','disabled','disabling','removed','removing','ready','configuration_saved','stale','failed','disconnected','applying'])expect(ruleApplied(rule,{...applied,stage})).toBe(false);
   expect(ruleApplied(rule,{...applied,busy:true})).toBe(false);
  });
  it('explains stale and uncertain policies instead of claiming observation only',()=>{
@@ -17,7 +17,7 @@ describe('provider acknowledgement UI contract',()=>{
   expect(policyNotice({...defaultExtension,stage:'applied'},'demo')).toBe('demoNeverApplied');
  });
  it('has translated labels for every lifecycle stage',()=>{
-  for(const stage of ['not_packaged','runtime_unavailable','signature_required','inactive','activating','approval_required','restart_required','configuration_saved','ready','applying','applied','stale','disconnected','failed','configuration_conflict']){
+  for(const stage of ['initial_sync','disabled','disabling','removed','removing','invalid_initial_policy','not_packaged','runtime_unavailable','signature_required','inactive','activating','approval_required','restart_required','configuration_saved','ready','applying','applied','stale','disconnected','failed','configuration_conflict']){
    const key=extensionLabel(stage);expect(key).not.toBe('unknown');
    for(const dictionary of Object.values(dictionaries))expect(dictionary[key].length).toBeGreaterThan(0);
   }

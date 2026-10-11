@@ -2,6 +2,7 @@ import Foundation
 import NetworkExtension
 import Security
 import FlowGuardPolicy
+import FlowGuardBridge
 
 /// Extension source only. Not installed or activated by the desktop observer build.
 /// The host must provide authenticated rule IPC and an acknowledgement before marking rules active.
@@ -19,6 +20,10 @@ public final class FilterDataProvider: NEFilterDataProvider {
     }
 
     public override func startFilter(completionHandler: @escaping (Error?) -> Void) {
+        do {
+            guard let data = filterConfiguration.vendorConfiguration?[InitialPolicy.key] as? Data else { throw NSError(domain: "FlowGuard.missing_initial_policy", code: 1) }
+            try replacePolicy(InitialPolicy.decode(data).rules)
+        } catch { completionHandler(error); return }
         let network = NENetworkRule(remoteNetwork: nil, remotePrefix: 0, localNetwork: nil, localPrefix: 0, protocol: .TCP, direction: .any)
         let settings = NEFilterSettings(rules: [NEFilterRule(networkRule: network, action: .filterData)], defaultAction: .allow)
         apply(settings) { [weak self] error in

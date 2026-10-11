@@ -98,19 +98,8 @@ pub fn sync_rules(contents: &Path, rules: &[crate::model::Rule]) -> Result<Bridg
     if !package.packaged || !package.bridge_available {
         return Err("extension_not_packaged".into());
     }
-    // Demo intentions never enter the provider. Ask is rejected until decision UI is connected.
-    let live: Vec<_> = rules.iter().filter(|rule| rule.source == "live").collect();
-    if live
-        .iter()
-        .any(|rule| !crate::model::validate_rule(rule) || rule.action == "ask")
-    {
-        return Err("unsupported_or_invalid_rules".into());
-    }
-    let payload =
-        serde_json::to_vec(&serde_json::json!({ "rules": live })).map_err(|e| e.to_string())?;
-    if payload.len() > 4 * 1024 * 1024 {
-        return Err("rule_payload_too_large".into());
-    }
+    let payload = policy_payload(rules)?;
+    let live: Vec<_> = rules.iter().filter(|r| r.source == "live").collect();
     let helper = contents.join("MacOS/FlowGuardBridge");
     let (success, output) = crate::observer::run_bounded_input(
         helper.to_str().ok_or("invalid_bundle_path")?,
@@ -130,4 +119,22 @@ pub fn sync_rules(contents: &Path, rules: &[crate::model::Rule]) -> Result<Bridg
         return Err("invalid_bridge_reply".into());
     }
     Ok(reply)
+}
+
+/// Validation runs before activation can reach any OS lifecycle API.
+pub fn policy_payload(rules: &[crate::model::Rule]) -> Result<Vec<u8>, String> {
+    // Demo intentions never enter the provider. Ask is rejected until decision UI is connected.
+    let live: Vec<_> = rules.iter().filter(|rule| rule.source == "live").collect();
+    if live
+        .iter()
+        .any(|rule| !crate::model::validate_rule(rule) || rule.action == "ask")
+    {
+        return Err("unsupported_or_invalid_rules".into());
+    }
+    let payload =
+        serde_json::to_vec(&serde_json::json!({ "rules": live })).map_err(|e| e.to_string())?;
+    if payload.len() > 4 * 1024 * 1024 {
+        return Err("rule_payload_too_large".into());
+    }
+    Ok(payload)
 }

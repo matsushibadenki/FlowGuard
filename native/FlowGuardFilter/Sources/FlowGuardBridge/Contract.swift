@@ -47,13 +47,7 @@ public final class PolicyReceiver {
         guard update.protocolVersion == 1, UUID(uuidString: update.requestID) != nil else { return response(update.requestID, "rejected", "invalid_protocol") }
         guard ready else { return response(update.requestID, "rejected", "provider_unavailable") }
         guard revision < UInt64.max, update.expectedInstanceID == instanceID, update.expectedRevision == revision else { return response(update.requestID, "rejected", "revision_conflict") }
-        guard update.rules.count <= 2000, Set(update.rules.map(\.id)).count == update.rules.count,
-              update.rules.allSatisfy({ rule in
-                  rule.source == "live" && !rule.id.isEmpty && rule.id.utf8.count <= 8192 &&
-                  rule.appKey.hasPrefix("/") && rule.appKey.utf8.count <= 4096 && !rule.appKey.contains("\0") &&
-                  !rule.destination.isEmpty && rule.destination.utf8.count <= 512 && !rule.destination.contains("\0") &&
-                  rule.port > 0 && rule.app.utf8.count <= 256 && rule.action != .ask
-              }) else { return response(update.requestID, "rejected", "unsupported_or_invalid_rules") }
+        guard BridgeContract.validRules(update.rules) else { return response(update.requestID, "rejected", "unsupported_or_invalid_rules") }
         do {
             try apply(update.rules)
             rules = update.rules; revision += 1
@@ -63,6 +57,15 @@ public final class PolicyReceiver {
 }
 
 public enum BridgeContract {
+    public static func validRules(_ rules: [PolicyRule]) -> Bool {
+        rules.count <= 2000 && Set(rules.map(\.id)).count == rules.count &&
+              rules.allSatisfy({ rule in
+                  rule.source == "live" && !rule.id.isEmpty && rule.id.utf8.count <= 8192 &&
+                  rule.appKey.hasPrefix("/") && rule.appKey.utf8.count <= 4096 && !rule.appKey.contains("\0") &&
+                  !rule.destination.isEmpty && rule.destination.utf8.count <= 512 && !rule.destination.contains("\0") &&
+                  rule.port > 0 && rule.app.utf8.count <= 256 && rule.action != .ask
+              })
+    }
     public static func validAcknowledgement(_ reply: BridgeReply, for update: PolicyUpdate) -> Bool {
         reply.protocolVersion == 1 && reply.requestID == update.requestID &&
         reply.instanceID == update.expectedInstanceID && reply.status == "accepted" && reply.error == nil &&

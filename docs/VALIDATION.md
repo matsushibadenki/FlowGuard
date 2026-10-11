@@ -51,3 +51,11 @@ The GPU smoke check requires access to Metal; the sandbox did not expose an adap
 - Production frontend, Tauri debug app and unsigned native staging build successfully. The staged bundle now includes the Swift host runtime under `Contents/Frameworks`.
 - Signed callback integration, real System Extension approval, NEFilterManager configuration, authenticated production XPC and actual allow/drop remain Pending. No signing exception, extension installation or network-filter change was performed.
 - Browser Settings checked in Japanese, English and Simplified Chinese; 375px document width matches the viewport with no horizontal overflow. Native actions are correctly disabled in browser preview. No application console errors. Desktop screenshot saved and inspected.
+
+## Disable / removal / initial policy — 2026-10-11
+
+- Rust: 17 tests pass, including real Swift ABI v2 activation, disable and remove calls. All three unsigned calls return `signature_required` before OS mutation. State tests cover busy initial sync, concurrent edits, receipt clearing, late callbacks, failure and removal reboot state.
+- Swift: 12 tests pass, including initial-policy validation and exact rule decision, rejection of invalid/demo/ask/duplicate/oversized bootstrap payloads, and protection of other or unidentified filter configurations. No real NEFilterManager preference operations are tested.
+- Frontend: 10 tests pass with new lifecycle labels and receipt rules. Total: 39 tests. Production frontend, Tauri debug app and unsigned staging build successfully.
+- Signed OS preference persistence, provider initialization, authenticated synchronization, actual disable/removal, user rejection, restart, existing-flow recovery and rollback behavior remain Pending. No extension was installed, removed or enabled and no firewall setting was changed.
+- Browser Settings reviewed in all three languages and at 375px width: no horizontal overflow, native-only lifecycle actions disabled in preview, readable wrapping and no application console errors. Screenshot inspected.

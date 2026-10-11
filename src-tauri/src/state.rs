@@ -228,6 +228,9 @@ impl SharedState {
     }
     pub fn begin_extension(&self, stage: &str) -> Result<(u64, Vec<Rule>, Snapshot), String> {
         let mut session = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if stage == "activating" {
+            crate::extension::policy_payload(&session.document.rules)?;
+        }
         let operation = session.extension.begin(stage)?;
         session.revision += 1;
         Ok((
@@ -318,6 +321,40 @@ mod tests {
         ));
         let _ = fs::remove_file(&path);
         SharedState::load(path).unwrap()
+    }
+    #[test]
+    fn activation_validation_precedes_state_change_and_captures_only_live_rules() {
+        let s = state();
+        s.extension_change(|extension, _| extension.configure(true, true, true))
+            .unwrap();
+        let rule = Rule {
+            id: "r".into(),
+            app_key: "/test".into(),
+            app: "Test".into(),
+            destination: "1.2.3.4".into(),
+            port: 443,
+            direction: "both".into(),
+            action: "ask".into(),
+            updated_at: 1,
+            source: "live".into(),
+        };
+        s.inner.lock().unwrap().document.rules = vec![rule.clone()];
+        let previous = s.snapshot().unwrap().revision;
+        assert_eq!(
+            s.begin_extension("activating").err().unwrap(),
+            "unsupported_or_invalid_rules"
+        );
+        assert_eq!(s.snapshot().unwrap().revision, previous);
+        assert!(!s.snapshot().unwrap().extension.busy);
+        let mut valid = rule.clone();
+        valid.action = "block".into();
+        let mut demo = rule;
+        demo.source = "demo".into();
+        demo.id = "demo".into();
+        s.inner.lock().unwrap().document.rules = vec![valid.clone(), demo];
+        let (_, sent, snapshot) = s.begin_extension("activating").unwrap();
+        assert_eq!(sent, vec![valid]);
+        assert!(snapshot.extension.busy);
     }
     #[test]
     fn saved_rules_remain_unapplied_and_roundtrip() {

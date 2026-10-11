@@ -77,6 +77,11 @@ impl Enforcement {
         if stage == "applying" && !self.status.signed {
             return Err("signature_required".into());
         }
+        if stage == "applying"
+            && ["disabled", "removed", "restart_required"].contains(&self.status.stage.as_str())
+        {
+            return Err("extension_inactive".into());
+        }
         self.operation += 1;
         self.status.busy = true;
         self.status.stage = stage.into();
@@ -96,13 +101,22 @@ impl Enforcement {
             "configuration_conflict",
             "failed",
             "busy",
+            "initial_sync",
+            "disabled",
+            "removed",
+            "invalid_initial_policy",
         ]
         .contains(&stage)
         {
             return false;
         }
         self.status.stage = stage.into();
-        self.status.busy = stage == "approval_required";
+        self.status.busy = ["approval_required", "initial_sync"].contains(&stage);
+        if ["disabled", "removed"].contains(&stage) {
+            self.applied.clear();
+            self.status.instance_id = None;
+            self.status.provider_revision = None;
+        }
         if ["failed", "configuration_conflict", "busy"].contains(&stage) {
             self.status.error = Some(stage.into());
         }
@@ -229,6 +243,46 @@ mod tests {
         assert!(state.status.applied_rule_ids.is_empty());
         state.disconnected("lost");
         assert_eq!(state.status.stage, "disconnected");
+    }
+    #[test]
+    fn initial_sync_keeps_operation_busy_and_edits_stale() {
+        let mut state = Enforcement::default();
+        state.configure(true, true, true);
+        let op = state.begin("activating").unwrap();
+        assert!(state.lifecycle(op, "initial_sync"));
+        assert!(state.status.busy);
+        assert!(state.begin("disabling").is_err());
+        let sent = rules();
+        let mut current = sent.clone();
+        current[0].action = "allow".into();
+        state.accepted(op, "instance".into(), 1, sent, &current);
+        assert_eq!(state.status.stage, "stale");
+        assert!(state.status.applied_rule_ids.is_empty());
+    }
+    #[test]
+    fn disable_and_remove_clear_receipts_and_reject_late_callbacks() {
+        let mut state = Enforcement::default();
+        state.configure(true, true, true);
+        let op = state.begin("applying").unwrap();
+        state.accepted(op, "instance".into(), 1, rules(), &rules());
+        let disable = state.begin("disabling").unwrap();
+        assert!(state.status.applied_rule_ids.is_empty());
+        assert!(!state.lifecycle(op, "configuration_saved"));
+        state.lifecycle(disable, "disabled");
+        assert_eq!(state.status.stage, "disabled");
+        assert!(state.status.instance_id.is_none());
+        assert!(state.begin("applying").is_err());
+        let remove = state.begin("removing").unwrap();
+        state.lifecycle(remove, "restart_required");
+        assert_eq!(state.status.stage, "restart_required");
+        assert!(!state.status.busy);
+        let retry = state.begin("removing").unwrap();
+        state.fail(retry, "denied".into());
+        assert_eq!(state.status.stage, "failed");
+        let retry = state.begin("removing").unwrap();
+        state.lifecycle(retry, "removed");
+        assert_eq!(state.status.stage, "removed");
+        assert!(state.begin("applying").is_err());
     }
     #[test]
     fn unsigned_and_failed_requests_never_report_applied() {

@@ -18,7 +18,7 @@ export function App(){
  const snapshot=useSnapshot();const startupError=useStartupError();const [search,setSearch]=useState('');const [filter,setFilter]=useState('all');const [error,setError]=useState<string|null>(null);
  const locale=snapshot?.document.preferences.locale??'ja';const t=translator(locale);
  useEffect(()=>{document.documentElement.lang=locale;},[locale]);
- const onError=(e:unknown)=>{const value=String(e);setError(value.includes('edit_conflict')?t('editConflict'):value.includes('invalid_backup')?t('invalidBackup'):value.includes('connection_expired')?t('expired'):value.includes('application_identity_unavailable')?t('identityError'):t('error'));};
+ const onError=(e:unknown)=>{const value=String(e);setError(value.includes('unsupported_or_invalid_rules')?t('askUnsupported'):value.includes('edit_conflict')?t('editConflict'):value.includes('invalid_backup')?t('invalidBackup'):value.includes('connection_expired')?t('expired'):value.includes('application_identity_unavailable')?t('identityError'):t('error'));};
  const connections=useMemo(()=>snapshot?.connections.filter(c=>{
   const match=`${c.app} ${c.destination} ${c.appKey}`.toLowerCase().includes(search.toLowerCase());
   return match&&(filter==='all'||(ruleFor(snapshot.document.rules,c,snapshot.document.preferences.mode)?.action??'none')===filter);
