@@ -6,6 +6,11 @@ pub struct SharedState {
     _document_lock: fs::File,
 }
 pub struct Session {
+    pub network: crate::network::NetworkSnapshot,
+    pub discovery: crate::discovery::DiscoverySnapshot,
+    discovery_operation: u64,
+    discovery_cancel: bool,
+    discovery_plan: Option<crate::discovery::Plan>,
     pub extension: Enforcement,
     pub document: Document,
     pub demo: Vec<Connection>,
@@ -44,7 +49,17 @@ impl SharedState {
         }
         let p = &document.preferences;
         if !["ja", "en", "zh-CN"].contains(&p.locale.as_str())
-            || !["map", "apps", "rules", "history", "settings"].contains(&p.view.as_str())
+            || ![
+                "map",
+                "apps",
+                "rules",
+                "history",
+                "settings",
+                "network",
+                "servers",
+                "diagnostics",
+            ]
+            .contains(&p.view.as_str())
             || !["demo", "live"].contains(&p.mode.as_str())
             || !["left", "right", "floating"].contains(&p.panel.as_str())
         {
@@ -56,6 +71,11 @@ impl SharedState {
             path,
             _document_lock: document_lock,
             inner: Mutex::new(Session {
+                network: Default::default(),
+                discovery: Default::default(),
+                discovery_operation: 0,
+                discovery_cancel: false,
+                discovery_plan: None,
                 extension: Enforcement::default(),
                 document,
                 demo: demo_connections(),
@@ -127,7 +147,18 @@ impl SharedState {
                 s.selected_id = Some(id);
             }
             Command::SetView { view } => {
-                if !["map", "apps", "rules", "history", "settings"].contains(&view.as_str()) {
+                if ![
+                    "map",
+                    "apps",
+                    "rules",
+                    "history",
+                    "settings",
+                    "network",
+                    "servers",
+                    "diagnostics",
+                ]
+                .contains(&view.as_str())
+                {
                     return Err("invalid_view".into());
                 }
                 s.document.preferences.view = view;
@@ -245,10 +276,82 @@ impl SharedState {
             session.snapshot(),
         ))
     }
+    pub fn begin_discovery(
+        &self,
+        plan: &crate::discovery::Plan,
+    ) -> Result<(u64, Snapshot), String> {
+        let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if ["running", "cancelling"].contains(&s.discovery.stage.as_str()) {
+            return Err("discovery_busy".into());
+        }
+        s.discovery_operation += 1;
+        s.discovery_cancel = false;
+        s.discovery_plan = Some(plan.clone());
+        s.discovery = crate::discovery::DiscoverySnapshot {
+            name_mode: plan.name_mode.clone(),
+            stage: "running".into(),
+            interface: plan.local.interface.clone(),
+            range: plan.range.clone(),
+            active: plan.active,
+            total: plan.targets.len(),
+            ..Default::default()
+        };
+        s.revision += 1;
+        Ok((s.discovery_operation, s.snapshot()))
+    }
+    pub fn discovery_cancelled(&self, operation: u64) -> bool {
+        self.inner
+            .lock()
+            .map(|s| s.discovery_operation != operation || s.discovery_cancel)
+            .unwrap_or(true)
+    }
+    pub fn stop_discovery(&self) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if s.discovery.stage == "running" {
+            s.discovery_cancel = true;
+            s.discovery.stage = "cancelling".into();
+            s.revision += 1;
+        }
+        Ok(s.snapshot())
+    }
+    pub fn update_discovery(
+        &self,
+        operation: u64,
+        mut result: crate::discovery::DiscoverySnapshot,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if s.discovery_operation != operation
+            || !["running", "cancelling"].contains(&s.discovery.stage.as_str())
+        {
+            return Err("stale_discovery".into());
+        }
+        if s.discovery_cancel {
+            // Freeze published rows at stop; do not publish any late batch results.
+            if result.stage == "running" {
+                return Err("discovery_cancelled".into());
+            }
+            result = s.discovery.clone();
+            result.stage = "cancelled".into();
+            result.observed_at = Some(now());
+        }
+        if result.devices.len() > 1024 {
+            result.devices.truncate(1024);
+            if !result.errors.iter().any(|e| e == "results_truncated") {
+                result.errors.push("results_truncated".into());
+            }
+            if result.stage == "completed" {
+                result.stage = "partial".into();
+            }
+        }
+        s.discovery = result;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
     pub fn observed(
         &self,
         mut connections: Vec<Connection>,
         firewall: FirewallStatus,
+        network: crate::network::NetworkSnapshot,
     ) -> Result<Snapshot, String> {
         let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
         if firewall.error.is_none() {
@@ -268,6 +371,17 @@ impl SharedState {
             s.connections.clear();
         }
         s.firewall = firewall;
+        s.network = network;
+        if s.discovery_plan
+            .as_ref()
+            .is_some_and(|plan| !plan.matches(&s.network))
+            && ["completed", "partial", "cancelled"].contains(&s.discovery.stage.as_str())
+        {
+            s.discovery.stage = "failed".into();
+            if !s.discovery.errors.iter().any(|e| e == "network_changed") {
+                s.discovery.errors.push("network_changed".into());
+            }
+        }
         if !s
             .visible()
             .iter()
@@ -291,6 +405,8 @@ impl Session {
         let connections = self.visible();
         let layout = renderer::layout(&connections);
         Snapshot {
+            network: self.network.clone(),
+            discovery: self.discovery.clone(),
             revision: self.revision,
             extension: self.extension.status.clone(),
             document: self.document.clone(),
@@ -322,6 +438,153 @@ mod tests {
         let _ = fs::remove_file(&path);
         SharedState::load(path).unwrap()
     }
+    #[test]
+    fn discovery_snapshot_caps_results_even_during_a_job() {
+        let state = state();
+        let network = crate::network::NetworkSnapshot {
+            addresses: vec![crate::network::InterfaceAddress {
+                interface: "en0".into(),
+                address: "192.168.1.20".into(),
+                family: "IPv4".into(),
+                netmask: "255.255.255.0".into(),
+                up: true,
+            }],
+            ..Default::default()
+        };
+        let plan = crate::discovery::Plan::new(&network, "en0", "192.168.1.20", false).unwrap();
+        let (operation, snapshot) = state.begin_discovery(&plan).unwrap();
+        let mut result = snapshot.discovery;
+        result.devices = (0..1025)
+            .map(|n| crate::discovery::Device {
+                name: Default::default(),
+                id: n.to_string(),
+                interface: "en0".into(),
+                address: format!("fd00::{n:x}"),
+                family: "IPv6".into(),
+                mac: None,
+                source: "ndp".into(),
+                response: "unverified".into(),
+                observed_at: now(),
+            })
+            .collect();
+        let updated = state.update_discovery(operation, result.clone()).unwrap();
+        assert_eq!(updated.discovery.devices.len(), 1024);
+        assert!(updated
+            .discovery
+            .errors
+            .iter()
+            .any(|e| e == "results_truncated"));
+        result.stage = "completed".into();
+        assert_eq!(
+            state
+                .update_discovery(operation, result)
+                .unwrap()
+                .discovery
+                .stage,
+            "partial"
+        );
+    }
+    #[test]
+    fn stop_freezes_name_progress_and_rejects_late_names() {
+        let state = state();
+        let network = crate::network::NetworkSnapshot {
+            addresses: vec![crate::network::InterfaceAddress {
+                interface: "en0".into(),
+                address: "192.168.1.20".into(),
+                family: "IPv4".into(),
+                netmask: "255.255.255.0".into(),
+                up: true,
+            }],
+            ..Default::default()
+        };
+        let plan = crate::discovery::Plan::new(&network, "en0", "192.168.1.20", false)
+            .unwrap()
+            .with_names("mdns")
+            .unwrap();
+        assert!(plan.clone().with_names("arbitrary").is_err());
+        let (operation, snapshot) = state.begin_discovery(&plan).unwrap();
+        let mut result = snapshot.discovery;
+        assert_eq!(result.name_mode, "mdns");
+        result.names_total = 1;
+        result.devices = vec![crate::discovery::Device {
+            id: "en0|192.168.1.1".into(),
+            interface: "en0".into(),
+            address: "192.168.1.1".into(),
+            family: "IPv4".into(),
+            mac: None,
+            source: "arp".into(),
+            response: "unverified".into(),
+            observed_at: now(),
+            name: crate::names::NameObservation {
+                status: "pending".into(),
+                ..Default::default()
+            },
+        }];
+        state.update_discovery(operation, result.clone()).unwrap();
+        state.stop_discovery().unwrap();
+        result.stage = "completed".into();
+        result.names_completed = 1;
+        result.devices[0].name.value = Some("late.local".into());
+        result.devices[0].name.status = "resolved".into();
+        let stopped = state.update_discovery(operation, result).unwrap();
+        assert_eq!(stopped.discovery.stage, "cancelled");
+        assert_eq!(stopped.discovery.names_completed, 0);
+        assert!(stopped.discovery.devices[0].name.value.is_none());
+    }
+    #[test]
+    fn discovery_cancellation_fences_late_results_and_new_jobs() {
+        let state = state();
+        let network = crate::network::NetworkSnapshot {
+            addresses: vec![crate::network::InterfaceAddress {
+                interface: "en0".into(),
+                address: "192.168.1.20".into(),
+                family: "IPv4".into(),
+                netmask: "255.255.255.0".into(),
+                up: true,
+            }],
+            ..Default::default()
+        };
+        let plan = crate::discovery::Plan::new(&network, "en0", "192.168.1.20", false).unwrap();
+        let (op, started) = state.begin_discovery(&plan).unwrap();
+        assert!(state.begin_discovery(&plan).is_err());
+        state.stop_discovery().unwrap();
+        assert!(state.discovery_cancelled(op));
+        assert!(state
+            .update_discovery(op, started.discovery.clone())
+            .is_err());
+        let mut completed = started.discovery;
+        completed.stage = "completed".into();
+        assert_eq!(
+            state
+                .update_discovery(op, completed.clone())
+                .unwrap()
+                .discovery
+                .stage,
+            "cancelled"
+        );
+        let (next, _) = state.begin_discovery(&plan).unwrap();
+        assert_ne!(op, next);
+        assert!(state.update_discovery(op, completed).is_err());
+        assert!(!state.discovery_cancelled(next));
+        let current = state.snapshot().unwrap();
+        let observed = state.observed(vec![], current.firewall, network).unwrap();
+        assert_eq!(observed.discovery.stage, "running");
+        assert_eq!(observed.discovery.interface, "en0");
+        let mut finished = observed.discovery;
+        finished.stage = "completed".into();
+        state.update_discovery(next, finished).unwrap();
+        let current = state.snapshot().unwrap();
+        let changed = state
+            .observed(vec![], current.firewall, Default::default())
+            .unwrap();
+        assert_eq!(changed.discovery.stage, "failed");
+        assert!(changed
+            .discovery
+            .errors
+            .iter()
+            .any(|e| e == "network_changed"));
+    }
+
     #[test]
     fn activation_validation_precedes_state_change_and_captures_only_live_rules() {
         let s = state();

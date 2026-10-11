@@ -52,6 +52,11 @@ host_info['LSMinimumSystemVersion'] = '13.0'
 host_info['NSSystemExtensionUsageDescription'] = 'FlowGuard uses a local network extension to apply your app connection rules.'
 with (output / 'Contents/Info.plist').open('wb') as f:
     plistlib.dump(host_info, f)
+local_network_descriptions = {
+    'en': 'FlowGuard discovers devices on the LAN you select using neighbor information, IPv4 response checks and optional name lookup.',
+    'ja': 'FlowGuardは、選択したLAN上の機器を近隣情報・IPv4応答確認・任意の名前取得で探索します。',
+    'zh-Hans': 'FlowGuard通过邻居信息、IPv4响应检查和可选的名称查询发现您所选LAN中的设备。',
+}
 descriptions = {
     'en': 'FlowGuard uses a local network extension to apply your app connection rules.',
     'ja': 'FlowGuardは、このMac上のネットワーク拡張機能でアプリごとの通信ルールを適用します。',
@@ -60,6 +65,6 @@ descriptions = {
 for locale, description in descriptions.items():
     resources = output / 'Contents/Resources' / (locale + '.lproj')
     resources.mkdir(parents=True, exist_ok=True)
-    (resources / 'InfoPlist.strings').write_text('"NSSystemExtensionUsageDescription" = "' + description + '";\n', encoding='utf-8')
+    (resources / 'InfoPlist.strings').write_text('"NSSystemExtensionUsageDescription" = "' + description + '";\n' + '"NSLocalNetworkUsageDescription" = "' + local_network_descriptions[locale] + '";\n', encoding='utf-8')
 subprocess.run([str(output / 'Contents/MacOS/FlowGuardBridge'), '--preflight', str(extension)], check=True)
 print(f'Unsigned staging bundle: {output}')

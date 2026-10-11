@@ -121,6 +121,8 @@ pub fn group_applications(connections: &[Connection]) -> Vec<ApplicationGroup> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub network: crate::network::NetworkSnapshot,
+    pub discovery: crate::discovery::DiscoverySnapshot,
     pub revision: u64,
     pub extension: crate::enforcement::ExtensionStatus,
     pub document: Document,

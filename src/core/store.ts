@@ -18,12 +18,12 @@ function emit(value:Snapshot){if(snapshot&&value.revision<snapshot.revision)retu
 function preview(){
  let document:Document={rules:[],preferences:{locale:'ja',view:'map',panel:'right',mode:'demo'}};
  try {const stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored&&validRules(stored.rules)) {document.rules=stored.rules;if(['ja','en','zh-CN'].includes(stored.preferences?.locale))document.preferences.locale=stored.preferences.locale;}}catch{/* Corrupt preview storage is isolated from desktop documents. */}
- const connections=sampleConnections();emit({revision:0,extension:{...defaultExtension},document,connections,applications:groupApplications(connections),history:connections,selectedId:connections[0].id,firewall:{enabled:null,enforcement:'unavailable',observer:'demo',error:null},lastObserved:null,layout:connections.map((c,i)=>({id:c.id,y:72+i*100}))});
+ const connections=sampleConnections();emit({discovery:{nameMode:"none",namesCompleted:0,namesTotal:0,stage:"idle",interface:"",range:"",active:false,completed:0,total:0,devices:[],errors:[],observedAt:null},network:{addresses:[],observedAt:null,error:null},revision:0,extension:{...defaultExtension},document,connections,applications:groupApplications(connections),history:connections,selectedId:connections[0].id,firewall:{enabled:null,enforcement:'unavailable',observer:'demo',error:null},lastObserved:null,layout:connections.map((c,i)=>({id:c.id,y:72+i*100}))});
 }
 let initPromise:Promise<void>|undefined;
 export function initialize(){
  if(initPromise)return initPromise;
- initPromise=(async()=>{try{if(native){await listen<Snapshot>('state-changed',event=>emit(event.payload));emit(await invoke<Snapshot>('get_snapshot'));}else{preview();window.addEventListener('storage',e=>{if(e.key!==storageKey||!e.newValue||!snapshot)return;try{const doc=JSON.parse(e.newValue);if(doc&&validRules(doc.rules)&&['ja','en','zh-CN'].includes(doc.preferences?.locale)&&['map','apps','rules','history','settings'].includes(doc.preferences?.view)&&['left','right'].includes(doc.preferences?.panel)&&doc.preferences?.mode==='demo')emit({...snapshot,revision:snapshot.revision+1,document:doc});}catch{/* Ignore malformed preview storage events. */}});}}catch(e){startupError=String(e);for(const l of listeners)l();}})();return initPromise;
+ initPromise=(async()=>{try{if(native){await listen<Snapshot>('state-changed',event=>emit(event.payload));emit(await invoke<Snapshot>('get_snapshot'));}else{preview();window.addEventListener('storage',e=>{if(e.key!==storageKey||!e.newValue||!snapshot)return;try{const doc=JSON.parse(e.newValue);if(doc&&validRules(doc.rules)&&['ja','en','zh-CN'].includes(doc.preferences?.locale)&&['map','apps','rules','history','settings','network','servers','diagnostics'].includes(doc.preferences?.view)&&['left','right'].includes(doc.preferences?.panel)&&doc.preferences?.mode==='demo')emit({...snapshot,revision:snapshot.revision+1,document:doc});}catch{/* Ignore malformed preview storage events. */}});}}catch(e){startupError=String(e);for(const l of listeners)l();}})();return initPromise;
 }
 export function useSnapshot(){return useSyncExternalStore(fn=>{listeners.add(fn);return()=>listeners.delete(fn);},()=>snapshot);}
 export function useStartupError(){return useSyncExternalStore(fn=>{listeners.add(fn);return()=>listeners.delete(fn);},()=>startupError);}
@@ -60,3 +60,12 @@ export async function applyExtensionRules(){if(!native)throw Error('desktop_requ
 export async function refreshExtension(){if(!native)return;emit(await invoke<Snapshot>('refresh_extension'));}
 
 export async function disableExtension(remove=false){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('disable_extension',{remove}));}
+
+export async function startLanDiscovery(interfaceName:string,address:string,active:boolean,nameMode:import('./types').NameMode='none') {
+ if(!native)throw Error('desktop_required');
+ emit(await invoke<Snapshot>('start_lan_discovery',{interface:interfaceName,address,active,nameMode}));
+}
+export async function stopLanDiscovery() {
+ if(!native)throw Error('desktop_required');
+ emit(await invoke<Snapshot>('stop_lan_discovery'));
+}

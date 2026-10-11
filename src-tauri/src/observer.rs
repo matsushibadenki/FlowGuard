@@ -9,10 +9,24 @@ use std::{
 pub(crate) fn run_bounded(binary: &str, args: &[&str]) -> Result<(bool, String), String> {
     run_bounded_input(binary, args, None)
 }
+pub(crate) fn run_bounded_diagnostic(
+    binary: &str,
+    args: &[&str],
+) -> Result<(bool, String), String> {
+    run_bounded_impl(binary, args, None, true)
+}
 pub(crate) fn run_bounded_input(
     binary: &str,
     args: &[&str],
     input: Option<Vec<u8>>,
+) -> Result<(bool, String), String> {
+    run_bounded_impl(binary, args, input, false)
+}
+fn run_bounded_impl(
+    binary: &str,
+    args: &[&str],
+    input: Option<Vec<u8>>,
+    capture_errors: bool,
 ) -> Result<(bool, String), String> {
     let deadline = if input.is_some() {
         Duration::from_secs(12)
@@ -27,7 +41,11 @@ pub(crate) fn run_bounded_input(
             Stdio::null()
         })
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(if capture_errors {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .spawn()
         .map_err(|e| e.to_string())?;
     if let Some(input) = input {
@@ -47,6 +65,14 @@ pub(crate) fn run_bounded_input(
             .read_to_string(&mut text)
             .map(|_| text)
     });
+    let error_reader = child.stderr.take().map(|pipe| {
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut text = String::new();
+            let _ = pipe.take(64 * 1024).read_to_string(&mut text);
+            text
+        })
+    });
     let start = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
@@ -56,14 +82,20 @@ pub(crate) fn run_bounded_input(
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
+            if let Some(reader) = error_reader {
+                let _ = reader.join();
+            }
             return Err("observer_timeout".into());
         }
         std::thread::sleep(Duration::from_millis(25));
     };
-    let text = reader
+    let mut text = reader
         .join()
         .map_err(|_| "observer_reader_failed")?
         .map_err(|e| e.to_string())?;
+    if let Some(reader) = error_reader {
+        text.push_str(&reader.join().unwrap_or_default());
+    }
     Ok((status.success(), text))
 }
 fn executable(pid: u32) -> String {

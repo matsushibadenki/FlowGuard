@@ -1,9 +1,12 @@
+mod discovery;
 mod enforcement;
 mod extension;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 mod model;
+mod names;
 mod native_runtime;
+mod network;
 mod observer;
 mod renderer;
 mod state;
@@ -11,6 +14,44 @@ use model::{Command, Rule, Snapshot};
 use state::SharedState;
 use tauri::{Emitter, Manager};
 
+#[tauri::command]
+async fn start_lan_discovery(
+    app: tauri::AppHandle,
+    interface: String,
+    address: String,
+    active: bool,
+    name_mode: Option<String>,
+) -> Result<Snapshot, String> {
+    let network = tauri::async_runtime::spawn_blocking(network::observe)
+        .await
+        .map_err(|_| "interfaces_unavailable")?;
+    let plan = discovery::Plan::new(&network, &interface, &address, active)?
+        .with_names(name_mode.as_deref().unwrap_or("none"))?;
+    let (operation, snapshot) = app.state::<SharedState>().begin_discovery(&plan)?;
+    let _ = app.emit("state-changed", &snapshot);
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        discovery::run(
+            plan,
+            |result| {
+                if let Ok(snapshot) = handle
+                    .state::<SharedState>()
+                    .update_discovery(operation, result)
+                {
+                    let _ = handle.emit("state-changed", snapshot);
+                }
+            },
+            || handle.state::<SharedState>().discovery_cancelled(operation),
+        );
+    });
+    Ok(snapshot)
+}
+#[tauri::command]
+fn stop_lan_discovery(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let snapshot = app.state::<SharedState>().stop_discovery()?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
 #[tauri::command]
 fn extension_package_status() -> Result<extension::ExtensionPackageStatus, String> {
     let executable = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -170,8 +211,7 @@ async fn sync_extension_rules(app: tauri::AppHandle) -> Result<Snapshot, String>
                 }
                 Err(error) => extension.fail(operation, error),
             })?;
-    app.emit("state-changed", &snapshot)
-        .map_err(|e| e.to_string())?;
+    let _ = app.emit("state-changed", &snapshot);
     Ok(snapshot)
 }
 #[tauri::command]
@@ -215,8 +255,7 @@ async fn refresh_extension(app: tauri::AppHandle) -> Result<Snapshot, String> {
                 Err(error) => extension.disconnected(&error),
             }
         })?;
-    app.emit("state-changed", &snapshot)
-        .map_err(|e| e.to_string())?;
+    let _ = app.emit("state-changed", &snapshot);
     Ok(snapshot)
 }
 #[tauri::command]
@@ -315,10 +354,11 @@ pub fn run() {
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 let (connections, firewall) = observer::observe();
-                if let Ok(snapshot) = handle
-                    .state::<SharedState>()
-                    .observed(connections, firewall)
-                {
+                if let Ok(snapshot) = handle.state::<SharedState>().observed(
+                    connections,
+                    firewall,
+                    network::observe(),
+                ) {
                     let _ = handle.emit("state-changed", snapshot);
                 }
                 let should_poll = handle.state::<SharedState>().snapshot().is_ok_and(|s| {
@@ -352,6 +392,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            start_lan_discovery,
+            stop_lan_discovery,
             extension_package_status,
             extension_bridge_status,
             sync_extension_rules,
