@@ -128,9 +128,7 @@ impl Inventory {
                             "changed"
                         }
                         .into();
-                        if !row.fields.is_empty() {
-                            row.previous = Some(previous.clone());
-                        }
+                        row.previous = Some(previous.clone());
                     } else {
                         row.kind = "added".into();
                     }
@@ -200,6 +198,11 @@ pub fn csv(inventory: &InventorySnapshot, job: &DiscoverySnapshot) -> String {
         "collected_at_unix",
         "previous_mac",
         "previous_name",
+        "previous_name_source",
+        "previous_name_status",
+        "previous_name_collected_at_unix",
+        "previous_response",
+        "previous_evidence_source",
         "previous_collected_at_unix",
         "result_errors",
     ];
@@ -240,6 +243,13 @@ pub fn csv(inventory: &InventorySnapshot, job: &DiscoverySnapshot) -> String {
             d.observed_at.to_string(),
             p.and_then(|d| d.mac.clone()).unwrap_or_default(),
             p.and_then(|d| d.name.value.clone()).unwrap_or_default(),
+            p.and_then(|d| d.name.source.clone()).unwrap_or_default(),
+            p.map(|d| d.name.status.clone()).unwrap_or_default(),
+            p.and_then(|d| d.name.observed_at)
+                .map(|t| t.to_string())
+                .unwrap_or_default(),
+            p.map(|d| d.response.clone()).unwrap_or_default(),
+            p.map(|d| d.source.clone()).unwrap_or_default(),
             p.map(|d| d.observed_at.to_string()).unwrap_or_default(),
             job.errors.join("|"),
         ];
@@ -314,6 +324,7 @@ mod tests {
             ["unchanged", "changed", "added", "not_seen"]
         );
         assert_eq!(i.snapshot.rows[1].fields, ["mac"]);
+        assert_eq!(i.snapshot.rows[0].previous.as_ref().unwrap().observed_at, 1);
         assert_eq!(i.snapshot.rows[3].device.observed_at, 1);
         if let Ok(path) = std::env::var("FLOWGUARD_CSV_TEST_OUTPUT") {
             std::fs::write(path, csv(&i.snapshot, &result(vec![]))).unwrap();
