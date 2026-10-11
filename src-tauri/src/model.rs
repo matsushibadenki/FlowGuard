@@ -123,6 +123,7 @@ pub fn group_applications(connections: &[Connection]) -> Vec<ApplicationGroup> {
 pub struct Snapshot {
     pub network: crate::network::NetworkSnapshot,
     pub discovery: crate::discovery::DiscoverySnapshot,
+    pub inventory: crate::inventory::InventorySnapshot,
     pub revision: u64,
     pub extension: crate::enforcement::ExtensionStatus,
     pub document: Document,

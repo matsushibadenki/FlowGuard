@@ -8,6 +8,7 @@ pub struct SharedState {
 pub struct Session {
     pub network: crate::network::NetworkSnapshot,
     pub discovery: crate::discovery::DiscoverySnapshot,
+    pub inventory: crate::inventory::Inventory,
     discovery_operation: u64,
     discovery_cancel: bool,
     discovery_plan: Option<crate::discovery::Plan>,
@@ -73,6 +74,7 @@ impl SharedState {
             inner: Mutex::new(Session {
                 network: Default::default(),
                 discovery: Default::default(),
+                inventory: Default::default(),
                 discovery_operation: 0,
                 discovery_cancel: false,
                 discovery_plan: None,
@@ -276,6 +278,30 @@ impl SharedState {
             session.snapshot(),
         ))
     }
+    pub fn lan_selection(&self, id: &str) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        s.inventory.select(id)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn lan_panel(&self, panel: &str) -> Result<Snapshot, String> {
+        if !["docked", "floating"].contains(&panel) {
+            return Err("invalid_panel".into());
+        }
+        let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        s.inventory.snapshot.panel = panel.into();
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn lan_csv(&self, generation: u64) -> Result<String, String> {
+        let s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if s.inventory.snapshot.generation != generation
+            || ["running", "cancelling", "idle"].contains(&s.discovery.stage.as_str())
+        {
+            return Err("export_stale_or_busy".into());
+        }
+        Ok(crate::inventory::csv(&s.inventory.snapshot, &s.discovery))
+    }
     pub fn begin_discovery(
         &self,
         plan: &crate::discovery::Plan,
@@ -286,6 +312,8 @@ impl SharedState {
         }
         s.discovery_operation += 1;
         s.discovery_cancel = false;
+        let generation = s.discovery_operation;
+        s.inventory.begin(plan, generation);
         s.discovery_plan = Some(plan.clone());
         s.discovery = crate::discovery::DiscoverySnapshot {
             name_mode: plan.name_mode.clone(),
@@ -343,6 +371,7 @@ impl SharedState {
                 result.stage = "partial".into();
             }
         }
+        s.inventory.update(&result);
         s.discovery = result;
         s.revision += 1;
         Ok(s.snapshot())
@@ -382,6 +411,10 @@ impl SharedState {
                 s.discovery.errors.push("network_changed".into());
             }
         }
+        if s.discovery.errors.iter().any(|e| e == "network_changed") {
+            let result = s.discovery.clone();
+            s.inventory.invalidate(&result);
+        }
         if !s
             .visible()
             .iter()
@@ -407,6 +440,7 @@ impl Session {
         Snapshot {
             network: self.network.clone(),
             discovery: self.discovery.clone(),
+            inventory: self.inventory.snapshot.clone(),
             revision: self.revision,
             extension: self.extension.status.clone(),
             document: self.document.clone(),
@@ -530,6 +564,52 @@ mod tests {
         assert_eq!(stopped.discovery.stage, "cancelled");
         assert_eq!(stopped.discovery.names_completed, 0);
         assert!(stopped.discovery.devices[0].name.value.is_none());
+    }
+    #[test]
+    fn inventory_selection_panel_and_csv_use_shared_generation() {
+        let state = state();
+        let network = crate::network::NetworkSnapshot {
+            addresses: vec![crate::network::InterfaceAddress {
+                interface: "en0".into(),
+                address: "192.168.1.20".into(),
+                family: "IPv4".into(),
+                netmask: "255.255.255.0".into(),
+                up: true,
+            }],
+            ..Default::default()
+        };
+        let plan = crate::discovery::Plan::new(&network, "en0", "192.168.1.20", false).unwrap();
+        let (op, started) = state.begin_discovery(&plan).unwrap();
+        assert!(state.lan_csv(op).is_err());
+        let mut result = started.discovery;
+        result.stage = "completed".into();
+        result.devices = vec![crate::discovery::Device {
+            id: "en0|192.168.1.1".into(),
+            interface: "en0".into(),
+            address: "192.168.1.1".into(),
+            family: "IPv4".into(),
+            mac: None,
+            source: "arp".into(),
+            response: "unverified".into(),
+            observed_at: now(),
+            name: Default::default(),
+        }];
+        state.update_discovery(op, result).unwrap();
+        assert!(state.lan_selection("missing").is_err());
+        let selected = state.lan_selection("en0|192.168.1.1").unwrap();
+        assert_eq!(
+            selected.inventory.selected_id.as_deref(),
+            Some("en0|192.168.1.1")
+        );
+        assert_eq!(
+            state.lan_panel("floating").unwrap().inventory.panel,
+            "floating"
+        );
+        assert_eq!(state.lan_panel("docked").unwrap().inventory.panel, "docked");
+        assert!(state.lan_csv(op).unwrap().contains("192.168.1.1"));
+        state.begin_discovery(&plan).unwrap();
+        assert!(state.lan_csv(op).is_err());
+        assert!(state.snapshot().unwrap().inventory.selected_id.is_none());
     }
     #[test]
     fn discovery_cancellation_fences_late_results_and_new_jobs() {

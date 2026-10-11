@@ -1,1 +1,1 @@
-{"$schema":"../gen/schemas/desktop-schema.json","identifier":"default","description":"Local FlowGuard windows; no shell or arbitrary filesystem access from the WebView","windows":["main","inspector"],"permissions":["core:default"]}
+{"$schema":"../gen/schemas/desktop-schema.json","identifier":"default","description":"Local FlowGuard windows; no shell or arbitrary filesystem access from the WebView","windows":["main","inspector","lan-details"],"permissions":["core:default"]}

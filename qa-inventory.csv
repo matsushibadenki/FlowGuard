@@ -1,0 +1,5 @@
+﻿"generation","result_stage","comparison_status","baseline_at_unix","interface","local_address","netmask","range","active_ping","name_mode","change","changed_fields","address","family","mac","reported_name","name_source","name_status","name_collected_at_unix","response","evidence_source","collected_at_unix","previous_mac","previous_name","previous_collected_at_unix","result_errors"
+"2","completed","ready","2","en0","192.168.1.20","255.255.255.0","","false","none","unchanged","","192.168.1.1","IPv4","","","","not_requested","","unverified","arp","10","","","",""
+"2","completed","ready","2","en0","192.168.1.20","255.255.255.0","","false","none","changed","mac","192.168.1.2","IPv4","02:00:00:00:00:02","","","not_requested","","unverified","arp","1","","","1",""
+"2","completed","ready","2","en0","192.168.1.20","255.255.255.0","","false","none","added","","192.168.1.4","IPv4","","","","not_requested","","unverified","arp","1","","","",""
+"2","completed","ready","2","en0","192.168.1.20","255.255.255.0","","false","none","not_seen","","192.168.1.3","IPv4","","","","not_requested","","unverified","arp","1","","","1",""

@@ -1,3 +1,4 @@
+import {LanDetails} from './components/LanDetails';
 import {useEffect,useMemo,useState} from 'react';
 import {Search,Globe,Eye,Info,X,ExternalLink} from 'lucide-react';
 import {dispatch,floatPanel,useStartupError,native,useSnapshot} from './core/store';
@@ -14,7 +15,8 @@ import {RuleList} from './components/RuleList';
 import {WorkspaceTools} from './components/WorkspaceTools';
 import {Settings} from './components/Settings';
 import {Brand} from './components/ui';
-const floating=new URLSearchParams(location.search).get('panel')==='inspector';
+const panelType=new URLSearchParams(location.search).get('panel');
+const floating=panelType==='inspector';
 export function App(){
  const snapshot=useSnapshot();const startupError=useStartupError();const [search,setSearch]=useState('');const [filter,setFilter]=useState('all');const [error,setError]=useState<string|null>(null);
  const locale=snapshot?.document.preferences.locale??'ja';const t=translator(locale);
@@ -31,6 +33,7 @@ export function App(){
  const tools=['network','servers','diagnostics'].includes(p.view);
  const category=p.view==='network'?'networkCategory':p.view==='servers'?'serverCategory':p.view==='diagnostics'?'securityCategory':p.view==='settings'?'commonCategory':'firewallCategory';
  const errorBanner=error?<div className="error-banner" role="alert"><Info size={18}/><span>{error}</span><button className="icon-button" aria-label={t('close')} onClick={()=>setError(null)}><X size={18}/></button></div>:null;
+ if(panelType==='lan-details')return <main className="floating-workspace">{errorBanner}<LanDetails snapshot={snapshot} t={t} native={native} standalone/></main>;
  if(floating)return <main className="floating-workspace">{errorBanner}<Inspector key={`${selected?.id}-${p.mode}`} snapshot={snapshot} connection={selected} t={t} onError={onError} isFloating/></main>;
  return <div className="app-shell"><Sidebar snapshot={snapshot} t={t} navigate={navigate}/><main className="workspace"><header className="workspace-header"><div><span className="workspace-category">{t(category)}</span><h1>{t(p.view)}</h1><p>{t(`${p.view}Subtitle`)}</p></div><label className="language-picker"><Globe size={17}/><span className="sr-only">{t('language')}</span><select aria-label={t('language')} value={locale} onChange={e=>void dispatch({type:'setLocale',locale:e.target.value as Locale}).catch(onError)}><option value="ja">日本語</option><option value="en">English</option><option value="zh-CN">简体中文</option></select></label></header>
  {errorBanner}{!native&&<div className="preview-banner"><Eye size={16}/>{t(tools?(p.view==='network'?'interfacePreview':p.view==='servers'?'serverPlan':'diagnosticPlan'):'browserDemo')}</div>}{!tools&&snapshot.firewall.error&&p.mode==='live'&&<div className="error-banner" role="alert"><Info size={17}/>{t('observerError')}</div>}

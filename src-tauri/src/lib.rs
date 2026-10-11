@@ -3,6 +3,7 @@ mod enforcement;
 mod extension;
 #[cfg(feature = "gpu")]
 pub mod gpu;
+mod inventory;
 mod model;
 mod names;
 mod native_runtime;
@@ -14,6 +15,57 @@ use model::{Command, Rule, Snapshot};
 use state::SharedState;
 use tauri::{Emitter, Manager};
 
+#[tauri::command]
+fn select_lan_device(app: tauri::AppHandle, id: String) -> Result<Snapshot, String> {
+    let snapshot = app.state::<SharedState>().lan_selection(&id)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
+#[tauri::command]
+fn lan_csv(app: tauri::AppHandle, generation: u64) -> Result<String, String> {
+    app.state::<SharedState>().lan_csv(generation)
+}
+#[tauri::command]
+async fn float_lan_details(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let locale = app
+        .state::<SharedState>()
+        .snapshot()?
+        .document
+        .preferences
+        .locale;
+    let title = match locale.as_str() {
+        "ja" => "FlowGuard · LAN記録の詳細",
+        "zh-CN" => "FlowGuard · LAN记录详情",
+        _ => "FlowGuard · LAN record details",
+    };
+    if let Some(window) = app.get_webview_window("lan-details") {
+        window.set_title(title).map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    } else {
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            "lan-details",
+            tauri::WebviewUrl::App("index.html?panel=lan-details".into()),
+        )
+        .title(title)
+        .inner_size(430.0, 800.0)
+        .min_inner_size(320.0, 500.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    }
+    let snapshot = app.state::<SharedState>().lan_panel("floating")?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
+#[tauri::command]
+async fn dock_lan_details(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let snapshot = app.state::<SharedState>().lan_panel("docked")?;
+    let _ = app.emit("state-changed", &snapshot);
+    if let Some(window) = app.get_webview_window("lan-details") {
+        window.close().map_err(|e| e.to_string())?;
+    }
+    Ok(snapshot)
+}
 #[tauri::command]
 async fn start_lan_discovery(
     app: tauri::AppHandle,
@@ -375,6 +427,12 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "lan-details" && matches!(event, tauri::WindowEvent::Destroyed) {
+                let app = window.app_handle();
+                if let Ok(snapshot) = app.state::<SharedState>().lan_panel("docked") {
+                    let _ = app.emit("state-changed", snapshot);
+                }
+            }
             if window.label() == "inspector" && matches!(event, tauri::WindowEvent::Destroyed) {
                 let app = window.app_handle();
                 if let Ok(current) = app.state::<SharedState>().snapshot() {
@@ -392,6 +450,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            select_lan_device,
+            lan_csv,
+            float_lan_details,
+            dock_lan_details,
             start_lan_discovery,
             stop_lan_discovery,
             extension_package_status,

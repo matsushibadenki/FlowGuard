@@ -18,7 +18,7 @@ function emit(value:Snapshot){if(snapshot&&value.revision<snapshot.revision)retu
 function preview(){
  let document:Document={rules:[],preferences:{locale:'ja',view:'map',panel:'right',mode:'demo'}};
  try {const stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored&&validRules(stored.rules)) {document.rules=stored.rules;if(['ja','en','zh-CN'].includes(stored.preferences?.locale))document.preferences.locale=stored.preferences.locale;}}catch{/* Corrupt preview storage is isolated from desktop documents. */}
- const connections=sampleConnections();emit({discovery:{nameMode:"none",namesCompleted:0,namesTotal:0,stage:"idle",interface:"",range:"",active:false,completed:0,total:0,devices:[],errors:[],observedAt:null},network:{addresses:[],observedAt:null,error:null},revision:0,extension:{...defaultExtension},document,connections,applications:groupApplications(connections),history:connections,selectedId:connections[0].id,firewall:{enabled:null,enforcement:'unavailable',observer:'demo',error:null},lastObserved:null,layout:connections.map((c,i)=>({id:c.id,y:72+i*100}))});
+ const connections=sampleConnections();emit({inventory:{generation:0,localAddress:"",netmask:"",status:"first",baselineAt:null,rows:[],selectedId:null,panel:"docked"},discovery:{nameMode:"none",namesCompleted:0,namesTotal:0,stage:"idle",interface:"",range:"",active:false,completed:0,total:0,devices:[],errors:[],observedAt:null},network:{addresses:[],observedAt:null,error:null},revision:0,extension:{...defaultExtension},document,connections,applications:groupApplications(connections),history:connections,selectedId:connections[0].id,firewall:{enabled:null,enforcement:'unavailable',observer:'demo',error:null},lastObserved:null,layout:connections.map((c,i)=>({id:c.id,y:72+i*100}))});
 }
 let initPromise:Promise<void>|undefined;
 export function initialize(){
@@ -69,3 +69,8 @@ export async function stopLanDiscovery() {
  if(!native)throw Error('desktop_required');
  emit(await invoke<Snapshot>('stop_lan_discovery'));
 }
+
+export async function selectLanDevice(id:string){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('select_lan_device',{id}));}
+export async function floatLanDetails(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('float_lan_details'));}
+export async function dockLanDetails(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('dock_lan_details'));}
+export async function lanCsv(generation:number):Promise<string>{if(!native)throw Error('desktop_required');return invoke<string>('lan_csv',{generation});}
