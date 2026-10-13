@@ -9,12 +9,94 @@ mod names;
 mod native_runtime;
 mod network;
 mod observer;
+mod ports;
 mod renderer;
 mod state;
 use model::{Command, Rule, Snapshot};
 use state::SharedState;
 use tauri::{Emitter, Manager};
 
+#[tauri::command]
+async fn open_lan_ports(
+    app: tauri::AppHandle,
+    id: String,
+    generation: u64,
+) -> Result<Snapshot, String> {
+    let snapshot = app.state::<SharedState>().open_ports(&id, generation)?;
+    let _ = app.emit("state-changed", &snapshot);
+    let main = if let Some(main) = app.get_webview_window("main") {
+        main
+    } else {
+        let config = app
+            .config()
+            .app
+            .windows
+            .iter()
+            .find(|w| w.label == "main")
+            .ok_or("main_window_config_missing")?;
+        tauri::WebviewWindowBuilder::from_config(&app, config)
+            .map_err(|e| e.to_string())?
+            .build()
+            .map_err(|e| e.to_string())?
+    };
+    main.show().map_err(|e| e.to_string())?;
+    main.unminimize().map_err(|e| e.to_string())?;
+    main.set_focus().map_err(|e| e.to_string())?;
+    Ok(snapshot)
+}
+#[tauri::command]
+async fn start_lan_ports(
+    app: tauri::AppHandle,
+    id: String,
+    generation: u64,
+    first: u16,
+    last: u16,
+    preset: Option<String>,
+) -> Result<Snapshot, String> {
+    let network = tauri::async_runtime::spawn_blocking(network::observe)
+        .await
+        .map_err(|_| "interfaces_unavailable")?;
+    let preset = preset.as_deref().unwrap_or("range");
+    let (first, last) = if preset == "range" {
+        (first, last)
+    } else {
+        (1, 1)
+    };
+    let plan = ports::Plan::new(
+        &app.state::<SharedState>().snapshot()?,
+        &network,
+        &id,
+        generation,
+        first,
+        last,
+    )?
+    .with_preset(preset)?;
+    let (op, snapshot) = app.state::<SharedState>().begin_ports(&plan)?;
+    let _ = app.emit("state-changed", &snapshot);
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ports::run(
+            plan,
+            |result| {
+                if let Ok(s) = handle.state::<SharedState>().update_ports(op, result) {
+                    let _ = handle.emit("state-changed", s);
+                }
+            },
+            || handle.state::<SharedState>().ports_cancelled(op),
+        )
+    });
+    Ok(snapshot)
+}
+#[tauri::command]
+fn lan_ports_csv(app: tauri::AppHandle, operation: u64) -> Result<String, String> {
+    app.state::<SharedState>().ports_csv(operation)
+}
+#[tauri::command]
+fn stop_lan_ports(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let s = app.state::<SharedState>().stop_ports()?;
+    let _ = app.emit("state-changed", &s);
+    Ok(s)
+}
 #[tauri::command]
 fn select_lan_device(app: tauri::AppHandle, id: String) -> Result<Snapshot, String> {
     let snapshot = app.state::<SharedState>().lan_selection(&id)?;
@@ -449,6 +531,10 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            start_lan_ports,
+            open_lan_ports,
+            lan_ports_csv,
+            stop_lan_ports,
             get_snapshot,
             select_lan_device,
             lan_csv,

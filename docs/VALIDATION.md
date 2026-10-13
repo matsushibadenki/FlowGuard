@@ -93,3 +93,34 @@ The GPU smoke check requires access to Metal; the sandbox did not expose an adap
 - The native view changed during UI work; an inadvertently opened connection inspector was closed to restore docking, and subsequent visual checks stayed in the isolated fixture. The user's running app was left open. Final refinements preserve previous values for unchanged rows and use LAN-specific panel labels to avoid confusion with the Firewall inspector; these were verified in Rust and browser UI. Restart the running app to load the final staged build.
 - UI fixture: all four classifications, changed MAC with previous values, previous-only record details, all three languages and 375px document width checked. Table scroll stays within the sheet, and narrow layouts wrap the detail fields. Final screenshot saved; no fixture console warnings/errors.
 - Production frontend, Tauri debug app and unsigned staging built. Real device replacement/disconnection, network switches and permission denial scenarios remain Pending; no such changes were forced on the user's LAN.
+
+
+## LAN TCP ports (2026-10-12)
+
+Unsigned Rust TCP connect checks use interface and source-address binding, bounded ranges and deadlines. The controlled loopback test checks a listening TCP socket and connection refusal after it closes; it sends no application payload. Real LAN sweeps, local-network permission denial, VPN routing and network changes remain Pending. IPv6 and remote targets are not implemented in this increment. UI shows open records by default and optionally all attempted outcomes; timeouts remain unknown.
+
+Verified: `cargo check --offline`, default Rust suite (32 passed, 7 host-only tests ignored), TCP loopback test (1 passed, interface-bound to lo0), focused latest scope/cancellation and error classification tests, frontend suite (14 passed), production frontend build. Synthetic browser fixture: open-only/all-results toggle, JA/EN/简体中文, 375px width with no page overflow, focus tooltip and clean console. Fixture files/tabs removed. Existing native app was left running; no LAN sweep or extension activation was performed.
+
+Unsigned `.app` build and native packaging completed. Staged bundle: `native/build/FlowGuard.app`; extension preflight: packaged=true, signed=false, signature_required. The running application was not restarted.
+
+
+## TCP presets and sheet export (2026-10-13)
+
+Rust default suite: 33 passed, 7 host-only tests ignored. Controlled lo0 TCP test: 1 passed; the actual worker checked exactly two requested ports and retained their open/refused outcomes. Frontend: 17 passed; production build passed. CSV parser verified 3 records / 18 columns, requested ports, operation ID, source IP, cancelled stage and stale-collection context. Tests cover preset validation, formula escaping, export rejection during a job and rejection of an old operation within the same LAN generation.
+
+Synthetic browser fixture: preset selection, empty range input, numeric sorting, one-row search with a full 3-record export callback, three locales, 375px page width without horizontal overflow, focus tooltip and clean console. Browser export callback/CSV content verified; a saved Downloads file was not observed. Real LAN sweeps and native OS permission/routing cases remain Pending.
+
+Unsigned Tauri app build completed for this increment. Temporary fixture sources/CSV and verification tabs were removed, and the task-owned Vite server was stopped. The existing native app was not restarted.
+
+Native package refresh completed: packaged=true, signed=false, signature_required. The unsigned staging app includes the latest port presets/search/CSV implementation.
+
+
+## TCP recollection comparison and details navigation (2026-10-13)
+
+Rust default tests: 34 passed, 7 host-only tests ignored. The ignored TCP loopback test passed with actual listeners swapped between two checks; differences were refused→open and open→refused. Comparison tests cover unknown outcomes, ignored timing changes, interruption without baseline promotion, changed request/generation and invalidation. Shared-state tests verify navigation selects the exact record, increments focus, switches the category and never starts a TCP operation; stale/missing targets are rejected.
+
+CSV parser: 4 records / 24 columns, previous status/time and baseline operation verified. Browser synthetic fixture: details→sheet scroll/focus, changes-only including a newly refused row and a timeout marked uncertain, JA/EN/简体中文, clean console, and 375px document width without overflow. No real LAN scan or native-window focus manipulation was performed. Native floating-window restoration/recreation and full native CSV saving remain Pending.
+
+Unsigned Tauri `.app` build completed. The comparison-only filter was also checked after invalidation: it deactivates and leaves the current rows visible. Temporary browser fixtures/tabs were removed, the task-owned local dev server was stopped, and the existing native app was not restarted.
+
+Native package refreshed successfully: packaged=true, signed=false, signature_required. The staged app contains the latest comparison/navigation implementation.

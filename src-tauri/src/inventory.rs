@@ -163,7 +163,7 @@ impl Inventory {
         Ok(())
     }
 }
-fn cell(value: &str) -> String {
+pub(crate) fn cell(value: &str) -> String {
     let dangerous = value.starts_with(['\t', '\r', '\n'])
         || value.trim_start().starts_with(['=', '+', '-', '@']);
     format!(

@@ -6,6 +6,12 @@ pub struct SharedState {
     _document_lock: fs::File,
 }
 pub struct Session {
+    pub ports: crate::ports::Snapshot,
+    ports_focus: u64,
+    ports_comparator: crate::ports::Comparator,
+    ports_operation: u64,
+    ports_cancel: bool,
+    ports_plan: Option<crate::ports::Plan>,
     pub network: crate::network::NetworkSnapshot,
     pub discovery: crate::discovery::DiscoverySnapshot,
     pub inventory: crate::inventory::Inventory,
@@ -72,6 +78,12 @@ impl SharedState {
             path,
             _document_lock: document_lock,
             inner: Mutex::new(Session {
+                ports: Default::default(),
+                ports_focus: 0,
+                ports_comparator: Default::default(),
+                ports_operation: 0,
+                ports_cancel: false,
+                ports_plan: None,
                 network: Default::default(),
                 discovery: Default::default(),
                 inventory: Default::default(),
@@ -302,6 +314,106 @@ impl SharedState {
         }
         Ok(crate::inventory::csv(&s.inventory.snapshot, &s.discovery))
     }
+    pub fn open_ports(&self, id: &str, generation: u64) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.inventory.snapshot.generation != generation
+            || !["completed", "partial"].contains(&s.discovery.stage.as_str())
+            || !s
+                .inventory
+                .snapshot
+                .rows
+                .iter()
+                .any(|r| r.device.id == id && r.kind != "not_seen")
+            || !s.discovery.devices.iter().any(|d| {
+                d.id == id
+                    && d.family == "IPv4"
+                    && d.address
+                        .parse::<std::net::Ipv4Addr>()
+                        .is_ok_and(|ip| ip.is_private())
+            })
+        {
+            return Err("stale_target".into());
+        }
+        let mut document = s.document.clone();
+        document.preferences.view = "network".into();
+        self.persist(&document)?;
+        s.inventory.select(id)?;
+        s.document = document;
+        s.ports_focus += 1;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn ports_csv(&self, operation: u64) -> Result<String, String> {
+        let s = self.inner.lock().map_err(|_| "state_lock")?;
+        if operation == 0
+            || s.ports.operation != operation
+            || ["running", "cancelling", ""].contains(&s.ports.stage.as_str())
+            || s.ports.rows.is_empty()
+        {
+            return Err("stale_or_unfinished_ports".into());
+        }
+        Ok(crate::ports::csv(&s.ports, s.inventory.snapshot.generation))
+    }
+    pub fn begin_ports(&self, plan: &crate::ports::Plan) -> Result<(u64, Snapshot), String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if ["running", "cancelling"].contains(&s.ports.stage.as_str())
+            || ["running", "cancelling"].contains(&s.discovery.stage.as_str())
+            || s.inventory.snapshot.generation != plan.generation
+        {
+            return Err("ports_busy_or_stale".into());
+        }
+        s.ports_operation += 1;
+        s.ports_cancel = false;
+        s.ports = plan.snapshot();
+        s.ports.comparison = s.ports_comparator.begin(plan);
+        s.ports.operation = s.ports_operation;
+        s.ports_plan = Some(plan.clone());
+        s.revision += 1;
+        Ok((s.ports_operation, s.snapshot()))
+    }
+    pub fn ports_cancelled(&self, op: u64) -> bool {
+        self.inner
+            .lock()
+            .map(|s| {
+                s.ports_operation != op
+                    || s.ports_cancel
+                    || s.inventory.snapshot.generation != s.ports.generation
+            })
+            .unwrap_or(true)
+    }
+    pub fn stop_ports(&self) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.ports.stage == "running" {
+            s.ports_cancel = true;
+            s.ports.stage = "cancelling".into();
+            s.revision += 1;
+        }
+        Ok(s.snapshot())
+    }
+    pub fn update_ports(
+        &self,
+        op: u64,
+        mut result: crate::ports::Snapshot,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.ports_operation != op || !["running", "cancelling"].contains(&s.ports.stage.as_str()) {
+            return Err("stale_ports".into());
+        }
+        if s.ports_cancel || s.inventory.snapshot.generation != s.ports.generation {
+            if result.stage == "running" {
+                return Err("cancelled".into());
+            }
+            result = s.ports.clone();
+            result.stage = "cancelled".into();
+        }
+        result.operation = op;
+        if let Some(plan) = s.ports_plan.clone() {
+            s.ports_comparator.update(&plan, &mut result);
+        }
+        s.ports = result;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
     pub fn begin_discovery(
         &self,
         plan: &crate::discovery::Plan,
@@ -310,6 +422,10 @@ impl SharedState {
         if ["running", "cancelling"].contains(&s.discovery.stage.as_str()) {
             return Err("discovery_busy".into());
         }
+        if ["running", "cancelling"].contains(&s.ports.stage.as_str()) {
+            return Err("ports_busy".into());
+        }
+        s.ports_comparator.invalidate();
         s.discovery_operation += 1;
         s.discovery_cancel = false;
         let generation = s.discovery_operation;
@@ -401,6 +517,19 @@ impl SharedState {
         }
         s.firewall = firewall;
         s.network = network;
+        if s.ports_plan
+            .as_ref()
+            .is_some_and(|plan| !plan.matches(&s.network))
+            && ["completed", "cancelled"].contains(&s.ports.stage.as_str())
+        {
+            s.ports.stage = "failed".into();
+            s.ports.error = Some("network_changed".into());
+            s.ports_comparator.invalidate();
+            s.ports.comparison = crate::ports::Comparison {
+                status: "invalidated".into(),
+                ..Default::default()
+            };
+        }
         if s.discovery_plan
             .as_ref()
             .is_some_and(|plan| !plan.matches(&s.network))
@@ -438,6 +567,8 @@ impl Session {
         let connections = self.visible();
         let layout = renderer::layout(&connections);
         Snapshot {
+            ports_focus: self.ports_focus,
+            ports: self.ports.clone(),
             network: self.network.clone(),
             discovery: self.discovery.clone(),
             inventory: self.inventory.snapshot.clone(),
@@ -471,6 +602,108 @@ mod tests {
         ));
         let _ = fs::remove_file(&path);
         SharedState::load(path).unwrap()
+    }
+    #[test]
+    fn tcp_stop_and_scope_fencing() {
+        let state = state();
+        let network = crate::network::NetworkSnapshot {
+            addresses: vec![crate::network::InterfaceAddress {
+                interface: "en0".into(),
+                address: "192.168.1.20".into(),
+                family: "IPv4".into(),
+                netmask: "255.255.255.0".into(),
+                up: true,
+            }],
+            ..Default::default()
+        };
+        let discovery =
+            crate::discovery::Plan::new(&network, "en0", "192.168.1.20", false).unwrap();
+        let (op, started) = state.begin_discovery(&discovery).unwrap();
+        let mut result = started.discovery;
+        result.stage = "completed".into();
+        result.devices = vec![crate::discovery::Device {
+            id: "en0|192.168.1.1".into(),
+            interface: "en0".into(),
+            address: "192.168.1.1".into(),
+            family: "IPv4".into(),
+            mac: None,
+            source: "arp".into(),
+            response: "unverified".into(),
+            observed_at: now(),
+            name: Default::default(),
+        }];
+        state.update_discovery(op, result).unwrap();
+        let snapshot = state.snapshot().unwrap();
+        let opened = state.open_ports("en0|192.168.1.1", op).unwrap();
+        assert_eq!(opened.ports_focus, 1);
+        assert_eq!(opened.document.preferences.view, "network");
+        assert_eq!(
+            opened.inventory.selected_id.as_deref(),
+            Some("en0|192.168.1.1")
+        );
+        assert_eq!(opened.ports.operation, 0);
+        assert!(state.open_ports("missing", op).is_err());
+        assert!(state.open_ports("en0|192.168.1.1", op + 1).is_err());
+        let make = |a, b| crate::ports::Plan::new(&snapshot, &network, "en0|192.168.1.1", op, a, b);
+        assert!(make(0, 1).is_err());
+        assert!(make(1, 257).is_err());
+        assert!(make(20, 10).is_err());
+        assert!(make(1, 256).is_ok());
+        assert!(crate::ports::Plan::new(&snapshot, &network, "missing", op, 1, 1).is_err());
+        assert!(
+            crate::ports::Plan::new(&snapshot, &network, "en0|192.168.1.1", op + 1, 1, 1).is_err()
+        );
+        let mut outside = snapshot.clone();
+        outside.discovery.devices[0].address = "8.8.8.8".into();
+        assert!(
+            crate::ports::Plan::new(&outside, &network, "en0|192.168.1.1", op, 22, 22).is_err()
+        );
+        outside.discovery.devices[0].address = "192.168.2.1".into();
+        assert!(
+            crate::ports::Plan::new(&outside, &network, "en0|192.168.1.1", op, 22, 22).is_err()
+        );
+        outside.discovery.devices[0].address = "fe80::1".into();
+        assert!(
+            crate::ports::Plan::new(&outside, &network, "en0|192.168.1.1", op, 22, 22).is_err()
+        );
+        let plan = make(22, 22).unwrap();
+        assert!(!plan.matches(&Default::default()));
+        let (job, started) = state.begin_ports(&plan).unwrap();
+        assert_eq!(started.ports.operation, job);
+        assert!(state.ports_csv(job).is_err());
+        assert!(state.begin_discovery(&discovery).is_err());
+        assert!(state.begin_ports(&plan).is_err());
+        state.stop_ports().unwrap();
+        assert!(state.ports_cancelled(job));
+        assert!(state.update_ports(job, started.ports.clone()).is_err());
+        let mut late = started.ports;
+        late.stage = "completed".into();
+        late.rows.push(crate::ports::Row {
+            port: 22,
+            status: "open".into(),
+            elapsed_ms: 1,
+            observed_at: now(),
+        });
+        let frozen = state.update_ports(job, late).unwrap();
+        assert_eq!(frozen.ports.stage, "cancelled");
+        assert!(frozen.ports.rows.is_empty());
+        let (next, _) = state.begin_ports(&plan).unwrap();
+        assert_ne!(job, next);
+        assert!(state.update_ports(job, Default::default()).is_err());
+        let mut finished = state.snapshot().unwrap().ports;
+        finished.stage = "completed".into();
+        finished.completed = 1;
+        finished.rows = vec![crate::ports::Row {
+            port: 22,
+            status: "open".into(),
+            elapsed_ms: 2,
+            observed_at: now(),
+        }];
+        state.update_ports(next, finished).unwrap();
+        assert!(state.ports_csv(job).is_err());
+        assert!(state.ports_csv(next).unwrap().contains("requested_ports"));
+        state.begin_discovery(&discovery).unwrap();
+        assert!(state.ports_csv(next).unwrap().contains("\"true\""));
     }
     #[test]
     fn discovery_snapshot_caps_results_even_during_a_job() {

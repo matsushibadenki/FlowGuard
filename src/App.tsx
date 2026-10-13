@@ -1,3 +1,4 @@
+import {usePortSheetFocus} from './components/usePortSheetFocus';
 import {LanDetails} from './components/LanDetails';
 import {useEffect,useMemo,useState} from 'react';
 import {Search,Globe,Eye,Info,X,ExternalLink} from 'lucide-react';
@@ -19,6 +20,7 @@ const panelType=new URLSearchParams(location.search).get('panel');
 const floating=panelType==='inspector';
 export function App(){
  const snapshot=useSnapshot();const startupError=useStartupError();const [search,setSearch]=useState('');const [filter,setFilter]=useState('all');const [error,setError]=useState<string|null>(null);
+ usePortSheetFocus(snapshot?.portsFocus??0);
  const locale=snapshot?.document.preferences.locale??'ja';const t=translator(locale);
  useEffect(()=>{document.documentElement.lang=locale;},[locale]);
  const onError=(e:unknown)=>{const value=String(e);setError(value.includes('unsupported_or_invalid_rules')?t('askUnsupported'):value.includes('edit_conflict')?t('editConflict'):value.includes('invalid_backup')?t('invalidBackup'):value.includes('connection_expired')?t('expired'):value.includes('application_identity_unavailable')?t('identityError'):t('error'));};

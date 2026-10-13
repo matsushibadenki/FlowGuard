@@ -121,6 +121,8 @@ pub fn group_applications(connections: &[Connection]) -> Vec<ApplicationGroup> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub ports_focus: u64,
+    pub ports: crate::ports::Snapshot,
     pub network: crate::network::NetworkSnapshot,
     pub discovery: crate::discovery::DiscoverySnapshot,
     pub inventory: crate::inventory::InventorySnapshot,

@@ -834,9 +834,11 @@ name = "flowguard"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "libc",
  "pollster",
  "serde",
  "serde_json",
+ "socket2",
  "tauri",
  "tauri-build",
  "wgpu",

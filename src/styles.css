@@ -39,3 +39,15 @@
 
 .lan-comparison{border-top:1px solid var(--color-rule);margin-top:16px;padding-top:16px}.lan-change-counts{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0}.change-label{font-size:var(--text-xs);display:inline-block;white-space:normal;padding:4px 8px;border-radius:4px;background:var(--color-paper);color:var(--color-muted)}.change-added,.change-changed{background:var(--color-accent-soft);color:var(--color-accent)}.lan-detail{margin-top:20px;padding:20px;min-width:0}.lan-detail>.section-head{padding:0!important;flex-wrap:wrap;gap:12px}.lan-detail h3{margin-top:16px}.lan-detail-values{display:grid;grid-template-columns:minmax(120px,.4fr) minmax(0,1fr);gap:8px 16px;margin:16px 0;font-size:var(--text-sm)}.lan-detail-values dt{color:var(--color-muted)}.lan-detail-values dd{margin:0;overflow-wrap:anywhere;white-space:normal}.selected-record{background:var(--color-accent-soft)}.lan-workspace table{min-width:1700px}.lan-panel-placeholder{padding:20px}.floating-workspace .lan-detail{margin-top:0}
 @media(max-width:600px){.lan-detail-values{grid-template-columns:minmax(0,1fr);gap:4px}.lan-detail-values dd{margin-bottom:12px}.lan-sheet-head>button{width:100%}}
+
+.port-controls{display:flex;gap:16px;flex-wrap:wrap;align-items:end}.port-controls label{display:grid;gap:8px}.port-controls input{width:120px}.port-checks table{min-width:680px!important}.port-checks>label{display:flex;gap:8px;align-items:center}.port-checks h2{margin-top:0}.port-checks{margin-top:24px}
+
+.port-info{position:relative}.port-info [role=tooltip]{display:none;position:absolute;right:0;top:100%;z-index:5;width:min(320px,75vw);padding:16px;background:var(--surface,#fff);border:1px solid #ccd9d5;border-radius:12px;box-shadow:0 8px 24px #162e2420;line-height:1.6}.port-info:hover [role=tooltip],.port-info:focus-within [role=tooltip]{display:block}
+
+.port-checks{padding:20px;min-width:0}.port-checks .section-head{align-items:center}.port-checks>p{line-height:1.6}.port-checks>progress{margin-bottom:16px}.port-checks>.table-scroll{margin-top:16px}
+
+.port-filters{display:flex;flex-wrap:wrap;gap:16px;align-items:end;margin-top:16px}.port-filters label{display:grid;gap:8px;min-width:0}.port-filters input{max-width:100%;width:280px;box-sizing:border-box}.port-request{overflow-wrap:anywhere;color:var(--muted,#536963);font-size:12px}.port-controls select{max-width:100%}
+
+#lan-tcp-sheet{scroll-margin-top:16px}#lan-tcp-sheet:focus{outline:2px solid #458b7a;outline-offset:4px}.port-comparison label{display:flex;align-items:center;gap:8px}.port-comparison{margin:16px 0}.port-checks table{min-width:1000px!important}
+
+.port-info [role=tooltip]{max-height:60vh;overflow:auto}

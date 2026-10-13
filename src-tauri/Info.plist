@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>NSLocalNetworkUsageDescription</key><string>FlowGuard discovers devices on the LAN you select using neighbor information, IPv4 response checks and optional name lookup.</string>
+<key>NSLocalNetworkUsageDescription</key><string>FlowGuard discovers devices on the LAN you select using neighbor information, IPv4 response checks, optional name lookup and manual TCP port checks.</string>
 </dict></plist>
