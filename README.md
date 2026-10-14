@@ -1,6 +1,6 @@
 # FlowGuard for macOS
 
-![FlowGuard_ui](docs/img/flowguard.png)
+![FlowGuard_ui](docs/imgages/flowguard.png)
 
 Macの通信を「アプリ → ルール → 接続先」で確認する、Tauri 2 + Rustのデスクトップアプリです。日本語・English・简体中文に対応しています。
 
