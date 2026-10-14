@@ -1,0 +1,398 @@
+/* パス: src/styles/map.css */
+.map-protection{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(240px,1fr) auto;
+  align-items:center;
+  gap:var(--space-md);
+  padding:var(--space-md);
+  margin-bottom:var(--space-md);
+  border-left:4px solid var(--color-rule-strong)}
+  .map-protection.tone-caution{
+    border-left-color:var(--color-ask)}
+    .map-protection.tone-acknowledged{
+      border-left-color:var(--color-accent)}
+      .map-protection-copy{
+        min-width:0}
+        .map-protection-copy>strong{
+          display:flex;
+          align-items:start;
+          gap:var(--space-sm);
+          font-size:var(--text-lg);
+          line-height:1.45;
+          overflow-wrap:anywhere}
+          .map-protection-copy details{
+            font-size:var(--text-sm);
+            margin-top:var(--space-xs)}
+            .map-protection-copy summary{
+              display:flex;
+              gap:var(--space-xs);
+              align-items:start;
+              cursor:help;
+              color:var(--color-muted)}
+              .map-protection-copy details p{
+                margin-top:var(--space-sm)}
+                .map-protection-track{
+                  list-style:none;
+                  margin:0;
+                  padding:0;
+                  display:grid;
+                  grid-template-columns:repeat(4,minmax(0,1fr));
+                  font-size:var(--text-sm);
+                  text-align:center;
+                  align-self:center}
+                  .map-protection-track li{
+                    position:relative;
+                    display:flex;
+                    align-items:center;
+                    flex-direction:column;
+                    gap:var(--space-sm);
+                    min-width:0;
+                    overflow-wrap:anywhere;
+                    color:var(--color-muted)}
+                    .map-protection-track li:not(:last-child):after{
+                      content:'';
+                      position:absolute;
+                      top:7px;
+                      left:calc(50% + 8px);
+                      width:calc(100% - 16px);
+                      height:1px;
+                      background:var(--color-rule-strong)}
+                      .map-step-dot{
+                        width:15px;
+                        height:15px;
+                        border:2px solid var(--color-rule-strong);
+                        border-radius:50%;
+                        background:var(--color-surface)}
+                        .confirmed .map-step-dot{
+                          background:var(--color-accent);
+                          border-color:var(--color-accent)}
+                          .map-protection-numbers dl{
+                            display:flex;
+                            justify-content:space-between;
+                            gap:var(--space-md);
+                            margin:var(--space-sm) 0 0}
+                            .map-protection-numbers dt{
+                              font-size:var(--text-sm);
+                              color:var(--color-muted)}
+                              .map-protection-numbers dd{
+                                font-size:var(--text-lg);
+                                font-weight:600;
+                                margin:0;
+                                font-variant-numeric:tabular-nums}
+                                .flowmap-redesign{
+                                  min-width:0}
+                                  .map-display-toolbar{
+                                    display:flex;
+                                    justify-content:space-between;
+                                    align-items:center;
+                                    gap:var(--space-md);
+                                    flex-wrap:wrap;
+                                    margin-bottom:var(--space-md);
+                                    font-size:var(--text-sm)}
+                                    .map-display-toolbar>label{
+                                      display:flex;
+                                      align-items:center;
+                                      gap:var(--space-sm);
+                                      min-width:0;
+                                      max-width:100%}
+                                      .map-display-toolbar select{
+                                        min-width:0;
+                                        max-width:100%;
+                                        width:220px}
+                                        .map-hide-loopback input{
+                                          min-height:0;
+                                          accent-color:var(--color-accent);
+                                          width:16px;
+                                          height:16px}
+                                          .map-hide-loopback{
+                                            min-height:32px}
+                                            .map-panes{
+                                              display:grid;
+                                              grid-template-columns:minmax(240px,340px) minmax(0,1fr);
+                                              gap:var(--space-md);
+                                              align-items:start}
+                                              .map-panes>.surface{
+                                                min-width:0}
+                                                .map-app-list h2{
+                                                  padding:var(--space-md)}
+                                                  .map-app-list ul{
+                                                    list-style:none;
+                                                    padding:0;
+                                                    margin:0;
+                                                    max-height:calc(100vh - 360px);
+                                                    min-height:56px;
+                                                    overflow-y:auto}
+                                                    .map-app-row{
+                                                      display:flex;
+                                                      align-items:center;
+                                                      gap:var(--space-sm);
+                                                      width:100%;
+                                                      min-height:56px;
+                                                      text-align:left;
+                                                      padding:var(--space-sm) var(--space-md);
+                                                      border-top:1px solid var(--color-rule);
+                                                      border-left:3px solid transparent;
+                                                      white-space:normal;
+                                                      transition:background var(--dur-micro) var(--ease-out)}
+                                                      .map-app-row[aria-current=true]{
+                                                        background:var(--color-accent-soft);
+                                                        border-left-color:var(--color-accent)}
+                                                        .map-app-row:focus-visible,.map-destination-row:focus-visible{
+                                                          outline-offset:-3px}
+                                                          .map-app-copy{
+                                                            flex:1;
+                                                            min-width:0}
+                                                            .map-app-copy>strong{
+                                                              display:block;
+                                                              overflow:hidden;
+                                                              text-overflow:ellipsis;
+                                                              white-space:nowrap;
+                                                              font-weight:600;
+                                                              font-size:var(--text-body)}
+                                                              .map-app-intents{
+                                                                display:flex;
+                                                                gap:var(--space-sm);
+                                                                align-items:center;
+                                                                font-size:var(--text-sm);
+                                                                color:var(--color-muted);
+                                                                flex-wrap:wrap}
+                                                                .map-app-count,.map-merged{
+                                                                  font-variant-numeric:tabular-nums;
+                                                                  flex-shrink:0}
+                                                                  .map-intent-bar{
+                                                                    display:inline-flex;
+                                                                    width:72px;
+                                                                    height:6px;
+                                                                    overflow:hidden;
+                                                                    border-radius:3px;
+                                                                    flex-shrink:0}
+                                                                    .map-intent-bar .intent-allow{
+                                                                      background:var(--color-allow)}
+                                                                      .map-intent-bar .intent-block{
+                                                                        background:var(--color-block)}
+                                                                        .map-intent-bar .intent-ask{
+                                                                          background:var(--color-ask)}
+                                                                          .map-intent-bar .intent-none{
+                                                                            background:var(--color-rule-strong)}
+                                                                            .map-selected-app{
+                                                                              display:flex;
+                                                                              gap:var(--space-sm);
+                                                                              align-items:center;
+                                                                              padding:var(--space-md);
+                                                                              min-width:0}
+                                                                              .map-selected-app>div{
+                                                                                min-width:0;
+                                                                                flex:1}
+                                                                                .map-selected-app h2{
+                                                                                  font-size:var(--text-xl);
+                                                                                  overflow-wrap:anywhere}
+                                                                                  .map-app-path{
+                                                                                    display:block;
+                                                                                    overflow:hidden;
+                                                                                    text-overflow:ellipsis;
+                                                                                    white-space:nowrap;
+                                                                                    font-family:var(--font-code)}
+                                                                                    .map-selected-app p{
+                                                                                      font-size:var(--text-sm);
+                                                                                      margin-top:var(--space-xs)}
+                                                                                      .map-intent-legend{
+                                                                                        display:flex;
+                                                                                        gap:var(--space-sm) var(--space-md);
+                                                                                        flex-wrap:wrap;
+                                                                                        padding:0 var(--space-md) var(--space-sm);
+                                                                                        font-size:var(--text-sm)}
+                                                                                        .map-intent-legend>span,.map-intent-chip>span,.map-intent-chip small{
+                                                                                          display:inline-flex;
+                                                                                          align-items:center;
+                                                                                          gap:var(--space-xs)}
+                                                                                          .intent-text-allow{
+                                                                                            color:var(--color-allow)}
+                                                                                            .intent-text-block{
+                                                                                              color:var(--color-block)}
+                                                                                              .intent-text-ask{
+                                                                                                color:var(--color-ask)}
+                                                                                                .map-class-help{
+                                                                                                  padding:0 var(--space-md) var(--space-md);
+                                                                                                  font-size:var(--text-sm)}
+                                                                                                  .map-class-help summary{
+                                                                                                    display:flex;
+                                                                                                    align-items:center;
+                                                                                                    gap:var(--space-xs);
+                                                                                                    min-height:32px;
+                                                                                                    cursor:pointer;
+                                                                                                    color:var(--color-muted)}
+                                                                                                    .map-class-help p{
+                                                                                                      padding-top:var(--space-sm);
+                                                                                                      overflow-wrap:anywhere}
+                                                                                                      .map-destination-group{
+                                                                                                        border-top:1px solid var(--color-rule)}
+                                                                                                        .map-destination-group h3{
+                                                                                                          font-size:var(--text-body)}
+                                                                                                          .map-destination-group h3 button{
+                                                                                                            display:flex;
+                                                                                                            align-items:center;
+                                                                                                            gap:var(--space-sm);
+                                                                                                            width:100%;
+                                                                                                            text-align:left;
+                                                                                                            padding:var(--space-sm) var(--space-md);
+                                                                                                            min-height:38px;
+                                                                                                            white-space:normal}
+                                                                                                            .map-destination-group ul{
+                                                                                                              list-style:none;
+                                                                                                              margin:0;
+                                                                                                              padding:0}
+                                                                                                              .map-destination-row{
+                                                                                                                display:flex;
+                                                                                                                align-items:center;
+                                                                                                                gap:var(--space-sm);
+                                                                                                                width:100%;
+                                                                                                                min-height:44px;
+                                                                                                                text-align:left;
+                                                                                                                padding:var(--space-sm) var(--space-md);
+                                                                                                                border-top:1px solid var(--color-rule);
+                                                                                                                border-left:4px solid var(--color-rule-strong);
+                                                                                                                white-space:normal;
+                                                                                                                transition:background var(--dur-micro) var(--ease-out)}
+                                                                                                                .map-destination-row.intent-allow{
+                                                                                                                  border-left-color:var(--color-allow)}
+                                                                                                                  .map-destination-row.intent-block{
+                                                                                                                    border-left-color:var(--color-block)}
+                                                                                                                    .map-destination-row.intent-ask{
+                                                                                                                      border-left-color:var(--color-ask)}
+                                                                                                                      .map-destination-row[aria-pressed=true]{
+                                                                                                                        background:var(--color-accent-soft)}
+                                                                                                                        .map-endpoint{
+                                                                                                                          min-width:0;
+                                                                                                                          flex:1}
+                                                                                                                          .map-endpoint strong{
+                                                                                                                            font-family:var(--font-code);
+                                                                                                                            font-variant-numeric:tabular-nums;
+                                                                                                                            font-size:var(--text-sm);
+                                                                                                                            font-weight:500;
+                                                                                                                            overflow-wrap:anywhere;
+                                                                                                                            display:block}
+                                                                                                                            .map-endpoint>span{
+                                                                                                                              display:flex;
+                                                                                                                              align-items:center;
+                                                                                                                              gap:var(--space-xs);
+                                                                                                                              flex-wrap:wrap;
+                                                                                                                              font-size:var(--text-sm);
+                                                                                                                              color:var(--color-muted)}
+                                                                                                                              .map-intent-chip{
+                                                                                                                                display:flex;
+                                                                                                                                flex-direction:column;
+                                                                                                                                gap:var(--space-xs);
+                                                                                                                                font-size:var(--text-sm);
+                                                                                                                                color:var(--color-muted);
+                                                                                                                                max-width:45%}
+                                                                                                                                .map-merged{
+                                                                                                                                  font-size:var(--text-sm)}
+                                                                                                                                  .map-row-count{
+                                                                                                                                    font-size:var(--text-sm);
+                                                                                                                                    padding:var(--space-xs) var(--space-md)}
+                                                                                                                                    .map-more{
+                                                                                                                                      margin:var(--space-sm) var(--space-md) var(--space-md);
+                                                                                                                                      white-space:normal}
+                                                                                                                                      .map-hidden-apps,.map-no-matches{
+                                                                                                                                        padding:var(--space-md);
+                                                                                                                                        font-size:var(--text-sm)}
+                                                                                                                                        .map-hidden-apps{
+                                                                                                                                          border-top:1px solid var(--color-rule)}
+                                                                                                                                          .map-hidden-apps button,.map-no-matches button{
+                                                                                                                                            margin-top:var(--space-sm);
+                                                                                                                                            white-space:normal}
+                                                                                                                                            .map-editor .save-status{
+                                                                                                                                              font-size:var(--text-sm);
+                                                                                                                                              color:var(--color-ink)}
+                                                                                                                                              @media(max-width:1550px){
+                                                                                                                                                .map-protection{
+                                                                                                                                                  grid-template-columns:minmax(0,1fr) auto}
+                                                                                                                                                  .map-protection-track{
+                                                                                                                                                    grid-column:1;
+                                                                                                                                                    grid-row:2}
+                                                                                                                                                    .map-protection-numbers{
+                                                                                                                                                      grid-column:2;
+                                                                                                                                                      grid-row:1/3}
+                                                                                                                                                    }
+                                                                                                                                                    @media(max-width:1250px){
+                                                                                                                                                      .workspace-map .map-workspace{
+                                                                                                                                                        grid-template-columns:minmax(0,1fr)}
+                                                                                                                                                        .workspace-map .panel-left>.inspector,.workspace-map .panel-left>.map-main{
+                                                                                                                                                          grid-column:auto;
+                                                                                                                                                          grid-row:auto}
+                                                                                                                                                          .workspace-map .inspector{
+                                                                                                                                                            position:static}
+                                                                                                                                                          }
+                                                                                                                                                          @media(max-width:850px){
+                                                                                                                                                            .map-panes{
+                                                                                                                                                              grid-template-columns:minmax(0,1fr)}
+                                                                                                                                                              .map-app-list ul{
+                                                                                                                                                                max-height:280px}
+                                                                                                                                                                .map-selected-app{
+                                                                                                                                                                  position:sticky;
+                                                                                                                                                                  top:0;
+                                                                                                                                                                  background:var(--color-surface);
+                                                                                                                                                                  z-index:1}
+                                                                                                                                                                  .map-protection{
+                                                                                                                                                                    grid-template-columns:minmax(0,1fr)}
+                                                                                                                                                                    .map-protection-track,.map-protection-numbers{
+                                                                                                                                                                      grid-column:auto;
+                                                                                                                                                                      grid-row:auto}
+                                                                                                                                                                      .map-protection-numbers{
+                                                                                                                                                                        display:flex;
+                                                                                                                                                                        justify-content:space-between;
+                                                                                                                                                                        align-items:center;
+                                                                                                                                                                        gap:var(--space-md);
+                                                                                                                                                                        flex-wrap:wrap}
+                                                                                                                                                                        .map-protection-numbers dl{
+                                                                                                                                                                          margin:0;
+                                                                                                                                                                          flex:1}
+                                                                                                                                                                          .map-selected-app h2{
+                                                                                                                                                                            font-size:var(--text-lg)}
+                                                                                                                                                                          }
+                                                                                                                                                                          @media(max-width:600px){
+                                                                                                                                                                            .map-display-toolbar>label{
+                                                                                                                                                                              width:100%}
+                                                                                                                                                                              .map-display-toolbar select{
+                                                                                                                                                                                flex:1;
+                                                                                                                                                                                width:0}
+                                                                                                                                                                                .map-destination-row{
+                                                                                                                                                                                  flex-wrap:wrap}
+                                                                                                                                                                                  .map-intent-chip{
+                                                                                                                                                                                    max-width:100%}
+                                                                                                                                                                                    .map-protection-copy>strong{
+                                                                                                                                                                                      font-size:var(--text-body)}
+                                                                                                                                                                                      .map-protection-numbers{
+                                                                                                                                                                                        flex-direction:column;
+                                                                                                                                                                                        align-items:stretch}
+                                                                                                                                                                                        .map-protection-track{
+                                                                                                                                                                                          font-size:var(--text-xs)}
+                                                                                                                                                                                        }
+                                                                                                                                                                                        @media(prefers-reduced-motion:reduce){
+                                                                                                                                                                                          .map-app-row,.map-destination-row{
+                                                                                                                                                                                            transition:none}
+                                                                                                                                                                                          }
+                                                                                                                                                                                          /* Keep absolute screen-reader labels inside the recent-history scroll container. */
+                                                                                                                                                                                          .workspace-map .table-scroll{
+                                                                                                                                                                                            position:relative;
+                                                                                                                                                                                            max-width:100%}
+                                                                                                                                                                                            .map-destination-pane{
+                                                                                                                                                                                              max-height:calc(100vh - 360px);
+                                                                                                                                                                                              min-height:280px;
+                                                                                                                                                                                              overflow-y:auto}
+                                                                                                                                                                                              @media(max-width:850px){
+                                                                                                                                                                                                .map-destination-pane{
+                                                                                                                                                                                                  max-height:600px}
+                                                                                                                                                                                                }
+                                                                                                                                                                                                .map-headline-parts{
+                                                                                                                                                                                                  display:flex;
+                                                                                                                                                                                                  flex-wrap:wrap;
+                                                                                                                                                                                                  gap:0 var(--space-xs);
+                                                                                                                                                                                                  min-width:0;
+                                                                                                                                                                                                  text-wrap:pretty}
+                                                                                                                                                                                                  .map-step-label{
+                                                                                                                                                                                                    display:flex;
+                                                                                                                                                                                                    flex-wrap:wrap;
+                                                                                                                                                                                                    justify-content:center}
+                                                                                                                                                                                                    .map-step-label>span{
+                                                                                                                                                                                                      white-space:nowrap}

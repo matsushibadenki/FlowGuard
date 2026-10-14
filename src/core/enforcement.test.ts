@@ -1,8 +1,10 @@
 import {describe,it,expect} from 'vitest';
+const signing = {authority:'developer' as const,teamId:'ABCDE12345',identifier:'com.test.app'};
+const subject = 'signed:v1:developer:ABCDE12345:com.test.app';
 import {protectionLabel,defaultExtension,ruleApplied,policyNotice,extensionLabel} from './enforcement';
 import {dictionaries} from './i18n';
 import type {Rule} from './types';
-const rule:Rule={id:'r',app:'Test',appKey:'/test',destination:'example.com',port:443,direction:'both',action:'block',source:'live',updatedAt:1};
+const rule:Rule={identity:signing,id:'r',app:'Test',appKey:subject,destination:'example.com',port:443,direction:'both',action:'block',source:'live',updatedAt:1};
 describe('provider acknowledgement UI contract',()=>{
  it('requires current applied state and a live rule receipt',()=>{
   const applied={...defaultExtension,stage:'applied',appliedRuleIds:['r']};

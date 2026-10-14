@@ -1,8 +1,10 @@
+mod asks;
 mod discovery;
 mod enforcement;
 mod extension;
 #[cfg(feature = "gpu")]
 pub mod gpu;
+mod identity;
 mod inventory;
 mod model;
 mod names;
@@ -19,6 +21,34 @@ use model::{Command, Rule, Snapshot};
 use state::SharedState;
 use tauri::{Emitter, Manager};
 
+#[tauri::command]
+async fn answer_ask(
+    app: tauri::AppHandle,
+    request_id: String,
+    instance_id: String,
+    policy_id: String,
+    action: String,
+) -> Result<Snapshot, String> {
+    let executable = std::env::current_exe().map_err(|_| "bundle_path_unavailable")?;
+    let contents = executable
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or("bundle_path_unavailable")?
+        .to_path_buf();
+    let (op, answer, snapshot) =
+        app.state::<SharedState>()
+            .claim_ask(&request_id, &instance_id, &policy_id, &action)?;
+    let _ = app.emit("state-changed", snapshot);
+    let sent = answer.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || asks::answer(&contents, &sent))
+        .await
+        .unwrap_or_else(|_| Err("ask_answer_unknown".into()));
+    let snapshot = app
+        .state::<SharedState>()
+        .finish_ask_answer(op, &answer, result)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
 #[tauri::command]
 async fn check_update(app: tauri::AppHandle) -> Result<Snapshot, String> {
     updates::check(app, false).await
@@ -625,6 +655,20 @@ pub fn run() {
                 .map_err(std::io::Error::other)?;
             app.manage(HostRuntime(runtime));
             updates::schedule(app.handle().clone());
+            let ask_handle = app.handle().clone();
+            let ask_contents = contents.to_path_buf();
+            std::thread::spawn(move || loop {
+                if let Ok((op, instance)) = ask_handle.state::<SharedState>().begin_ask_poll() {
+                    let result = asks::poll(&ask_contents);
+                    if let Ok(snapshot) = ask_handle
+                        .state::<SharedState>()
+                        .finish_ask_poll(op, &instance, result)
+                    {
+                        let _ = ask_handle.emit("state-changed", snapshot);
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            });
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 let (connections, firewall) = observer::observe();
@@ -671,6 +715,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            answer_ask,
             check_update,
             download_update,
             cancel_update,

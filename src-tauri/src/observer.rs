@@ -148,6 +148,7 @@ pub fn parse_lsof(text: &str, timestamp: u64) -> Vec<Connection> {
                     if let Some((destination, port)) = split_endpoint(remote) {
                         if pid > 0 && !app.is_empty() {
                             result.push(Connection {
+                                identity: None,
                                 id: format!("{pid}:{protocol}:{value}"),
                                 app: app.clone(),
                                 app_key: String::new(),
@@ -208,7 +209,12 @@ pub fn observe() -> (Vec<Connection>, FirewallStatus) {
         Err(_) => (vec![], Some("observer_failed".into())),
     };
     let mut paths = HashMap::new();
+    let mut identities = HashMap::new();
     for c in &mut connections {
+        c.identity = identities
+            .entry(c.pid)
+            .or_insert_with(|| crate::identity::for_pid(c.pid))
+            .clone();
         c.app_key = paths
             .entry(c.pid)
             .or_insert_with(|| executable(c.pid))

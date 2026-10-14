@@ -1,20 +1,52 @@
-import {Globe,Network,ChevronRight} from 'lucide-react';
-import type {Connection,Snapshot} from '../core/types';
-import {ruleFor} from '../core/rules';
-import {AppIcon,Brand,Empty,Notice,type T} from './ui';
-export function FlowMap({snapshot,connections,t,select}:{snapshot:Snapshot;connections:Connection[];t:T;select:(c:Connection)=>void}){
- const visible=connections.slice(0,6);const height=Math.max(420,visible.length*100+42);
- const mode=snapshot.document.preferences.mode;
- function action(c:Connection){return ruleFor(snapshot.document.rules,c,mode)?.action??'none';}
- return <section className="map-surface" aria-label={t('map')}><div className="map-head"><strong>{t('yourMac')}</strong><strong>{t('firewallRules')}</strong><strong>{t('destinations')}</strong></div>
- {visible.length===0?<Empty t={t}/>:<div className="map-canvas" style={{'--map-height':`${height}px`} as React.CSSProperties}>
- <svg className="routes" viewBox={`0 0 800 ${height}`} preserveAspectRatio="none" aria-hidden="true"><defs>{['allow','block','ask','none'].map(a=><marker key={a} id={`arrow-${a}`} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" className={`arrow ${a}`}/></marker>)}</defs>
- {visible.map((c,i)=>{const y=72+i*100;const mid=height/2;return <g key={c.id} className={`route ${action(c)} ${snapshot.selectedId===c.id?'selected':''}`}><path d={`M 190 ${y} C 295 ${y}, 300 ${mid}, 355 ${mid}`} markerEnd={`url(#arrow-${action(c)})`}/><path d={`M 445 ${mid} C 525 ${mid}, 530 ${y}, 610 ${y}`} markerEnd={`url(#arrow-${action(c)})`}/></g>;})}</svg>
- <div className="map-nodes">{visible.map(c=><button key={c.id} className={`map-node ${snapshot.selectedId===c.id?'selected':''}`} onClick={()=>select(c)} aria-pressed={snapshot.selectedId===c.id}><AppIcon app={c.app}/><span><strong>{c.app}</strong><small>{t('observed')} · TCP</small></span><ChevronRight className="node-chevron" size={15}/></button>)}</div>
- <div className="map-center"><div className="center-orbit"><Brand large/><strong>FlowGuard</strong><small>{t('firewallRules')}</small></div></div>
- <div className="map-destinations">{visible.map(c=><button key={c.id} className={`destination-node ${snapshot.selectedId===c.id?'selected':''}`} onClick={()=>select(c)}><span className="destination-icon">{c.destination.startsWith('192.168.')||c.destination.startsWith('127.')?<Network size={24} strokeWidth={1.5}/>:<Globe size={25} strokeWidth={1.5}/>}</span><span><strong title={c.destination}>{c.destination}</strong><small>{c.port} · {c.protocol}</small></span></button>)}</div>
- </div>}
- <div className="map-footer"><div className="legend">{(['allow','block','ask','none'] as const).map(a=><span key={a}><i className={`legend-dot ${a}`}/>{t(a==='none'?'noRule':`${a}Intent`)}</span>)}</div><Notice snapshot={snapshot} t={t} compact/></div>
- {connections.length>6&&<p className="map-overflow">+{connections.length-6} · {t('moreConnections')}</p>}
- <details className="map-help"><summary>{t('learn')}</summary><p>{t('learnHelp')}</p></details></section>;
+// パス: src/components/FlowMap.tsx
+import {useMemo, useState} from 'react';
+import type {Connection, Snapshot} from '../core/types';
+import {buildAppRows, representativeConnection, type AppRow, type SortKey} from '../core/mapModel';
+import {classifyAddress} from '../core/destinations';
+import {AppList} from './AppList';
+import {DestinationPane} from './DestinationPane';
+import {Empty, type T} from './ui';
+export function FlowMap({snapshot, connections, t, select, clearFilters}: {
+  snapshot: Snapshot; connections: Connection[]; t: T; select: (c: Connection) => void; clearFilters?: () => void;
+}) {
+  const [hideLoopback, setHideLoopback] = useState(true);
+  const [sort, setSort] = useState<SortKey>('connections');
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [limits, setLimits] = useState<Record<string, number>>({});
+  const model = useMemo(() => buildAppRows({groups: snapshot.applications, connections,
+    rules: snapshot.document.rules, mode: snapshot.document.preferences.mode, extension: snapshot.extension,
+    hideLoopback, sort, locale: snapshot.document.preferences.locale}),
+  [snapshot.applications, connections, snapshot.document.rules, snapshot.document.preferences.mode,
+    snapshot.document.preferences.locale, snapshot.extension, hideLoopback, sort]);
+  const byId = useMemo(() => new Map(connections.map(c => [c.id, c])), [connections]);
+  const selectedGroup = snapshot.applications.find(group => group.connectionIds.includes(snapshot.selectedId ?? ''));
+  const active = model.rows.find(row => row.id === selectedGroup?.id) ?? model.rows[0];
+  const activeIds = new Set(snapshot.applications.find(group => group.id === active?.id)?.connectionIds ?? []);
+  const hiddenConnections = hideLoopback ? connections.filter(c =>
+    activeIds.has(c.id) && classifyAddress(c.destination) === 'loopback').length : 0;
+  function selectApp(row: AppRow) {
+    const c = representativeConnection(row.destinations.flatMap(d => d.connectionIds.flatMap(id => {
+      const c = byId.get(id); return c ? [c] : [];
+    })));
+    if (c) select(c);
+  }
+  return <section className="flowmap-redesign" aria-label={t('map')}>
+    <div className="map-display-toolbar"><label>{t('sortBy')}<select value={sort} onChange={e => setSort(e.target.value as SortKey)}>
+      <option value="connections">{t('sortConnections')}</option><option value="name">{t('sortName')}</option>
+      <option value="attention">{t('sortAttention')}</option></select></label>
+      <label className="map-hide-loopback"><input type="checkbox" checked={hideLoopback} onChange={e => setHideLoopback(e.target.checked)}/>{t('hideLoopback')}</label>
+    </div>
+    {snapshot.connections.length === 0 ? <div className="surface"><Empty t={t}/></div> : <>
+      {model.rows.length === 0 && <div className="map-no-matches surface"><p>{t('noMatches')}</p>
+        {clearFilters && <button className="secondary-button" onClick={clearFilters}>{t('clearFilters')}</button>}</div>}
+      <div className="map-panes"><AppList rows={model.rows} activeId={active?.id} select={selectApp} t={t}
+        hiddenApps={model.hiddenLoopbackOnlyApps} showHidden={() => setHideLoopback(false)}/>
+        <DestinationPane row={active} selectedId={snapshot.selectedId} t={t} expanded={expanded} limits={limits}
+          select={row => {const c = byId.get(row.representativeId); if (c) select(c);}}
+          toggle={(key, current) => setExpanded(value => ({...value, [key]: !current}))}
+          showMore={(key, current) => setLimits(value => ({...value, [key]: current + 50}))}
+          hiddenConnections={hiddenConnections} showHidden={() => setHideLoopback(false)}/>
+      </div>
+    </>}
+  </section>;
 }

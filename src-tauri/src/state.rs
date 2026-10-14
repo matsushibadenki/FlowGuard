@@ -6,6 +6,7 @@ pub struct SharedState {
     _document_lock: fs::File,
 }
 pub struct Session {
+    pub asks: crate::asks::Machine,
     pub updates: crate::updates::Machine,
     pub services: crate::services::Snapshot,
     services_operation: u64,
@@ -60,7 +61,8 @@ impl SharedState {
             return Err("Invalid saved rules".into());
         }
         let p = &document.preferences;
-        if !["ja", "en", "zh-CN"].contains(&p.locale.as_str())
+        if !["allow", "block"].contains(&p.ask_timeout_action.as_str())
+            || !["ja", "en", "zh-CN"].contains(&p.locale.as_str())
             || ![
                 "map",
                 "apps",
@@ -83,6 +85,7 @@ impl SharedState {
             path,
             _document_lock: document_lock,
             inner: Mutex::new(Session {
+                asks: Default::default(),
                 updates: Default::default(),
                 services: Default::default(),
                 services_operation: 0,
@@ -153,7 +156,11 @@ impl SharedState {
         let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
         if matches!(
             &command,
-            Command::SaveRule { .. } | Command::DeleteRule { .. } | Command::RestoreRules { .. }
+            Command::SetAskTimeoutAction { .. }
+                | Command::SaveRule { .. }
+                | Command::MigrateRule { .. }
+                | Command::DeleteRule { .. }
+                | Command::RestoreRules { .. }
         ) {
             if let Some(expected) = expected_rules {
                 if expected != s.document.rules.as_slice() {
@@ -167,6 +174,18 @@ impl SharedState {
             return Err("update_installing".into());
         }
         match command {
+            Command::SetAskTimeoutAction { action } => {
+                if !["allow", "block"].contains(&action.as_str()) {
+                    return Err("invalid_rule".into());
+                }
+                s.document.preferences.ask_timeout_action = action.clone();
+                for rule in &mut s.document.rules {
+                    if rule.action == "ask" {
+                        rule.timeout_action = action.clone();
+                        rule.updated_at = now();
+                    }
+                }
+            }
             Command::SetAutoUpdates { enabled } => s.document.preferences.auto_updates = enabled,
             Command::Select { id } => {
                 if !s.visible().iter().any(|c| c.id == id) {
@@ -229,13 +248,29 @@ impl SharedState {
                     return Err("application_identity_unavailable".into());
                 }
                 let source = s.document.preferences.mode.clone();
+                let identity = if source == "live" {
+                    let fresh = crate::identity::for_pid(c.pid)
+                        .ok_or("application_identity_unavailable")?;
+                    if c.identity.as_ref() != Some(&fresh) {
+                        return Err("application_identity_changed".into());
+                    }
+                    Some(fresh)
+                } else {
+                    None
+                };
+                let subject = identity
+                    .as_ref()
+                    .map(|i| i.key())
+                    .unwrap_or_else(|| c.app_key.clone());
                 let id = format!(
                     "{}:{}:{}:{}:{}",
-                    source, c.app_key, c.destination, c.port, direction
+                    source, subject, c.destination, c.port, direction
                 );
                 let rule = Rule {
+                    timeout_action: s.document.preferences.ask_timeout_action.clone(),
+                    identity,
                     id: id.clone(),
-                    app_key: c.app_key,
+                    app_key: subject,
                     app: c.app,
                     destination: c.destination,
                     port: c.port,
@@ -244,7 +279,19 @@ impl SharedState {
                     updated_at: now(),
                     source,
                 };
-                if let Some(index) = s.document.rules.iter().position(|r| r.id == id) {
+                if let Some(index) = s.document.rules.iter().position(|r| {
+                    r.source == rule.source
+                        && r.destination == rule.destination
+                        && r.port == rule.port
+                        && r.direction == rule.direction
+                        && if rule.source == "live" {
+                            r.identity.is_some() && r.identity == rule.identity
+                        } else {
+                            r.app_key == rule.app_key
+                        }
+                }) {
+                    let mut rule = rule;
+                    rule.id = s.document.rules[index].id.clone();
                     s.document.rules[index] = rule;
                 } else {
                     if s.document.rules.len() >= 2000 {
@@ -252,6 +299,45 @@ impl SharedState {
                     }
                     s.document.rules.push(rule);
                 }
+            }
+            Command::MigrateRule { id, connection_id } => {
+                let index = s
+                    .document
+                    .rules
+                    .iter()
+                    .position(|r| r.id == id)
+                    .ok_or("connection_expired")?;
+                let legacy = s.document.rules[index].clone();
+                let c = s
+                    .connections
+                    .iter()
+                    .find(|c| c.id == connection_id)
+                    .ok_or("connection_expired")?;
+                if legacy.source != "live"
+                    || legacy.identity.is_some()
+                    || legacy.app_key != c.app_key
+                    || legacy.destination != c.destination
+                    || legacy.port != c.port
+                {
+                    return Err("migration_conflict".into());
+                }
+                let identity =
+                    crate::identity::for_pid(c.pid).ok_or("application_identity_unavailable")?;
+                if c.identity.as_ref() != Some(&identity) {
+                    return Err("application_identity_changed".into());
+                }
+                if s.document.rules.iter().any(|r| {
+                    r.source == "live"
+                        && r.identity.as_ref() == Some(&identity)
+                        && r.destination == legacy.destination
+                        && r.port == legacy.port
+                        && r.direction == legacy.direction
+                }) {
+                    return Err("migration_conflict".into());
+                }
+                s.document.rules[index].app_key = identity.key();
+                s.document.rules[index].identity = Some(identity);
+                s.document.rules[index].updated_at = now();
             }
             Command::DeleteRule { id } => s.document.rules.retain(|r| r.id != id),
             Command::RestoreRules { rules } => {
@@ -281,7 +367,14 @@ impl SharedState {
     ) -> Result<Snapshot, String> {
         let mut session = self.inner.lock().map_err(|_| "state_unavailable")?;
         let rules = session.document.rules.clone();
+        let before = session.extension.status.instance_id.clone();
         change(&mut session.extension, &rules);
+        if before != session.extension.status.instance_id
+            || !session.extension.status.signed
+            || !["ready", "applied", "stale"].contains(&session.extension.status.stage.as_str())
+        {
+            session.asks.invalidate();
+        }
         session.revision += 1;
         Ok(session.snapshot())
     }
@@ -298,7 +391,7 @@ impl SharedState {
             .document
             .rules
             .iter()
-            .filter(|r| r.source == "live")
+            .filter(|r| crate::model::enforceable(r))
             .cloned()
             .collect();
         session.revision += 1;
@@ -313,6 +406,7 @@ impl SharedState {
             crate::extension::policy_payload(&session.document.rules)?;
         }
         let operation = session.extension.begin(stage)?;
+        session.asks.invalidate();
         if ["activating", "applying"].contains(&stage) {
             let rules = session.document.rules.clone();
             session.extension.requested(&rules);
@@ -324,11 +418,77 @@ impl SharedState {
                 .document
                 .rules
                 .iter()
-                .filter(|r| r.source == "live")
+                .filter(|r| crate::model::enforceable(r))
                 .cloned()
                 .collect(),
             session.snapshot(),
         ))
+    }
+    pub fn begin_ask_poll(&self) -> Result<(u64, String), String> {
+        let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if s.updates.snapshot.stage == "installing"
+            || s.extension.status.busy
+            || !s.extension.status.signed
+            || !["ready", "applied", "stale"].contains(&s.extension.status.stage.as_str())
+        {
+            return Err("ask_unavailable".into());
+        }
+        let instance = s
+            .extension
+            .status
+            .instance_id
+            .clone()
+            .ok_or("ask_unavailable")?;
+        let op = s.asks.begin_poll().ok_or("ask_unavailable")?;
+        Ok((op, instance))
+    }
+    pub fn finish_ask_poll(
+        &self,
+        op: u64,
+        instance: &str,
+        result: Result<crate::asks::Envelope, String>,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if s.extension.status.instance_id.as_deref() != Some(instance)
+            || !s.asks.polled(op, instance, result)
+        {
+            return Err("ask_stale".into());
+        }
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn claim_ask(
+        &self,
+        id: &str,
+        instance: &str,
+        policy: &str,
+        action: &str,
+    ) -> Result<(u64, crate::asks::Answer, Snapshot), String> {
+        let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if s.updates.snapshot.stage == "installing"
+            || s.extension.status.busy
+            || !s.extension.status.signed
+            || !["ready", "applied", "stale"].contains(&s.extension.status.stage.as_str())
+            || s.extension.status.instance_id.as_deref() != Some(instance)
+        {
+            return Err("ask_unavailable".into());
+        }
+        let (op, answer) = s.asks.claim(id, instance, policy, action)?;
+        s.revision += 1;
+        Ok((op, answer, s.snapshot()))
+    }
+    pub fn finish_ask_answer(
+        &self,
+        op: u64,
+        answer: &crate::asks::Answer,
+        result: Result<crate::asks::Reply, String>,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if !s.asks.answered(op, answer, result) {
+            return Err("ask_stale".into());
+        }
+        s.revision += 1;
+        Ok(s.snapshot())
     }
     pub fn lan_selection(&self, id: &str) -> Result<Snapshot, String> {
         let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
@@ -756,6 +916,7 @@ impl Session {
         let connections = self.visible();
         let layout = renderer::layout(&connections);
         Snapshot {
+            asks: self.asks.snapshot.clone(),
             security: crate::security::normalize(
                 &connections,
                 self.document.preferences.mode == "demo",
@@ -1369,8 +1530,14 @@ mod tests {
         s.extension_change(|extension, _| extension.configure(true, true, true))
             .unwrap();
         let rule = Rule {
+            timeout_action: "ask".into(),
+            identity: Some(crate::identity::SigningIdentity {
+                authority: "developer".into(),
+                team_id: "ABCDE12345".into(),
+                identifier: "com.test.app".into(),
+            }),
             id: "r".into(),
-            app_key: "/test".into(),
+            app_key: "signed:v1:developer:ABCDE12345:com.test.app".into(),
             app: "Test".into(),
             destination: "1.2.3.4".into(),
             port: 443,
@@ -1388,7 +1555,7 @@ mod tests {
         assert_eq!(s.snapshot().unwrap().revision, previous);
         assert!(!s.snapshot().unwrap().extension.busy);
         let mut valid = rule.clone();
-        valid.action = "block".into();
+        valid.timeout_action = "block".into();
         let mut demo = rule;
         demo.source = "demo".into();
         demo.id = "demo".into();
@@ -1503,5 +1670,239 @@ mod tests {
             .extension_change(|e, current| e.accepted(new, "restarted".into(), 1, sent, current))
             .unwrap();
         assert!(state.begin_recovery(1000).is_err());
+    }
+    #[test]
+    fn legacy_backup_is_retained_but_never_sent_or_acknowledged() {
+        let state = state();
+        let mut rules = Vec::new();
+        let c = demo_connections().remove(0);
+        rules.push(Rule {
+            timeout_action: "allow".into(),
+            identity: None,
+            id: "legacy".into(),
+            app_key: c.app_key,
+            app: c.app,
+            destination: c.destination,
+            port: c.port,
+            direction: "both".into(),
+            action: "allow".into(),
+            updated_at: 10,
+            source: "live".into(),
+        });
+        state
+            .dispatch(Command::RestoreRules {
+                rules: rules.clone(),
+            })
+            .unwrap();
+        state
+            .extension_change(|e, _| e.configure(true, true, true))
+            .unwrap();
+        let (_, sent, snapshot) = state.begin_extension("applying").unwrap();
+        assert!(sent.is_empty());
+        assert_eq!(snapshot.document.rules, rules);
+        assert_eq!(
+            crate::extension::policy_payload(&rules).unwrap(),
+            br#"{"rules":[]}"#
+        );
+        let path = state.path.clone();
+        drop(state);
+        let reopened = SharedState::load(path).unwrap().snapshot().unwrap();
+        assert_eq!(reopened.document.rules, rules);
+    }
+    #[test]
+    fn unsigned_or_missing_process_cannot_save_or_migrate() {
+        let state = state();
+        let mut c = demo_connections().remove(0);
+        c.pid = 0;
+        c.identity = None;
+        state.inner.lock().unwrap().connections = vec![c.clone()];
+        let legacy = Rule {
+            timeout_action: "allow".into(),
+            identity: None,
+            id: "legacy".into(),
+            app_key: c.app_key.clone(),
+            app: c.app,
+            destination: c.destination,
+            port: c.port,
+            direction: "both".into(),
+            action: "block".into(),
+            updated_at: 10,
+            source: "live".into(),
+        };
+        state
+            .dispatch(Command::RestoreRules {
+                rules: vec![legacy.clone()],
+            })
+            .unwrap();
+        assert!(state
+            .dispatch(Command::SaveRule {
+                connection_id: c.id.clone(),
+                action: "allow".into(),
+                direction: "both".into()
+            })
+            .is_err());
+        assert!(state
+            .dispatch(Command::MigrateRule {
+                id: legacy.id.clone(),
+                connection_id: c.id
+            })
+            .is_err());
+        assert_eq!(state.snapshot().unwrap().document.rules, vec![legacy]);
+    }
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires host Security guest access; no OS configuration changes"]
+    fn migration_revalidates_signed_guest_preserves_intent_and_rolls_back() {
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let result = (|| {
+            let identity = crate::identity::for_pid(child.id()).unwrap();
+            let state = state();
+            let mut c = demo_connections().remove(0);
+            c.app_key = "/bin/sleep".into();
+            c.pid = child.id();
+            c.identity = Some(identity.clone());
+            state.inner.lock().unwrap().connections = vec![c.clone()];
+            let legacy = Rule {
+                timeout_action: "allow".into(),
+                identity: None,
+                id: "legacy".into(),
+                app_key: c.app_key.clone(),
+                app: c.app,
+                destination: c.destination.clone(),
+                port: c.port,
+                direction: "outbound".into(),
+                action: "block".into(),
+                updated_at: 10,
+                source: "live".into(),
+            };
+            state
+                .dispatch(Command::RestoreRules {
+                    rules: vec![legacy.clone()],
+                })
+                .unwrap();
+            // The same path is insufficient when the current observed subject changed.
+            state.inner.lock().unwrap().connections[0].identity = None;
+            assert!(state
+                .dispatch(Command::MigrateRule {
+                    id: legacy.id.clone(),
+                    connection_id: c.id.clone()
+                })
+                .is_err());
+            state.inner.lock().unwrap().connections[0].identity = Some(identity.clone());
+            let migrated = state
+                .dispatch(Command::MigrateRule {
+                    id: legacy.id.clone(),
+                    connection_id: c.id.clone(),
+                })
+                .unwrap();
+            let rule = &migrated.document.rules[0];
+            assert_eq!(rule.identity.as_ref(), Some(&identity));
+            assert_eq!(rule.app_key, identity.key());
+            assert_eq!(rule.action, legacy.action);
+            assert_eq!(rule.direction, legacy.direction);
+            assert_eq!(rule.destination, legacy.destination);
+            assert_eq!(rule.id, legacy.id);
+            assert!(!migrated.extension.applied_rule_ids.contains(&rule.id));
+            // Undo safely restores the disabled legacy rule without signature reattachment.
+            state
+                .dispatch(Command::RestoreRules {
+                    rules: vec![legacy.clone()],
+                })
+                .unwrap();
+            // Existing signed scope must not be silently overwritten by migration.
+            let mut signed = rule.clone();
+            signed.id = "existing".into();
+            state
+                .dispatch(Command::RestoreRules {
+                    rules: vec![legacy.clone(), signed],
+                })
+                .unwrap();
+            assert!(state
+                .dispatch(Command::MigrateRule {
+                    id: legacy.id.clone(),
+                    connection_id: c.id.clone()
+                })
+                .is_err());
+            state
+                .dispatch(Command::RestoreRules {
+                    rules: vec![legacy.clone()],
+                })
+                .unwrap();
+            // Force atomic-write failure and ensure the in-memory migration is rolled back.
+            std::fs::create_dir(state.path.with_extension("tmp")).unwrap();
+            assert!(state
+                .dispatch(Command::MigrateRule {
+                    id: legacy.id.clone(),
+                    connection_id: c.id.clone()
+                })
+                .is_err());
+            assert_eq!(state.snapshot().unwrap().document.rules, vec![legacy]);
+            // After the guest exits, an observed signature cannot authorize another save.
+            let _ = child.kill();
+            let _ = child.wait();
+            assert!(state
+                .dispatch(Command::SaveRule {
+                    connection_id: c.id,
+                    action: "allow".into(),
+                    direction: "both".into()
+                })
+                .is_err());
+        })();
+        let _ = child.kill();
+        let _ = child.wait();
+        result
+    }
+    #[test]
+    fn ask_timeout_default_persists_and_updates_intentions_with_conflict_guard() {
+        let state = state();
+        assert_eq!(
+            state
+                .snapshot()
+                .unwrap()
+                .document
+                .preferences
+                .ask_timeout_action,
+            "allow"
+        );
+        state
+            .dispatch(Command::SetMode {
+                mode: "demo".into(),
+            })
+            .unwrap();
+        let c = state.snapshot().unwrap().connections[0].id.clone();
+        state
+            .dispatch(Command::SaveRule {
+                connection_id: c,
+                action: "ask".into(),
+                direction: "both".into(),
+            })
+            .unwrap();
+        let previous = state.snapshot().unwrap().document.rules;
+        let snapshot = state
+            .dispatch_checked(
+                Command::SetAskTimeoutAction {
+                    action: "block".into(),
+                },
+                Some(&previous),
+            )
+            .unwrap();
+        assert_eq!(snapshot.document.preferences.ask_timeout_action, "block");
+        assert_eq!(snapshot.document.rules[0].timeout_action, "block");
+        assert!(state
+            .dispatch_checked(
+                Command::SetAskTimeoutAction {
+                    action: "allow".into()
+                },
+                Some(&previous)
+            )
+            .is_err());
+        let path = state.path.clone();
+        drop(state);
+        let reopened = SharedState::load(path).unwrap().snapshot().unwrap();
+        assert_eq!(reopened.document.preferences.ask_timeout_action, "block");
+        assert!(reopened.extension.applied_rule_ids.is_empty());
     }
 }

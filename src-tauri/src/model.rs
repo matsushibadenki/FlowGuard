@@ -10,6 +10,8 @@ pub fn now() -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Connection {
+    #[serde(default)]
+    pub identity: Option<crate::identity::SigningIdentity>,
     pub id: String,
     pub app: String,
     pub app_key: String,
@@ -24,6 +26,10 @@ pub struct Connection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Rule {
+    #[serde(default = "default_ask_action")]
+    pub timeout_action: String,
+    #[serde(default)]
+    pub identity: Option<crate::identity::SigningIdentity>,
     pub id: String,
     pub app_key: String,
     pub app: String,
@@ -37,6 +43,8 @@ pub struct Rule {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
+    #[serde(default = "default_ask_action")]
+    pub ask_timeout_action: String,
     pub locale: String,
     pub view: String,
     pub panel: String,
@@ -44,12 +52,16 @@ pub struct Preferences {
     #[serde(default = "default_auto_updates")]
     pub auto_updates: bool,
 }
+fn default_ask_action() -> String {
+    "allow".into()
+}
 fn default_auto_updates() -> bool {
     true
 }
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            ask_timeout_action: default_ask_action(),
             locale: "ja".into(),
             view: "map".into(),
             panel: "right".into(),
@@ -127,6 +139,7 @@ pub fn group_applications(connections: &[Connection]) -> Vec<ApplicationGroup> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub asks: crate::asks::Snapshot,
     pub security: crate::security::SecuritySnapshot,
     pub updates: crate::updates::Snapshot,
     pub services: crate::services::Snapshot,
@@ -149,6 +162,9 @@ pub struct Snapshot {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Command {
+    SetAskTimeoutAction {
+        action: String,
+    },
     SetAutoUpdates {
         enabled: bool,
     },
@@ -173,6 +189,11 @@ pub enum Command {
         action: String,
         direction: String,
     },
+    MigrateRule {
+        id: String,
+        #[serde(rename = "connectionId")]
+        connection_id: String,
+    },
     DeleteRule {
         id: String,
     },
@@ -185,14 +206,32 @@ pub enum Command {
 pub fn rule_for<'a>(rules: &'a [Rule], connection: &Connection, source: &str) -> Option<&'a Rule> {
     rules.iter().find(|r| {
         r.source == source
-            && r.app_key == connection.app_key
+            && if source == "demo" {
+                r.app_key == connection.app_key
+            } else {
+                enforceable(r) && r.identity == connection.identity
+            }
             && r.destination == connection.destination
             && r.port == connection.port
             && (r.direction == "both" || r.direction == connection.direction)
     })
 }
+pub fn enforceable(rule: &Rule) -> bool {
+    rule.source == "live"
+        && rule
+            .identity
+            .as_ref()
+            .is_some_and(|i| i.valid() && rule.app_key == i.key())
+}
 pub fn validate_rule(rule: &Rule) -> bool {
-    ["allow", "block", "ask"].contains(&rule.action.as_str())
+    ["allow", "block"].contains(&rule.timeout_action.as_str())
+        && (rule.identity.is_none()
+            || (rule.source == "live"
+                && rule
+                    .identity
+                    .as_ref()
+                    .is_some_and(|i| i.valid() && rule.app_key == i.key())))
+        && ["allow", "block", "ask"].contains(&rule.action.as_str())
         && ["outbound", "inbound", "both"].contains(&rule.direction.as_str())
         && ["live", "demo"].contains(&rule.source.as_str())
         && !rule.app_key.is_empty()
@@ -213,6 +252,7 @@ pub fn demo_connections() -> Vec<Connection> {
     .iter()
     .enumerate()
     .map(|(i, (app, host, port))| Connection {
+        identity: None,
         id: format!("demo-{i}"),
         app: (*app).into(),
         app_key: format!("/Applications/{app}.app"),
@@ -259,6 +299,8 @@ mod tests {
     fn rule_scope_includes_port_direction_and_source() {
         let c = demo_connections().remove(0);
         let mut r = Rule {
+            timeout_action: "allow".into(),
+            identity: None,
             id: "r".into(),
             app_key: c.app_key.clone(),
             app: c.app.clone(),

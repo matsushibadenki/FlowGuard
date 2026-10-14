@@ -110,6 +110,7 @@ mod tests {
     use super::*;
     fn connection() -> Connection {
         Connection {
+            identity: None,
             id: "c1".into(),
             app: "test".into(),
             app_key: "".into(),

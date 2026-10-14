@@ -11,14 +11,9 @@ public final class FilterDataProvider: NEFilterDataProvider {
     private var bridge: BridgeService?
     private let lock = NSLock()
     private var policy = Policy()
-    private var pending: [UUID: NEFilterFlow] = [:]
+    private let asks = AskQueue()
+    private var askTimer: DispatchSourceTimer?
     private let work = DispatchQueue(label: "com.flowguard.filter.decisions")
-    /// The extension host must supply an authenticated decision transport before asking is enabled.
-    private var requestDecision: ((UUID, FlowIdentity) -> Void)?
-    public func setDecisionTransport(_ callback: ((UUID, FlowIdentity) -> Void)?) {
-        lock.lock(); requestDecision = callback; lock.unlock()
-    }
-
     public override func startFilter(completionHandler: @escaping (Error?) -> Void) {
         let initial: [PolicyRule]
         do {
@@ -30,65 +25,52 @@ public final class FilterDataProvider: NEFilterDataProvider {
         let settings = NEFilterSettings(rules: [NEFilterRule(networkRule: network, action: .filterData)], defaultAction: .allow)
         apply(settings) { [weak self] error in
             guard let self, error == nil else { completionHandler(error); return }
-            let service = BridgeService { [weak self] rules in
+            let service = BridgeService(asks: self.asks) { [weak self] rules in
                 guard let self else { throw NSError(domain: "FlowGuardBridge", code: 2) }
                 try self.replacePolicy(rules)
             }
-            do { try service.start(initial: initial); self.bridge = service; completionHandler(nil) }
+            do {
+                try service.start(initial: initial); self.bridge = service
+                let timer = DispatchSource.makeTimerSource(queue: self.work)
+                timer.schedule(deadline: .now() + .milliseconds(250), repeating: .milliseconds(250), leeway: .milliseconds(20))
+                timer.setEventHandler { [weak self] in self?.asks.expire() }
+                timer.resume(); self.askTimer = timer
+                completionHandler(nil)
+            }
             catch { completionHandler(error) }
         }
     }
     public override func stopFilter(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
+        askTimer?.cancel(); askTimer = nil
         bridge?.stop(); bridge = nil
-        lock.lock(); let paused = Array(pending.values); pending.removeAll(); lock.unlock()
-        for flow in paused { resumeFlow(flow, with: NEFilterNewFlowVerdict.allow()) }
-        completionHandler()
+        work.async { completionHandler() }
     }
     /// Call only from a transport that verifies the signing identity of the host.
     public func replacePolicy(_ rules: [PolicyRule]) throws {
-        guard rules.count <= 2000 else { throw NSError(domain: "FlowGuard", code: 1) }
-        lock.lock(); policy = Policy(rules: rules); lock.unlock()
+        guard BridgeContract.validRules(rules) else { throw NSError(domain: "FlowGuard", code: 1) }
+        lock.lock(); policy = Policy(rules: rules); let cancelled = asks.changePolicy(); lock.unlock()
+        cancelled.forEach { $0() }
     }
     public override func handleNewFlow(_ flow: NEFilterFlow) -> NEFilterNewFlowVerdict {
         guard let socket = flow as? NEFilterSocketFlow,
               socket.socketProtocol == IPPROTO_TCP,
               let remote = socket.remoteEndpoint as? NWHostEndpoint,
               let port = UInt16(remote.port),
-              let executable = executablePath(from: flow.sourceAppAuditToken) else { return .allow() }
-        let identity = FlowIdentity(executable: executable, destination: remote.hostname, port: port,
-                                    direction: flow.direction == .inbound ? .inbound : .outbound)
-        lock.lock(); let decision = policy.decision(for: identity); let callback = requestDecision; lock.unlock()
-        switch decision {
-        case .block: return .drop()
-        case .ask:
-            // Without a decision transport the host must report this rule as unsupported.
-            guard let callback else { return .allow() }
-            let id = UUID()
-            lock.lock()
-            guard pending.count < 128 else { lock.unlock(); return .allow() }
-            pending[id] = flow; lock.unlock()
-            work.async { callback(id, identity) }
-            // A lost UI cannot indefinitely hang system networking. Timeout policy: allow.
-            work.asyncAfter(deadline: .now() + 15) { [weak self] in self?.resolve(id, allow: true) }
+              flow.direction == .inbound || flow.direction == .outbound,
+              let signingIdentity = SigningIdentity.verified(auditToken: flow.sourceAppAuditToken) else { return .allow() }
+        let identity = FlowIdentity(executable: "", destination: remote.hostname, port: port,
+                                    direction: flow.direction == .inbound ? .inbound : .outbound, identity: signingIdentity)
+        lock.lock()
+        guard let rule = policy.matchingRule(for: identity) else { lock.unlock(); return .allow() }
+        if rule.action == .ask {
+            let request = asks.enqueue(rule: rule, flow: identity) { [weak self] action in
+                self?.work.async { [weak self] in self?.resumeFlow(flow, with: action == .block ? NEFilterNewFlowVerdict.drop() : NEFilterNewFlowVerdict.allow()) }
+            }
+            lock.unlock()
+            guard request != nil else { return rule.timeoutAction == .block ? .drop() : .allow() }
             return .pause()
-        default: return .allow()
         }
-    }
-    public func resolve(_ id: UUID, allow: Bool) {
-        lock.lock(); let flow = pending.removeValue(forKey: id); lock.unlock()
-        if let flow { resumeFlow(flow, with: allow ? NEFilterNewFlowVerdict.allow() : NEFilterNewFlowVerdict.drop()) }
-    }
-    private func executablePath(from auditToken: Data?) -> String? {
-        guard let auditToken else { return nil }
-        var code: SecCode?
-        let attributes = [kSecGuestAttributeAudit as String: auditToken] as CFDictionary
-        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess, let code else { return nil }
-        var staticCode: SecStaticCode?
-        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
-        var information: CFDictionary?
-        guard SecCodeCopySigningInformation(staticCode, [], &information) == errSecSuccess,
-              let info = information as? [String: Any],
-              let executable = info[kSecCodeInfoMainExecutable as String] as? URL else { return nil }
-        return executable.path
+        lock.unlock()
+        return rule.action == .block ? .drop() : .allow()
     }
 }

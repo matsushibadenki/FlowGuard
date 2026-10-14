@@ -4,7 +4,7 @@ import FlowGuardPolicy
 final class BridgeTests: XCTestCase {
     func rules(_ action: String = "block", source: String = "live") throws -> [PolicyRule] {
         let data = Data("""
-        [{"id":"one","appKey":"/Applications/Test.app/Contents/MacOS/Test","app":"Test","destination":"1.2.3.4","port":443,"direction":"both","action":"\(action)","updatedAt":1,"source":"\(source)"}]
+        [{"id":"one","appKey":"signed:v1:developer:ABCDE12345:com.test.app","identity":{"authority":"developer","teamId":"ABCDE12345","identifier":"com.test.app"},"app":"Test","destination":"1.2.3.4","port":443,"direction":"both","action":"\(action)","updatedAt":1,"source":"\(source)"}]
         """.utf8)
         return try JSONDecoder().decode([PolicyRule].self, from: data)
     }
@@ -24,12 +24,12 @@ final class BridgeTests: XCTestCase {
         let valid = try rules()
         let data = try JSONEncoder().encode(InitialPolicy(rules: valid))
         let initial = try InitialPolicy.decode(data)
-        let decision = Policy(rules: initial.rules).decision(for: FlowIdentity(executable: "/Applications/Test.app/Contents/MacOS/Test", destination: "1.2.3.4", port: 443, direction: .outbound))
+        let decision = Policy(rules: initial.rules).decision(for: FlowIdentity(executable: "/Applications/Test.app/Contents/MacOS/Test", destination: "1.2.3.4", port: 443, direction: .outbound, identity: SigningIdentity(authority: "developer", teamId: "ABCDE12345", identifier: "com.test.app")))
         XCTAssertEqual(decision, .block)
         XCTAssertTrue(try InitialPolicy.decode(Data("{\"rules\":[]}".utf8)).rules.isEmpty)
     }
     func testInvalidInitialPolicyNeverStartsWithAnEmptyFallback() throws {
-        for invalid in [try rules("ask"), try rules(source: "demo"), try rules() + rules()] {
+        for invalid in [try rules(source: "demo"), try rules() + rules()] {
             XCTAssertThrowsError(try InitialPolicy.decode(JSONEncoder().encode(InitialPolicy(rules: invalid))))
         }
         XCTAssertThrowsError(try InitialPolicy.decode(Data("{}".utf8)))
@@ -54,7 +54,7 @@ final class BridgeTests: XCTestCase {
         let receiver = PolicyReceiver(); receiver.setReady(true)
         XCTAssertEqual(receiver.replace(try payload(receiver, rules: rules())) { _ in throw NSError(domain: "test", code: 1) }.error, "apply_failed")
         XCTAssertEqual(receiver.status().revision, 0); XCTAssertEqual(receiver.status().ruleCount, 0)
-        for invalid in [try rules("ask"), try rules(source: "demo"), try rules() + rules()] {
+        for invalid in [try rules(source: "demo"), try rules() + rules()] {
             XCTAssertEqual(receiver.replace(try payload(receiver, rules: invalid)) { _ in XCTFail() }.error, "unsupported_or_invalid_rules")
         }
         XCTAssertEqual(receiver.replace(Data(repeating: 0, count: 4 * 1024 * 1024 + 1)) { _ in XCTFail() }.error, "invalid_payload")
@@ -86,8 +86,8 @@ final class BridgeTests: XCTestCase {
     }
 
     func testDigestTracksExactPolicyAndLostAcknowledgement() throws {
-        XCTAssertEqual(BridgeContract.digest([]), "6bd8902048330975e577e9d4605d264456a0bcacc8eda9edc591be2383500783")
-        XCTAssertEqual(BridgeContract.digest(try rules()), "89a3fffc4b5a9dd520965a06291d106ee1f6d878a7bc3a778d992d79a9306afb")
+        XCTAssertEqual(BridgeContract.digest([]), "dc4588f5d4949ea04f5b1c296dad6f24a990246a4e3139191bed4789eabc4e32")
+        XCTAssertEqual(BridgeContract.digest(try rules()), "c9e3e7608370bec8f372ebd9a7da81df695a2bebe2bd5651bc476b38a617ba60")
         let receiver = PolicyReceiver(); receiver.seed(try rules()); receiver.setReady(true)
         XCTAssertEqual(receiver.status().policyDigest, BridgeContract.digest(try rules()))
         let before = receiver.status().policyDigest
@@ -95,6 +95,25 @@ final class BridgeTests: XCTestCase {
         XCTAssertNotEqual(accepted.policyDigest, before)
         XCTAssertEqual(receiver.status().policyDigest, accepted.policyDigest)
         receiver.setReady(false); XCTAssertNil(receiver.status().policyDigest)
+    }
+
+    func testLegacyPolicyAndOldProtocolAreRejected() throws {
+        let legacy = Data(#"{"rules":[{"id":"old","appKey":"/old/path","app":"Test","destination":"1.2.3.4","port":443,"direction":"both","action":"allow","updatedAt":1,"source":"live"}]}"#.utf8)
+        XCTAssertThrowsError(try InitialPolicy.decode(legacy))
+        let receiver = PolicyReceiver(); receiver.setReady(true)
+        var object = try JSONSerialization.jsonObject(with: payload(receiver, rules: rules())) as! [String: Any]
+        object["protocolVersion"] = 1
+        let reply = receiver.replace(try JSONSerialization.data(withJSONObject: object)) { _ in XCTFail("old protocol must not apply") }
+        XCTAssertEqual(reply.error, "invalid_protocol")
+    }
+
+    func testSavingV3RemovesBothObsoletePolicySlots() throws {
+        let policy = try JSONEncoder().encode(InitialPolicy(rules: rules()))
+        let vendor = InitialPolicy.vendorConfiguration(previous: [InitialPolicy.legacyKey: Data("old".utf8), "flowguard.initialPolicy.v2": Data("old-v2".utf8), "other": "retained"], policy: policy)
+        XCTAssertNil(vendor[InitialPolicy.legacyKey])
+        XCTAssertNil(vendor["flowguard.initialPolicy.v2"])
+        XCTAssertEqual(vendor[InitialPolicy.key] as? Data, policy)
+        XCTAssertEqual(vendor["other"] as? String, "retained")
     }
 
 }

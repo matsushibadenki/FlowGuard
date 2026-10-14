@@ -117,9 +117,7 @@ extension ExtensionController {
                 if let error { self.finish("failed", error); return }
                 guard manager.isEnabled, let config = manager.providerConfiguration,
                       config.filterDataProviderBundleIdentifier == "com.flowguard.filter" else { self.finish("configuration_conflict", nil); return }
-                var vendor = config.vendorConfiguration ?? [:]
-                vendor[InitialPolicy.key] = policy
-                config.vendorConfiguration = vendor
+                config.vendorConfiguration = InitialPolicy.vendorConfiguration(previous: config.vendorConfiguration ?? [:], policy: policy)
                 manager.providerConfiguration = config
                 manager.saveToPreferences { error in
                     DispatchQueue.main.async {
@@ -127,7 +125,7 @@ extension ExtensionController {
                         manager.loadFromPreferences { error in
                             DispatchQueue.main.async {
                                 if let error { self.finish("failed", error); return }
-                                guard InitialPolicy.persisted(enabled: manager.isEnabled,
+                                guard InitialPolicy.obsoleteKeys.allSatisfy({ manager.providerConfiguration?.vendorConfiguration?[$0] == nil }), InitialPolicy.persisted(enabled: manager.isEnabled,
                                       provider: manager.providerConfiguration?.filterDataProviderBundleIdentifier,
                                       stored: manager.providerConfiguration?.vendorConfiguration?[InitialPolicy.key] as? Data,
                                       requested: policy) else { self.finish("failed", nil); return }

@@ -8,11 +8,22 @@ let bridge = HostBridge()
 func output(_ data: Data) { FileHandle.standardOutput.write(data); FileHandle.standardOutput.write(Data("\n".utf8)) }
 if arguments.count == 2 && arguments[0] == "--preflight" {
     output(try JSONEncoder().encode(bridge.preflight(extensionURL: URL(fileURLWithPath: arguments[1]))))
-} else if arguments == ["--status"] || arguments == ["--push"] || arguments == ["--sync"] {
+} else if arguments == ["--status"] || arguments == ["--push"] || arguments == ["--sync"] || arguments == ["--asks"] || arguments == ["--answer"] {
     // A signed helper must not become a proxy for arbitrary local CLI callers.
     guard BridgeSigning.trustedDesktopParent() else { fputs("trusted_desktop_required\n", stderr); exit(1) }
-    let data = arguments != ["--status"] ? FileHandle.standardInput.readData(ofLength: 4 * 1024 * 1024 + 1) : nil
+    let data = ![ ["--status"], ["--asks"] ].contains(arguments) ? FileHandle.standardInput.readData(ofLength: 4 * 1024 * 1024 + 1) : nil
     if let data, data.count > 4 * 1024 * 1024 { fputs("invalid_payload\n", stderr); exit(2) }
+    if arguments == ["--asks"] || arguments == ["--answer"] {
+        let completion: (Result<Data, Error>) -> Void = { result in
+            switch result {
+            case .success(let reply): output(reply); exit(0)
+            case .failure: fputs("ask_bridge_failed\n", stderr); exit(1)
+            }
+        }
+        if arguments == ["--asks"] { bridge.pendingAsks(completion: completion) }
+        else { bridge.answerAsk(data ?? Data(), completion: completion) }
+        dispatchMain()
+    }
     if arguments == ["--sync"] {
         do {
             let payload = try JSONDecoder().decode(RulePayload.self, from: data ?? Data())
@@ -33,5 +44,5 @@ if arguments.count == 2 && arguments[0] == "--preflight" {
     }
     dispatchMain()
 } else {
-    fputs("Usage: FlowGuardBridgeCLI --preflight EXTENSION | --status | --push < update.json | --sync < rules.json\n", stderr); exit(2)
+    fputs("Usage: FlowGuardBridgeCLI --preflight EXTENSION | --status | --push < update.json | --sync < rules.json | --asks | --answer < answer.json\n", stderr); exit(2)
 }

@@ -2,7 +2,7 @@ import Foundation
 import FlowGuardBridge
 import FlowGuardPolicy
 public struct BridgePreflight: Encodable {
-    public let protocolVersion = 1
+    public let protocolVersion = 3
     public let packaged: Bool
     public let signed: Bool
     public let status: String
@@ -21,7 +21,7 @@ public final class HostBridge {
         transact(update: nil) { [self] result in
             do {
                 let status = try JSONDecoder().decode(BridgeReply.self, from: result.get())
-                guard status.protocolVersion == 1, status.status == "ready", status.error == nil else { throw NSError(domain: "FlowGuardBridge.not_ready", code: 6) }
+                guard status.protocolVersion == 3, status.status == "ready", status.error == nil else { throw NSError(domain: "FlowGuardBridge.not_ready", code: 6) }
                 let update = PolicyUpdate(requestID: UUID().uuidString, expectedInstanceID: status.instanceID, expectedRevision: status.revision, rules: rules)
                 let payload = try JSONEncoder().encode(update)
                 transact(update: payload) { result in
@@ -34,8 +34,14 @@ public final class HostBridge {
             } catch { completion(.failure(error)) }
         }
     }
+    public func pendingAsks(completion: @escaping (Result<Data, Error>) -> Void) { transaction(operation: .pending, completion: completion) }
+    public func answerAsk(_ data: Data, completion: @escaping (Result<Data, Error>) -> Void) { transaction(operation: .answer(data), completion: completion) }
+    private enum Operation { case status, policy(Data), pending, answer(Data) }
     /// Each transaction has a bounded lifetime. Reconnect starts with status, never a cached revision.
     public func transact(update: Data?, completion: @escaping (Result<Data, Error>) -> Void) {
+        transaction(operation: update.map { .policy($0) } ?? .status, completion: completion)
+    }
+    private func transaction(operation: Operation, completion: @escaping (Result<Data, Error>) -> Void) {
         guard let team = BridgeSigning.teamIdentifier() else {
             completion(.failure(NSError(domain: "FlowGuardBridge.signature_required", code: 1))); return
         }
@@ -51,7 +57,12 @@ public final class HostBridge {
             finish.end(.failure(NSError(domain: "FlowGuardBridge.invalid_proxy", code: 5))); return
         }
         let reply: (Data) -> Void = { finish.end(.success($0)) }
-        if let update { remote.replacePolicy(update, withReply: reply) } else { remote.status(withReply: reply) }
+        switch operation {
+        case .status: remote.status(withReply: reply)
+        case .policy(let data): remote.replacePolicy(data, withReply: reply)
+        case .pending: remote.pendingAsks(withReply: reply)
+        case .answer(let data): remote.answerAsk(data, withReply: reply)
+        }
     }
 }
 private final class CompletionGate {

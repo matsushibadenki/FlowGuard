@@ -1,6 +1,6 @@
 import {SoftwareUpdate} from './SoftwareUpdate';
 import {extensionLabel} from '../core/enforcement';
-import {Eye,LockKeyhole,Shield,PanelLeft,PanelRight} from 'lucide-react';
+import {Eye,LockKeyhole,Shield,PanelLeft,PanelRight,Clock,Info} from 'lucide-react';
 import type {Locale,Snapshot} from '../core/types';
 import {dispatch,dockPanel,native,activateExtension,applyExtensionRules,refreshExtension,disableExtension} from '../core/store';
 import {type T} from './ui';
@@ -16,6 +16,9 @@ export function Settings({snapshot,t,onError}:{snapshot:Snapshot;t:T;onError:(e:
  <p>{t('initialPolicyHelp')}</p><div className="button-row extension-actions"><button className="secondary-button" disabled={!native||!snapshot.extension.packaged||!snapshot.extension.runtimeAvailable||snapshot.extension.busy||snapshot.extension.stage==='removed'} onClick={()=>void disableExtension().catch(onError)}>{t('disableExtension')}</button><button className="secondary-button" disabled={!native||!snapshot.extension.packaged||!snapshot.extension.runtimeAvailable||snapshot.extension.busy||snapshot.extension.stage==='removed'} onClick={()=>void disableExtension(true).catch(onError)}>{t('removeExtension')}</button></div><p>{t('removeExtensionHelp')}</p>
  {snapshot.extension.providerRevision!==null&&<p>{t('providerRevision')}: {snapshot.extension.providerRevision} · {snapshot.extension.appliedRuleIds.length} {t('ruleCount')}</p>}
  </>}</section>)}
- <SoftwareUpdate snapshot={snapshot}/>
+ <section className="surface settings-section"><div className="settings-heading"><Clock size={22}/><h2>{t('askSettings')}</h2></div>
+ <div className="setting-row"><label htmlFor="ask-timeout-action">{t('askTimeoutLabel')}</label><select id="ask-timeout-action" value={p.askTimeoutAction??'allow'} onChange={e=>void dispatch({type:'setAskTimeoutAction',action:e.target.value as 'allow'|'block'}).catch(onError)}><option value="allow">{t('askTimeoutAllow')}</option><option value="block">{t('askTimeoutBlock')}</option></select></div>
+ <p>{t('askDefaultReason')}</p><details><summary><Info size={16}/>{t('askPolicyDetails')}</summary><p>{t('askSettingsHelp')}</p></details>
+ </section><SoftwareUpdate snapshot={snapshot}/>
  </div>;
 }

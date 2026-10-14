@@ -1,8 +1,10 @@
 import {describe,it,expect} from 'vitest';
+const signing = {authority:'developer' as const,teamId:'ABCDE12345',identifier:'com.test.app'};
+const subject = 'signed:v1:developer:ABCDE12345:com.test.app';
 import {ruleFor,validRules,endpoint} from './rules';
 import type {Connection,Rule} from './types';
-const c:Connection={id:'c',app:'Mail',appKey:'/Mail',pid:1,local:'::1',destination:'2001:db8::1',port:993,protocol:'TCP',direction:'unknown',observedAt:1};
-const r:Rule={id:'r',appKey:'/Mail',app:'Mail',destination:c.destination,port:993,direction:'both',action:'block',updatedAt:1,source:'live'};
+const c:Connection={identity:signing,id:'c',app:'Mail',appKey:'/Mail',pid:1,local:'::1',destination:'2001:db8::1',port:993,protocol:'TCP',direction:'unknown',observedAt:1};
+const r:Rule={identity:signing,id:'r',appKey:subject,app:'Mail',destination:c.destination,port:993,direction:'both',action:'block',updatedAt:1,source:'live'};
 describe('rule contracts',()=>{
  it('does not conflate intent with a different source or port',()=>{expect(ruleFor([r],c,'demo')).toBeUndefined();expect(ruleFor([{...r,port:443}],c,'live')).toBeUndefined();expect(ruleFor([r],c,'live')).toBe(r);});
  it('does not infer an outbound rule for unknown direction',()=>expect(ruleFor([{...r,direction:'outbound'}],c,'live')).toBeUndefined());

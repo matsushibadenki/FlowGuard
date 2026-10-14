@@ -205,3 +205,77 @@ Final current-code unsigned Tauri debug build and native staging completed: pack
 - Browser plugin skill unavailable (`Browser plugin not available`); bundled Playwright with installed Chrome tested http://127.0.0.1:1420 at 1440×960 and 390×960. Page identity/content, no framework overlay, screenshots and no horizontal page overflow verified.
 - Japanese demo status → English locale → Save intention (not applied) → Rule saved · not applied verified. No JavaScript runtime errors; existing favicon.ico returns 404.
 - Signed-provider lifecycle rendering and real blocking/recovery remain untested. Screenshots/scripts kept in /tmp, outside repository.
+
+## Communication map redesign (2026-10-14)
+
+Scope: frontend map presentation only. No change to src-tauri/, native/, Snapshot, Command, ruleFor or external dependencies. New source files have path comments and remain below 500 lines.
+
+Implementation decisions: one non-sticky map status bar before the page heading; readable wrapping takes precedence over a 96px height cap. The four states are independent confirmations, not continuous percentage progress. Signed provider identity and revision are required before displaying a full receipt. Map-specific wording uses separate contextual keys so other screens retain their existing translations. Inspector changes are enabled only for the map and its floating detail.
+
+### Changed file inventory
+
+| File | Change location / purpose |
+| --- | --- |
+| src/core/protection.ts + protection.test.ts | New status derivation and lifecycle/observation tests |
+| src/core/destinations.ts + destinations.test.ts | New IPv4/IPv6 range parser and boundary/malformed-address tests |
+| src/core/mapModel.ts + mapModel.test.ts | New app/socket projection, merged destinations, sorting, receipt/identity/direction tests |
+| src/components/IntentBar.tsx | New accessible intent-count bar |
+| src/components/AppList.tsx | New full app list, roving keyboard focus and hidden-app recovery |
+| src/components/DestinationPane.tsx | New range groups, collapse, 50-row increments and existing-selection highlighting |
+| src/components/ProtectionStatus.tsx | New independent four-state track, source switch and counts |
+| src/components/FlowMap.tsx | Replaced six-socket diagram with app/destination panes and local display controls |
+| src/styles/map.css | New scoped responsive layout, intent styles and accessible-label containment |
+| src/main.tsx | Import map.css after existing styles |
+| src/App.tsx | Map-only status replacement, omit its old overview, pass filter reset and map inspector flag |
+| src/components/Inspector.tsx | Opt-in map styling and map-only conditional save wording; other screens retain behavior |
+| src/core/i18n.ts | Add map translations for English/Japanese/Simplified Chinese; existing translations preserved |
+| src/styles.css | Remove unused old diagram selectors after reference check; preserve shared rules |
+| docs/ROADMAP.md | Mark browser-verified map work Done and native/real-data confirmation Pending |
+
+### Automated and rendered checks
+
+- npm ci: succeeded. npm reports existing allowScripts coverage warnings for esbuild/fsevents; build still succeeds. No dependency changes introduced.
+- npm run build: passed (TypeScript strict + Vite).
+- npm test: 67 passed across 10 files, including 43 new map-model/status/address cases.
+- git diff --check: passed. git diff --name-only -- src-tauri native: empty.
+- Browser plugin skill unavailable (Browser plugin not available); bundled Playwright with installed headless Chrome used against http://127.0.0.1:1420/. No new browser dependencies installed.
+- Tested 320/375/414/768/1200/1550px in all three languages, 18 combinations. Page identity/content correct, no framework overlay or JavaScript errors, no page horizontal overflow. Existing favicon.ico 404 excluded from app runtime errors.
+- Temporary 172-connection/16-app fixture injected only into the browser response at sampleConnections() call site. Includes loopback-only app, IPv6, unknown direction, long app name, multiple PIDs, duplicate destinations and two distinct unidentified processes. Shows all 15 visible apps and recovers the hidden app; unit test also verifies 172 distinct apps without a six-app cap. No fixture/source-store change shipped.
+- Interaction loop: app ArrowDown + Enter → destination Enter → block radio Space → save Enter; inspector follows selected app/connection and reports saved/not applied. Loopback toggle, 50-row expansion, left/right docking, no-match search, reset and block-intent filter passed. Existing Applications view still displays its original overview.
+- Muted/allow/block/ask text on white surface measured at approximately 6.53/6.38/7.11/6.34:1, exceeding 4.5:1. Intent colors are not protection assertions.
+- A 768px overflow from an existing recent-history screen-reader label was fixed only inside the map's scroll container. Narrow headline clauses and parenthetical step labels wrap at meaningful boundaries.
+
+Screenshots are temporary evidence outside the repository: /tmp/flowguard-map-{ja,en,zh-CN}-{320,375,414,768,1200,1550}.png and /tmp/flowguard-map-interaction.png. QA script: /tmp/flowguard-map-qa.cjs.
+
+Pending: Apple Silicon native display; real 172-connection samples; native multi-window selectedId propagation/floating detail; signed-provider state changes; real blocking and recovery. Browser fixtures and receipt tests do not prove OS enforcement.
+
+Screenshot capture note: installed Chrome repeated the top strip in the bottom 87px of uncropped headless captures. Final evidence captures the upper 880px of 1000px viewports to exclude this capture artifact. DOM/page-width checks and interactions cover the full viewport; no repeated app root was introduced.
+
+## Signed rule identity and legacy migration (2026-10-14)
+
+- New `src-tauri/src/identity.rs` uses CoreFoundation/Security.framework to acquire and validate running guests. No codesign text parsing, Info.plist trust, filesystem-path authorization, private credentials or new dependencies.
+- Connection identity is optional; old rule JSON without identity remains readable and disabled. Live rule subject keys are canonical and must agree with their identity. Source/destination/port/direction semantics remain intact; demo rules retain their separate path-based intent scope.
+- Creation and explicit MigrateRule reacquire the running guest inside the existing state mutation transaction. Migration preserves original ID, action, destination and direction; occupied signed scopes, changed/unknown signatures and absent processes are rejected. Existing expected-rules conflicts and persistence rollback protect migration and undo. No current signature is treated as evidence of the historical signer at an old path.
+- Provider independently validates the flow audit token. No path fallback. Old path policies are excluded from payload/digest/recovery/receipt IDs; provider validation rejects them even if injected directly. v2 protocol and identity-bearing digest vectors match in Rust and Swift. Saving v2 OS configuration removes the obsolete v1 policy slot and verifies its absence after reload.
+- Frontend adds signing labels, disabled legacy-state warning and explicit per-rule signer review. Unverified live save and browser-only migration are disabled. v2 backups are exported; both v1/v2 are validated on import. Invalid identities/keys/false demo signature claims are rejected.
+
+Verification:
+
+- npm run build: passed; npm test: 71 passed, 11 files.
+- cargo test --manifest-path src-tauri/Cargo.toml --lib: 56 passed, 16 explicitly ignored, 0 failed. The 16 include 14 earlier host/environment tests plus 2 new host Security guest tests.
+- cargo test --manifest-path src-tauri/Cargo.toml --lib signed_guest -- --ignored --nocapture --test-threads=1: both host tests passed with host guest access. Uses only a newly spawned /bin/sleep child and temporary rule documents, with no firewall/extension configuration changes. Verifies real Apple signing, explicit migration, signature recheck, competing scope rejection, original intent preservation, failed-write rollback/undo and refusal after guest termination.
+- swift test (workspace package, module/cache paths under /tmp, --disable-sandbox to avoid unsupported nested sandboxing): 18 passed (5 Policy, 12 Bridge, 1 transport). Builds host runtime/helper/extension targets. Includes legacy policy/protocol rejection, removed v1 vendor slot, different signer/identifier, moved executable and missing audit token tests.
+- A null-CF-reference release was found by the terminated-guest test, fixed, and covered by a regression test plus the passing real guest-termination test. Failure never falls back to a path identity.
+- Playwright + installed headless Chrome at http://127.0.0.1:1420/; Browser plugin skill unavailable. Three locales at 375/1200px with a temporary browser response fixture. Verified legacy rules do not create matched block intentions, unknown signature disables live save, signer review displays the exact Team ID/identifier, migration stays disabled outside native mode, page identity/content, no overlay, no page overflow or JS errors. Existing favicon.ico 404 excluded. No mock signature data shipped.
+- Evidence: /tmp/flowguard-signing-{ja,en,zh-CN}-{375,1200}.png; script /tmp/flowguard-signing-qa.cjs. Captures crop the known Chrome bottom-strip screenshot artifact described above.
+- git diff --check: passed. Earlier uncommitted map redesign work retained.
+
+Pending: replacing a signed installed host/provider together, real Provider flow verdicts/audit tokens, Developer ID/App Store update and on-disk tamper scenarios, old installed provider/cached-policy transitions. Do not downgrade the new saved document into an old path-only build. OS configuration persistence/removal behavior still requires signed testing; source edits do not disable a running old provider.
+
+## Ask decisions (2026-10-14)
+
+- `npm run build` and `npm test`: build succeeded, 72 tests passed. Backup validation accepts absent legacy timeout and allow/block, rejects invalid fallbacks.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 61 passed, 16 host-only tests ignored. Ask tests cover bounded queue envelopes, restart IDs, shared-window claim, stale poll rejection, mismatched replies, expired response versus user acknowledgement, default preference persistence, updating saved intentions and conflict control.
+- Swift SystemExtension product build succeeded. Custom-cache `swift test --disable-sandbox`: 24 passed (5 policy, 12 bridge, 5 queue, 2 transport). Both timeout actions, exact deadline, duplicate/late answers, unsigned/different scopes, inactive intake, capacity, policy replacement and graceful stop are covered. v3 saves remove both obsolete v1/v2 slots. Anonymous XPC exercises production protocol metadata retrieval and one-flow answer callback exactly once; it does not exercise the production signing-gated Mach listener.
+- Temporary browser fixture verified default allow, choosing block, persisted selection after reload, signer/IPv6/scope, captured request fallback and disabled browser answer buttons. JA/EN/简体中文 at 375/1200px showed no horizontal overflow or JavaScript errors. Screenshots of inbox and settings were visually inspected. Fixtures remain outside the repository; no synthetic provider data is shipped.
+- ⭕️ [Pending] Signed installation/approval/update and actual NEFilterFlow pause/resume/drop, both timeout network outcomes, multiple native windows, UI termination, capacity saturation, policy update/stop, provider crash, sleep/wake, reboot and VPN/proxy behavior. Provider receipt/history does not prove actual traffic verdicts. No OS filter configuration was changed for this increment.

@@ -44,7 +44,7 @@ impl Enforcement {
         self.target = Some(
             rules
                 .iter()
-                .filter(|r| r.source == "live")
+                .filter(|r| crate::model::enforceable(r))
                 .cloned()
                 .collect(),
         );
@@ -55,7 +55,7 @@ impl Enforcement {
     pub fn recovery_due(&self, current: &[Rule], now: u64) -> bool {
         let live: Vec<_> = current
             .iter()
-            .filter(|r| r.source == "live")
+            .filter(|r| crate::model::enforceable(r))
             .cloned()
             .collect();
         self.recovery
@@ -215,7 +215,7 @@ impl Enforcement {
     pub fn reconcile(&mut self, current: &[Rule]) {
         let live: Vec<_> = current
             .iter()
-            .filter(|r| r.source == "live")
+            .filter(|r| crate::model::enforceable(r))
             .cloned()
             .collect();
         if ["applied", "stale"].contains(&self.status.stage.as_str()) {
@@ -286,8 +286,14 @@ mod tests {
     use super::*;
     fn rules() -> Vec<Rule> {
         vec![Rule {
+            timeout_action: "allow".into(),
+            identity: Some(crate::identity::SigningIdentity {
+                authority: "developer".into(),
+                team_id: "ABCDE12345".into(),
+                identifier: "com.test.app".into(),
+            }),
             id: "r".into(),
-            app_key: "/test".into(),
+            app_key: "signed:v1:developer:ABCDE12345:com.test.app".into(),
             app: "Test".into(),
             destination: "1.2.3.4".into(),
             port: 443,
