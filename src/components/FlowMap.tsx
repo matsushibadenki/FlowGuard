@@ -6,11 +6,9 @@ import {classifyAddress} from '../core/destinations';
 import {AppList} from './AppList';
 import {DestinationPane} from './DestinationPane';
 import {Empty, type T} from './ui';
-export function FlowMap({snapshot, connections, t, select, clearFilters}: {
-  snapshot: Snapshot; connections: Connection[]; t: T; select: (c: Connection) => void; clearFilters?: () => void;
+export function FlowMap({snapshot, connections, t, select, clearFilters, hideLoopback, setHideLoopback, sort}: {
+  snapshot: Snapshot; connections: Connection[]; t: T; select: (c: Connection) => void; clearFilters?: () => void; hideLoopback: boolean; setHideLoopback: (value: boolean) => void; sort: SortKey;
 }) {
-  const [hideLoopback, setHideLoopback] = useState(true);
-  const [sort, setSort] = useState<SortKey>('connections');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [limits, setLimits] = useState<Record<string, number>>({});
   const model = useMemo(() => buildAppRows({groups: snapshot.applications, connections,
@@ -31,11 +29,6 @@ export function FlowMap({snapshot, connections, t, select, clearFilters}: {
     if (c) select(c);
   }
   return <section className="flowmap-redesign" aria-label={t('map')}>
-    <div className="map-display-toolbar"><label>{t('sortBy')}<select value={sort} onChange={e => setSort(e.target.value as SortKey)}>
-      <option value="connections">{t('sortConnections')}</option><option value="name">{t('sortName')}</option>
-      <option value="attention">{t('sortAttention')}</option></select></label>
-      <label className="map-hide-loopback"><input type="checkbox" checked={hideLoopback} onChange={e => setHideLoopback(e.target.checked)}/>{t('hideLoopback')}</label>
-    </div>
     {snapshot.connections.length === 0 ? <div className="surface"><Empty t={t}/></div> : <>
       {model.rows.length === 0 && <div className="map-no-matches surface"><p>{t('noMatches')}</p>
         {clearFilters && <button className="secondary-button" onClick={clearFilters}>{t('clearFilters')}</button>}</div>}

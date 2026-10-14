@@ -396,3 +396,33 @@
                                                                                                                                                                                                     justify-content:center}
                                                                                                                                                                                                     .map-step-label>span{
                                                                                                                                                                                                       white-space:nowrap}
+
+/* Both panes share a viewport-bounded height; only their lists scroll. */
+.map-panes{align-items:stretch;--map-pane-height:clamp(360px,calc(100dvh - 360px),760px)}
+.map-panes>.surface{height:var(--map-pane-height);max-height:none;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.map-app-list>h2,.map-app-list>.map-hidden-apps,.map-destination-pane>.map-selected-app{flex-shrink:0}
+.map-app-list ul{flex:1;min-height:0;max-height:none;overflow-y:auto;overscroll-behavior:contain}
+.map-destination-pane>.map-selected-app{position:static;border-bottom:1px solid var(--color-rule)}
+.map-destination-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+@media(max-width:850px){.map-panes{--map-pane-height:440px}}
+
+/* One shared toolbar precedes all three columns. */
+.map-unified-toolbar{justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;padding:4px;margin:-4px -4px 12px;gap:12px}
+.map-unified-toolbar>label{flex-shrink:0}
+.map-sort-control{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:var(--text-sm)}
+.map-sort-control select{width:180px;font-size:var(--text-sm)}
+.map-unified-toolbar .map-hide-loopback{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:var(--text-sm)}
+.map-unified-toolbar .search-field{flex:1 0 180px;max-width:none;margin-left:auto}
+.workspace-map .map-workspace>.inspector{position:static;align-self:start}
+@media(min-width:1051px){
+ .workspace-map .map-workspace{grid-template-columns:minmax(0,1fr) 276px;align-items:start}
+ .workspace-map .panel-left{grid-template-columns:276px minmax(0,1fr)}
+ .workspace-map .panel-left>.inspector{grid-column:1;grid-row:1}
+ .workspace-map .panel-left>.map-main{grid-column:2;grid-row:1}
+ .workspace-map .map-panes{grid-template-columns:minmax(180px,240px) minmax(0,1fr)}
+}
+@media(min-width:1550px){
+ .workspace-map .map-workspace{grid-template-columns:minmax(0,1fr) 340px}
+ .workspace-map .panel-left{grid-template-columns:340px minmax(0,1fr)}
+ .workspace-map .map-panes{grid-template-columns:minmax(240px,340px) minmax(0,1fr)}
+}

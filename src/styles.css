@@ -68,3 +68,15 @@
 .legacy-warning{background:var(--color-ask-soft);border-color:var(--color-ask)}.rule-app small:first-of-type{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ask-inbox{padding:var(--space-md);margin-bottom:var(--space-md);border-left:4px solid var(--color-ask);min-width:0}.ask-inbox h2{display:flex;align-items:center;gap:var(--space-sm)}.ask-inbox .section-head{padding:0;margin-bottom:var(--space-sm)}.ask-inbox ul{list-style:none;padding:0;margin:0;max-height:320px;overflow-y:auto}.ask-inbox li{display:flex;justify-content:space-between;gap:var(--space-md);padding:var(--space-md) 0;border-top:1px solid var(--color-rule);min-width:0}.ask-scope,.ask-inbox details,.ask-inbox>p{font-size:var(--text-sm);margin-bottom:var(--space-sm);overflow-wrap:anywhere}.ask-request-copy{display:flex;flex-direction:column;gap:var(--space-xs);min-width:0}.ask-request-copy small,.ask-request-copy code,.ask-inbox details code{overflow-wrap:anywhere;white-space:normal}.ask-request-copy>span{font-size:var(--text-sm)}.ask-deadline{display:flex;align-items:center;gap:var(--space-xs);flex-wrap:wrap;color:var(--color-muted)}.ask-answer-buttons{display:flex;gap:var(--space-sm);align-items:center;flex-wrap:wrap;flex-shrink:0}.ask-answer-buttons button{white-space:normal}.ask-inbox details summary{min-height:32px;cursor:pointer}.settings-section details{font-size:var(--text-sm);margin-top:var(--space-sm)}.settings-section details summary{display:flex;align-items:center;gap:var(--space-sm);min-height:32px;cursor:pointer}
 @media(max-width:600px){.ask-inbox li{flex-direction:column}.ask-answer-buttons{width:100%;justify-content:stretch}.ask-answer-buttons button{flex:1}}
+
+.sidebar-footer{display:flex;flex-direction:column;gap:12px;min-width:0;width:100%;flex-shrink:0}
+.sidebar-footer .language-picker{position:static;width:100%;min-width:0;padding:0 10px}
+.sidebar-footer .language-picker select{min-width:0;max-width:none;width:100%;font-size:var(--text-sm)}
+.sidebar-footer .version{padding:0 4px}
+@media(min-width:601px) and (max-width:1050px){
+ .sidebar-footer{margin-top:auto}
+ .sidebar-footer .language-picker{padding:0}
+ .sidebar-footer .language-picker>svg{display:none}
+ .sidebar-footer .language-picker select{padding:6px 0;font-size:var(--text-xs)}
+}
+@media(max-width:600px){.sidebar-footer .version{display:block}.sidebar-footer .language-picker{max-width:180px}}

@@ -17,6 +17,7 @@ export function DestinationPane({row, selectedId, select, t, expanded, limits, t
         <small className="map-app-path" title={row.appKey}>{row.appKey || t('noIdentity')}</small>
         <p>{t('mapConnectionSummary').replace('{n}', String(row.connectionCount)).replace('{m}', String(row.processCount))}</p>
       </div></header>
+      <div className="map-destination-scroll" tabIndex={0} aria-label={t('destinations')}>
       <div className="map-intent-legend">{(['allow', 'block', 'ask'] as const).map(intent =>
         <span key={intent} className={`intent-text-${intent}`}><ActionIcon action={intent}/>{t(`${intent}Intent`)}</span>)}</div>
       <details className="map-class-help"><summary><Info size={15}/>{t('classRangeLabel')}</summary><p>{t('classHelp')}</p></details>
@@ -49,6 +50,7 @@ export function DestinationPane({row, selectedId, select, t, expanded, limits, t
       })}
       {hiddenConnections > 0 && <div className="map-hidden-apps"><p>{t('mapHiddenConnections').replace('{n}', String(hiddenConnections))}</p>
         <button className="secondary-button" onClick={showHidden}>{t('showHidden')}</button></div>}
+      </div>
     </>}
   </section>;
 }
