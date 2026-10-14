@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {defaultExtension,ruleApplied,policyNotice,extensionLabel} from './enforcement';
+import {protectionLabel,defaultExtension,ruleApplied,policyNotice,extensionLabel} from './enforcement';
 import {dictionaries} from './i18n';
 import type {Rule} from './types';
 const rule:Rule={id:'r',app:'Test',appKey:'/test',destination:'example.com',port:443,direction:'both',action:'block',source:'live',updatedAt:1};
@@ -21,5 +21,17 @@ describe('provider acknowledgement UI contract',()=>{
    const key=extensionLabel(stage);expect(key).not.toBe('unknown');
    for(const dictionary of Object.values(dictionaries))expect(dictionary[key].length).toBeGreaterThan(0);
   }
+ });
+});
+
+describe('top-level protection status',()=>{
+ it('never carries a confirmation through a lost, busy or demo state',()=>{
+  const receipt={...defaultExtension,signed:true,stage:'applied',instanceId:'boot',providerRevision:1};
+  expect(protectionLabel(receipt,'live',true)).toBe('protectionConfirmed');
+  for(const stage of ['stale','failed','disconnected','applying'])expect(protectionLabel({...receipt,stage},'live',true)).toBe('protectionUncertain');
+  expect(protectionLabel({...receipt,busy:true},'live',true)).toBe('protectionUncertain');
+  expect(protectionLabel(receipt,'demo',true)).toBe('protectionDemo');
+  expect(protectionLabel({...receipt,instanceId:null},'live',true)).toBe('protectionSaved');
+  expect(protectionLabel(defaultExtension,'live',false)).toBe('protectionObserved');
  });
 });

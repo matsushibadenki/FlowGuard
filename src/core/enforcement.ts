@@ -13,3 +13,11 @@ export function policyNotice(status:ExtensionStatus,mode:'live'|'demo'):TextKey{
  if(['initial_sync','disabling','removing'].includes(status.stage)||status.stage==='applying'||status.stage==='failed'||status.stage==='disconnected')return 'uncertainPolicyHelp';
  return 'noEnforcement';
 }
+
+export function protectionLabel(status:ExtensionStatus,mode:'live'|'demo',hasRules:boolean):TextKey {
+ if(mode==='demo')return 'protectionDemo';
+ if(['stale','failed','disconnected','configuration_conflict','applying','initial_sync','disabling','removing'].includes(status.stage)||status.busy)return 'protectionUncertain';
+ if(status.signed&&status.stage==='applied'&&status.instanceId!==null&&status.providerRevision!==null)return 'protectionConfirmed';
+ if(status.signed&&status.stage==='ready')return 'protectionEnabled';
+ return hasRules?'protectionSaved':'protectionObserved';
+}

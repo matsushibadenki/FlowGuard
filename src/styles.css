@@ -61,3 +61,5 @@
 #software-update{scroll-margin-top:16px}#software-update:focus{outline:2px solid var(--color-focus);outline-offset:4px}
 
 .update-version{white-space:nowrap}
+
+.protection-status{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:12px 16px;margin-bottom:16px;border:1px solid var(--color-rule);border-left:3px solid #b58439;border-radius:8px;background:var(--color-paper);font-size:var(--text-sm);line-height:1.5;min-width:0}.protection-status strong{flex:1;min-width:0;overflow-wrap:anywhere}.protection-status>svg,.protection-info{flex-shrink:0}.protection-info{display:flex;cursor:help}.protection-info:focus-visible{outline:2px solid var(--color-accent);outline-offset:4px}

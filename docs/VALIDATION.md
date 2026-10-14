@@ -198,3 +198,10 @@ Final current-code unsigned Tauri debug build and native staging completed: pack
 - `npm test`: 23 passed across 7 files.
 - `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 51 passed, 14 explicitly ignored, 0 failed. Includes normalization tests for deduplication, unavailable byte counters/application attribution, unknown direction/capabilities, demo source separation and empty observation.
 - This phase adds shared data only; router collection, AI inference and defense execution remain unimplemented. No router/LLM/real blocking validation is claimed.
+
+## Protection status clarity (2026-10-14)
+
+- Build passed; Vitest 24 tests passed. Status tests reject confirmed display during lost/busy/stale/demo states and missing provider identity.
+- Browser plugin skill unavailable (`Browser plugin not available`); bundled Playwright with installed Chrome tested http://127.0.0.1:1420 at 1440×960 and 390×960. Page identity/content, no framework overlay, screenshots and no horizontal page overflow verified.
+- Japanese demo status → English locale → Save intention (not applied) → Rule saved · not applied verified. No JavaScript runtime errors; existing favicon.ico returns 404.
+- Signed-provider lifecycle rendering and real blocking/recovery remain untested. Screenshots/scripts kept in /tmp, outside repository.
