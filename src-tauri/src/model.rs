@@ -41,6 +41,11 @@ pub struct Preferences {
     pub view: String,
     pub panel: String,
     pub mode: String,
+    #[serde(default = "default_auto_updates")]
+    pub auto_updates: bool,
+}
+fn default_auto_updates() -> bool {
+    true
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -49,6 +54,7 @@ impl Default for Preferences {
             view: "map".into(),
             panel: "right".into(),
             mode: "live".into(),
+            auto_updates: true,
         }
     }
 }
@@ -121,6 +127,8 @@ pub fn group_applications(connections: &[Connection]) -> Vec<ApplicationGroup> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub updates: crate::updates::Snapshot,
+    pub services: crate::services::Snapshot,
     pub ports_focus: u64,
     pub ports: crate::ports::Snapshot,
     pub network: crate::network::NetworkSnapshot,
@@ -140,6 +148,9 @@ pub struct Snapshot {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Command {
+    SetAutoUpdates {
+        enabled: bool,
+    },
     Select {
         id: String,
     },

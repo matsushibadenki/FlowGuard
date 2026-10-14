@@ -53,9 +53,9 @@ host_info['NSSystemExtensionUsageDescription'] = 'FlowGuard uses a local network
 with (output / 'Contents/Info.plist').open('wb') as f:
     plistlib.dump(host_info, f)
 local_network_descriptions = {
-    'en': 'FlowGuard discovers devices on the LAN you select using neighbor information, IPv4 response checks, optional name lookup and manual TCP port checks.',
-    'ja': 'FlowGuardは、選択したLAN上の機器を近隣情報・IPv4応答確認・任意の名前取得と、手動のTCPポート確認で調査します。',
-    'zh-Hans': 'FlowGuard通过邻居信息、IPv4响应检查、可选的名称查询和手动TCP端口检查发现您所选LAN中的设备。',
+    'en': 'FlowGuard discovers devices on the LAN you select using neighbor information, IPv4 response checks, optional name lookup, manual TCP port checks and service response checks.',
+    'ja': 'FlowGuardは、選択したLAN上の機器を近隣情報・IPv4応答確認・任意の名前取得と、手動のTCPポート・サービス応答確認で調査します。',
+    'zh-Hans': 'FlowGuard通过邻居信息、IPv4响应检查、可选名称查询、手动TCP端口与服务响应检查调查您所选LAN中的设备。',
 }
 descriptions = {
     'en': 'FlowGuard uses a local network extension to apply your app connection rules.',

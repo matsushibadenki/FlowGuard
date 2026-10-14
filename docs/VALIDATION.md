@@ -124,3 +124,52 @@ CSV parser: 4 records / 24 columns, previous status/time and baseline operation 
 Unsigned Tauri `.app` build completed. The comparison-only filter was also checked after invalidation: it deactivates and leaves the current rows visible. Temporary browser fixtures/tabs were removed, the task-owned local dev server was stopped, and the existing native app was not restarted.
 
 Native package refreshed successfully: packaged=true, signed=false, signature_required. The staged app contains the latest comparison/navigation implementation.
+
+
+## LAN IPv6 TCP (2026-10-14)
+
+Rust default suite: 36 passed, 8 host-only tests ignored. Focused scope tests also pass with IPv6-only interface collection, unscoped link-local records, ULA/global compatible sources, wrong zones, forbidden addresses, outside-prefix targets, /63 rejection, down/disappearing sources and changed masks. An unsigned ::1/lo0 listener test exercised the actual IPv6 worker, open→refused comparison and CSV. The existing IPv4 lo0 test also passed. No real LAN probes were sent.
+
+Frontend: 19 tests passed and production build passed. Synthetic browser fixture verified equivalent IPv6 spelling without a false target warning, details→sheet focus, three comparison outcomes, JA/EN/简体中文 and 375px document width without overflow; console warnings/errors were empty. Rust CSV was independently parsed: 1 record, 26 columns, IPv6/source fields and previous-open/current-refused change. Native floating-window restoration and full OS CSV saving remain Pending.
+
+Real LAN link-local/ULA/global routing, privacy address rotation, multiple interfaces, VPN and local-network permission denial remain Pending. The user's running native app was not manipulated or restarted.
+
+Unsigned Tauri debug .app and native packaging completed. Staging preflight: packaged=true, signed=false, signature_required. Temporary fixture sources and browser tab were removed; the task-owned Vite server was stopped and its viewport override reset.
+
+
+## Open-port service identification / service sheet (2026-10-14)
+
+Rust default suite: 39 passed, 11 host-only tests ignored. New tests cover protocol evidence versus port candidates, generic FTP-style 220 greeting rejection, bounded/untrusted responses, formula-safe CSV, open-only plan selection, invalid mode/old operation/changed source/empty or >64 targets, job exclusion, cancellation with frozen rows, stale callbacks, shared detail selection and network invalidation. Frontend: 21 passed; production build passed.
+
+Three host-only service tests passed without signing, using only IPv4/IPv6 loopback: actual HTTP HEAD plus SSH/SMTP greetings; verified HTTPS on both families with a test trust root; rejection of untrusted certificates and a trusted certificate with the wrong IP identity; actual IPv6 service worker and total timeout. The test key is public fixture data and is never used in production trust configuration. OS root loading and rejection of the test certificate using those roots were also checked; real LAN services were not exercised end-to-end. IPv6 worker CSV was parsed independently: 1 record / 20 columns, captured mode, error field, service, source-port operation and IPv6 family.
+
+CUA in-app browser, temporary fixture outside the repository: synthetic services only. JA/EN/简体中文, product search to one row, shared-selection mock detail, TLS-failure filter, prior-port-operation warning, focus-visible information tooltip, service→TCP sheet→service navigation and 375px layout verified. Page identity/nonblank/no framework overlay and final console health passed (no warning/error). Table scroll remained inside the sheet; narrow details wrapped without page overflow. Screenshot: flowguard-services-qa.png. Initial fixture module/preamble loading was corrected before the final checks. No native window manipulation, actual LAN service probes, network setting changes or extension activation occurred.
+
+Pending: real LAN responses, virtual hosts/SNI, native local-network permission, real-service OS trust-store integration, native CSV saving, certificate expiry/issuer display and service history comparison. Product/version values are self-reported, and no internal service inventory or health assessment is implied.
+
+The refactored shared socket connection also passed the existing IPv4 and IPv6 TCP loopback regression tests. Final temporary browser fixtures were removed from /private/tmp, the task-owned Vite server was stopped, and its viewport override was reset.
+
+Final unsigned Tauri debug .app and native package refresh completed. Preflight: packaged=true, signed=false, signature_required. Local-network usage descriptions include service-response checks in English, Japanese and Simplified Chinese; staged metadata was checked. The running application was left open and was not restarted.
+
+
+## Software updater and release preparation (2026-10-14)
+
+Rust default suite: 44 passed, 13 host-only tests ignored. Two separately executed updater host tests passed with final reqwest 0.13.5: real plugin manifest/download/signature verification and disposable bundle replacement; tampered payload rejection; backup restoration after failed installation or failed verification. The loopback listener requires execution outside the filesystem/network sandbox. No installed user application was replaced. Frontend: 23 tests passed; production build and Rust formatting checks passed. Release script Python compilation, stable-version/two-architecture manifest checks and CI YAML parsing passed.
+
+Synthetic browser fixture checked download progress/cancellation, ready/installing states, development and active-job installation gates, signature failure, release notes, automatic-update preference and JA/EN/简体中文. Narrow 375px layout had no page overflow; information tooltip worked with keyboard focus. Real preview Settings displayed the update panel with native-only actions disabled. Console warnings/errors were empty. Screenshot: flowguard-updates-qa.png (synthetic). Temporary fixture sources/tabs were removed, viewport override reset and task-owned Vite server stopped.
+
+Final unsigned Tauri debug app and native packaging completed: packaged=true, signed=false, signature_required. The running native app was left open. Development builds disable automatic update traffic and installation. Production defaults to scheduled checks/downloads; installation/restart requires the update button. Signature/version/archive limits and application backup are implemented; signed real-app Gatekeeper, restart, data retention and active Extension update behavior remain Pending.
+
+Developer ID Application identities and the flowguard notarization Keychain profile were verified without printing credentials. Matching FlowGuard Developer ID provisioning profiles remain unavailable. User selected initial publication with both host and Network Extension: no host-only release, GitHub publication, notarization submission or production install was performed. Full distribution awaits profiles for com.flowguard.desktop and com.flowguard.filter. The updater private key stays in the ignored local .release-secrets directory; it is not a release asset.
+
+
+## Supplied Developer ID profiles (2026-10-14)
+
+Decoded the user-supplied host and extension profiles with security cms. Both have exact App IDs (com.flowguard.desktop / com.flowguard.filter), Team 3WH28SSRZC, ProvisionsAllDevices=true, expiry 2044-10-09 and the installed Developer ID certificate SHA-1 3D0BB7BD18E71AD3DA59704A68B4E9349FC06FB6. Both lack com.apple.developer.networking.networkextension, and the host also lacks com.apple.developer.system-extension.install. The current entitlement requirements are therefore unsatisfied. Full-bundle signing/notarization/publication remain Pending regenerated capability-enabled profiles. No profile was modified, no signed release was produced and no GitHub release was published.
+
+
+## Full-bundle Developer ID release (2026-10-14)
+
+Regenerated profiles in ignored docs-private match the selected Developer ID certificate and both App IDs. Required Content Filter/System Extension capabilities are present. Release v0.1.0 aarch64 includes the host, Swift bridge/runtime and System Extension. Signing binds App ID and Team ID explicitly. Fixed SecCodeCopySigningInformation to request kSecCSSigningInformation: the signed bridge preflight now reports packaged=true, signed=true, requires_activation and the exact team-qualified Mach service. No activation or installation was performed.
+
+Final notarization: Accepted, submission baa9acc4-7782-483e-b6bf-340fcbc34df4. Staple/validate and Gatekeeper assessment passed (Notarized Developer ID). Private signing keys, profiles and notarization archives stay Git-ignored; GitHub assets are installer ZIP, updater archive/signature, latest.json and SHA256SUMS only. Frontend 23 tests passed. Signed-app update restart and activated Extension behavior remain Pending.

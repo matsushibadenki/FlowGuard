@@ -1,0 +1,31 @@
+name: Verify FlowGuard
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt && rustup default stable
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Verify frontend
+        run: npm test && npm run build
+      - name: Verify Rust and update signature policy
+        working-directory: src-tauri
+        run: cargo test --locked --lib
+      - name: Verify controlled updater transaction
+        working-directory: src-tauri
+        run: cargo test --locked --lib updates::tests -- --ignored
+      - name: Check formatting
+        working-directory: src-tauri
+        run: cargo fmt --check

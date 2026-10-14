@@ -13,7 +13,7 @@ export function LanDevices({snapshot,t,native,onSelect=selectLanDevice,onExport=
  const options=snapshot.network.addresses.filter(a=>/^en\d+$/.test(a.interface)&&a.up);
  const choice=options.find(a=>`${a.interface}|${a.address}`===selected)??options[0];
  const range=choice?lanRange(choice):null;const job=snapshot.discovery;const inventory=snapshot.inventory;const busy=job.stage==='running'||job.stage==='cancelling';
- const portsBusy=['running','cancelling'].includes(snapshot.ports.stage);
+ const portsBusy=['running','cancelling'].includes(snapshot.ports.stage)||['running','cancelling'].includes(snapshot.services.stage);
  const rows=inventory.rows.filter(r=>matchesDevice(r.device,search)).sort((a,b)=>(descending?-1:1)*addressCompare(a.device.address,b.device.address));
  const time=(timestamp:number)=>new Intl.DateTimeFormat(snapshot.document.preferences.locale,{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(timestamp*1000);
  async function exportCsv(){setError(null);try{const text=await onExport(inventory.generation);const url=URL.createObjectURL(new Blob([text],{type:'text/csv;charset=utf-8'}));const anchor=document.createElement('a');anchor.href=url;anchor.download=`flowguard-lan-${inventory.generation}.csv`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{setError('lanExportError');}}

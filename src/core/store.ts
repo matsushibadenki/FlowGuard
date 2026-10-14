@@ -16,9 +16,9 @@ export function sampleConnections():Connection[]{
 }
 function emit(value:Snapshot){if(snapshot&&value.revision<snapshot.revision)return;snapshot=value;for(const l of listeners)l();}
 function preview(){
- let document:Document={rules:[],preferences:{locale:'ja',view:'map',panel:'right',mode:'demo'}};
- try {const stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored&&validRules(stored.rules)) {document.rules=stored.rules;if(['ja','en','zh-CN'].includes(stored.preferences?.locale))document.preferences.locale=stored.preferences.locale;}}catch{/* Corrupt preview storage is isolated from desktop documents. */}
- const connections=sampleConnections();emit({portsFocus:0,ports:{comparison:{status:"",baselineOperation:null,rows:[]},operation:0,sourceAddress:"",requestedPorts:[],selection:"",stage:"",target:"",interface:"",generation:0,completed:0,total:0,rows:[],error:null},inventory:{generation:0,localAddress:"",netmask:"",status:"first",baselineAt:null,rows:[],selectedId:null,panel:"docked"},discovery:{nameMode:"none",namesCompleted:0,namesTotal:0,stage:"idle",interface:"",range:"",active:false,completed:0,total:0,devices:[],errors:[],observedAt:null},network:{addresses:[],observedAt:null,error:null},revision:0,extension:{...defaultExtension},document,connections,applications:groupApplications(connections),history:connections,selectedId:connections[0].id,firewall:{enabled:null,enforcement:'unavailable',observer:'demo',error:null},lastObserved:null,layout:connections.map((c,i)=>({id:c.id,y:72+i*100}))});
+ let document:Document={rules:[],preferences:{locale:'ja',view:'map',panel:'right',mode:'demo',autoUpdates:true}};
+ try {const stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored&&validRules(stored.rules)) {document.rules=stored.rules;if(['ja','en','zh-CN'].includes(stored.preferences?.locale))document.preferences.locale=stored.preferences.locale;if(typeof stored.preferences?.autoUpdates==='boolean')document.preferences.autoUpdates=stored.preferences.autoUpdates;}}catch{/* Corrupt preview storage is isolated from desktop documents. */}
+ const connections=sampleConnections();emit({updates:{stage:"idle",operation:0,currentVersion:"0.1.0",version:null,notes:null,checkedAt:null,downloaded:0,total:null,error:null,development:true},services:{operation:0,portOperation:0,generation:0,target:"",sourceAddress:"",interface:"",family:"",mode:"",stage:"",total:0,completed:0,rows:[],error:null,selectedPort:null},portsFocus:0,ports:{family:"",sourceNetmask:"",comparison:{status:"",baselineOperation:null,rows:[]},operation:0,sourceAddress:"",requestedPorts:[],selection:"",stage:"",target:"",interface:"",generation:0,completed:0,total:0,rows:[],error:null},inventory:{generation:0,localAddress:"",netmask:"",status:"first",baselineAt:null,rows:[],selectedId:null,panel:"docked"},discovery:{nameMode:"none",namesCompleted:0,namesTotal:0,stage:"idle",interface:"",range:"",active:false,completed:0,total:0,devices:[],errors:[],observedAt:null},network:{addresses:[],observedAt:null,error:null},revision:0,extension:{...defaultExtension},document,connections,applications:groupApplications(connections),history:connections,selectedId:connections[0].id,firewall:{enabled:null,enforcement:'unavailable',observer:'demo',error:null},lastObserved:null,layout:connections.map((c,i)=>({id:c.id,y:72+i*100}))});
 }
 let initPromise:Promise<void>|undefined;
 export function initialize(){
@@ -34,7 +34,8 @@ export async function dispatch(command:Command, expectedRules:Rule[]=snapshot?.d
  const next:Snapshot=structuredClone(snapshot);const doc=next.document;
  switch(command.type){
  case 'select':if(!next.connections.some(c=>c.id===command.id))throw Error('connection_expired');next.selectedId=command.id;break;
- case 'setView':doc.preferences.view=command.view;break;
+ case 'setAutoUpdates':doc.preferences.autoUpdates=command.enabled;break;
+  case 'setView':doc.preferences.view=command.view;break;
  case 'setLocale':doc.preferences.locale=command.locale;break;
  case 'setMode':if(command.mode==='live')throw Error('macos_required');break;
  case 'setPanel':doc.preferences.panel=command.panel;break;
@@ -81,3 +82,13 @@ export async function stopLanPorts(){if(!native)throw Error("desktop_required");
 export async function lanPortsCsv(operation:number):Promise<string>{if(!native)throw Error("desktop_required");return invoke<string>("lan_ports_csv",{operation});}
 
 export async function openLanPorts(id:string,generation:number){if(!native)throw Error("desktop_required");emit(await invoke<Snapshot>("open_lan_ports",{id,generation}));}
+
+export async function startServices(operation:number,mode:import('./types').ServiceMode){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('start_services',{operation,mode}));}
+export async function stopServices(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('stop_services'));}
+export async function servicesCsv(operation:number):Promise<string>{if(!native)throw Error('desktop_required');return invoke<string>('services_csv',{operation});}
+export async function selectService(operation:number,port:number){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('select_service',{operation,port}));}
+
+export async function checkUpdate(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('check_update'));}
+export async function downloadUpdate(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('download_update'));}
+export async function cancelUpdate(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('cancel_update'));}
+export async function installUpdate(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('install_update'));}

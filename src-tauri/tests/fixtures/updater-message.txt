@@ -1,0 +1,5 @@
+# Service TLS fixtures
+
+These self-signed certificates and the private key are public test data, not deployment credentials. Tests add the matching certificate only to their own in-memory trust store; nothing is installed in macOS or production configuration. The wrong-IP certificate uses the same key with SAN 127.0.0.2; positive tests use 127.0.0.1 and ::1. Certificates were generated for 10 years; regenerate before expiry.
+
+Generate a test-only RSA key and self-signed certificates with OpenSSL `req -x509 -newkey rsa:2048 -nodes -days 3650`. Use `subjectAltName=IP:127.0.0.1,IP:::1` for the positive certificate and `subjectAltName=IP:127.0.0.2` for the negative certificate, with `basicConstraints=critical,CA:FALSE`, `keyUsage=critical,digitalSignature,keyEncipherment` and `extendedKeyUsage=serverAuth`. Export certificates with `x509 -outform DER`, and the key with `pkcs8 -topk8 -nocrypt -outform DER`. Never reuse a deployment key.

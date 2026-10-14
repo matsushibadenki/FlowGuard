@@ -48,3 +48,10 @@ pnpm-debug.log*
 # Python packaging-tool caches
 __pycache__/
 *.pyc
+
+# Local updater signing keys and generated release artifacts
+/.release-secrets/
+/release/
+
+# Private documentation
+/docs-private/

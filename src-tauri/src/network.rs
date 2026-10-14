@@ -58,6 +58,13 @@ fn parse(output: &str) -> Vec<InterfaceAddress> {
         if name.is_empty() || parts.len() < 2 || !["inet", "inet6"].contains(&parts[0]) {
             continue;
         }
+        if parts[0] == "inet6"
+            && parts
+                .iter()
+                .any(|p| ["tentative", "duplicated", "detached", "deprecated"].contains(p))
+        {
+            continue;
+        }
         let raw = parts[1];
         let valid = if parts[0] == "inet" {
             raw.parse::<std::net::Ipv4Addr>().is_ok()
@@ -101,6 +108,13 @@ fn parse(output: &str) -> Vec<InterfaceAddress> {
 mod tests {
     use super::*;
     #[cfg(target_os = "macos")]
+    #[test]
+    fn unusable_ipv6_sources_are_not_offered() {
+        let output="en0: flags=1<UP>\n inet6 fe80::1%en0 prefixlen 64 secured\n inet6 fd00::1 prefixlen 64 tentative\n inet6 fd00::2 prefixlen 64 duplicated\n inet6 fd00::3 prefixlen 64 deprecated\n inet6 fd00::4 prefixlen 64 detached\n";
+        let rows = parse(output);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].address, "fe80::1%en0");
+    }
     #[test]
     #[ignore = "Reads this Mac's local interfaces only; no network scan or configuration change"]
     fn reads_real_local_interfaces_without_network_probes() {

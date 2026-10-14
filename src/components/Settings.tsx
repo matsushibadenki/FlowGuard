@@ -1,3 +1,4 @@
+import {SoftwareUpdate} from './SoftwareUpdate';
 import {extensionLabel} from '../core/enforcement';
 import {Eye,LockKeyhole,Shield,PanelLeft,PanelRight} from 'lucide-react';
 import type {Locale,Snapshot} from '../core/types';
@@ -15,5 +16,6 @@ export function Settings({snapshot,t,onError}:{snapshot:Snapshot;t:T;onError:(e:
  <p>{t('initialPolicyHelp')}</p><div className="button-row extension-actions"><button className="secondary-button" disabled={!native||!snapshot.extension.packaged||!snapshot.extension.runtimeAvailable||snapshot.extension.busy||snapshot.extension.stage==='removed'} onClick={()=>void disableExtension().catch(onError)}>{t('disableExtension')}</button><button className="secondary-button" disabled={!native||!snapshot.extension.packaged||!snapshot.extension.runtimeAvailable||snapshot.extension.busy||snapshot.extension.stage==='removed'} onClick={()=>void disableExtension(true).catch(onError)}>{t('removeExtension')}</button></div><p>{t('removeExtensionHelp')}</p>
  {snapshot.extension.providerRevision!==null&&<p>{t('providerRevision')}: {snapshot.extension.providerRevision} · {snapshot.extension.appliedRuleIds.length} {t('ruleCount')}</p>}
  </>}</section>)}
+ <SoftwareUpdate snapshot={snapshot}/>
  </div>;
 }

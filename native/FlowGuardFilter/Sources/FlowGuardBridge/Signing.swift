@@ -8,7 +8,7 @@ public enum BridgeSigning {
         var staticCode: SecStaticCode?
         guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
         var info: CFDictionary?
-        guard SecCodeCopySigningInformation(staticCode, [], &info) == errSecSuccess,
+        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
               let team = (info as? [String: Any])?[kSecCodeInfoTeamIdentifier as String] as? String,
               team.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil else { return nil }
         return team

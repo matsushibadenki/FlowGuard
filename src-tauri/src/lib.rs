@@ -11,11 +11,113 @@ mod network;
 mod observer;
 mod ports;
 mod renderer;
+mod services;
 mod state;
+mod updates;
 use model::{Command, Rule, Snapshot};
 use state::SharedState;
 use tauri::{Emitter, Manager};
 
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    updates::check(app, false).await
+}
+#[tauri::command]
+async fn download_update(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    updates::download(app).await
+}
+#[tauri::command]
+fn cancel_update(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let (_, s) = app.state::<SharedState>().update_change(|m| m.cancel())?;
+    let _ = app.emit("state-changed", &s);
+    Ok(s)
+}
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let exe = std::env::current_exe().map_err(|_| "install_failed")?;
+    let bundle = exe
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+        .ok_or("install_failed")?;
+    if bundle.file_name().and_then(|p| p.to_str()) != Some("FlowGuard.app")
+        || bundle
+            .to_string_lossy()
+            .chars()
+            .any(|c| c == '\\' || c == '\'' || c == '"' || c.is_control())
+    {
+        return Err("install_failed".into());
+    }
+    let (op, update, bytes, s) = app.state::<SharedState>().begin_update_install()?;
+    let _ = app.emit("state-changed", s);
+    let bundle = bundle.to_path_buf();
+    let installed = tauri::async_runtime::spawn_blocking(move || {
+        updates::install_with_backup(update, bytes, &bundle)
+    })
+    .await;
+    if !matches!(installed, Ok(Ok(()))) {
+        let (_, s) = app.state::<SharedState>().update_change(|m| {
+            m.fail(
+                op,
+                if matches!(&installed,Ok(Err(error))if error=="rollback_failed") {
+                    "rollback_failed"
+                } else {
+                    "install_failed"
+                },
+            )
+        })?;
+        let _ = app.emit("state-changed", &s);
+        return Ok(s);
+    }
+    app.restart()
+}
+#[tauri::command]
+async fn start_services(
+    app: tauri::AppHandle,
+    operation: u64,
+    mode: String,
+) -> Result<Snapshot, String> {
+    let network = tauri::async_runtime::spawn_blocking(network::observe)
+        .await
+        .map_err(|_| "interfaces_unavailable")?;
+    let plan = services::Plan::new(
+        &app.state::<SharedState>().snapshot()?,
+        &network,
+        operation,
+        &mode,
+    )?;
+    let (op, snapshot) = app.state::<SharedState>().begin_services(&plan)?;
+    let _ = app.emit("state-changed", &snapshot);
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        services::run(
+            plan,
+            |result| {
+                if let Ok(s) = handle.state::<SharedState>().update_services(op, result) {
+                    let _ = handle.emit("state-changed", s);
+                }
+            },
+            || handle.state::<SharedState>().services_cancelled(op),
+        )
+    });
+    Ok(snapshot)
+}
+#[tauri::command]
+fn stop_services(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let s = app.state::<SharedState>().stop_services()?;
+    let _ = app.emit("state-changed", &s);
+    Ok(s)
+}
+#[tauri::command]
+fn services_csv(app: tauri::AppHandle, operation: u64) -> Result<String, String> {
+    app.state::<SharedState>().services_csv(operation)
+}
+#[tauri::command]
+fn select_service(app: tauri::AppHandle, operation: u64, port: u16) -> Result<Snapshot, String> {
+    let s = app.state::<SharedState>().select_service(operation, port)?;
+    let _ = app.emit("state-changed", &s);
+    Ok(s)
+}
 #[tauri::command]
 async fn open_lan_ports(
     app: tauri::AppHandle,
@@ -462,6 +564,7 @@ async fn dock_panel(app: tauri::AppHandle, panel: String) -> Result<Snapshot, St
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let path = app.path().app_data_dir()?.join("document-v1.json");
             app.manage(SharedState::load(path).map_err(std::io::Error::other)?);
@@ -485,6 +588,7 @@ pub fn run() {
                 })
                 .map_err(std::io::Error::other)?;
             app.manage(HostRuntime(runtime));
+            updates::schedule(app.handle().clone());
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 let (connections, firewall) = observer::observe();
@@ -531,6 +635,14 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            check_update,
+            download_update,
+            cancel_update,
+            install_update,
+            start_services,
+            stop_services,
+            services_csv,
+            select_service,
             start_lan_ports,
             open_lan_ports,
             lan_ports_csv,
