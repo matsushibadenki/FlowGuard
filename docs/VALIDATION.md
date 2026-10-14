@@ -175,3 +175,26 @@ Regenerated profiles in ignored docs-private match the selected Developer ID cer
 Final notarization: Accepted, submission baa9acc4-7782-483e-b6bf-340fcbc34df4. Staple/validate and Gatekeeper assessment passed (Notarized Developer ID). Private signing keys, profiles and notarization archives stay Git-ignored; GitHub assets are installer ZIP, updater archive/signature, latest.json and SHA256SUMS only. Frontend 23 tests passed. Signed-app update restart and activated Extension behavior remain Pending.
 
 Production updater validation accepted the final archive using the embedded production public key and exact version/archive policy. Rust default suite: 44 passed, 14 ignored; ephemeral-key TLS host test passed. The initial public-push approval review rejected a tracked test TLS private key. Removed all TLS credential fixtures from the staged publication and replaced them with short-lived OpenSSL credentials generated in a temporary test directory; verification passed. No private TLS/updater/Apple key was published. GitHub Release v0.1.0 is public at https://github.com/matsushibadenki/FlowGuard/releases/tag/v0.1.0 with five distribution assets.
+
+
+## Startup policy persistence on normal apply (2026-10-14)
+
+Normal apply now calls Swift host ABI v3 to persist the validated real policy in our enabled NEFilterManager configuration, reloads preferences and confirms exact policy bytes and ownership before live XPC synchronization. No unrelated vendor fields are discarded. Rust waits on an operation-token-specific callback with a 30s bound; late callbacks cannot satisfy another request. Persistence failures never reach live synchronization or applied acknowledgement. A saved policy can still become the next startup policy after live synchronization fails; automatic reconciliation remains Next.
+
+Rust default suite: 44 passed, 14 ignored. Actual unsigned Swift FFI gate passed for activation, disable/removal and persistence, with no OS mutation. Swift bridge suite: 10 passed including old-policy, disabled, foreign-provider, missing and invalid-data persistence confirmation rejection. Production frontend and unsigned Tauri app built. Signed OS preference saving/provider restart and uncertain-timeout recovery remain Pending. Published v0.1.0 assets were not changed; its GitHub CI completed successfully.
+
+
+## Extension restart and uncertain-ack recovery (2026-10-14)
+
+Rust tests cover restart detection, explicit-intent requirement, unsaved edits blocking recovery, retry budget/backoff, late acknowledgements after removal and atomic recovery admission during updater installation. Empty/nonempty SHA-256 golden values agree with Swift, and same-count policy edits change the digest. Swift receiver tests seed actual startup state, observe a changed policy after a discarded acknowledgement and omit the digest while unavailable. Swift policy tests (3) and bridge/anonymous-XPC tests (11) passed. Rust default suite: 49 passed, 14 ignored. Unsigned staging retains ABI v3 signature gates.
+
+No real Network Extension restart, activation, OS preference mutation, LAN probes or running-app replacement was performed. Signed actual-provider crash, real XPC acknowledgement loss, OS-save timeout and automatic restart recovery remain Pending. Recovery intent is intentionally session-only; no implicit application of newly edited rules or recovery after host-process restart is claimed. Published release assets are unchanged.
+
+Final current-code unsigned Tauri debug build and native staging completed: packaged=true, signed=false, signature_required. Final Rust 49/14 result and formatting/diff checks passed. The actual unsigned C ABI v3 signature-gate test passed (1). Running applications were not restarted.
+
+## AI Security Phase 1 (2026-10-14)
+
+- `npm run build`: passed.
+- `npm test`: 23 passed across 7 files.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 51 passed, 14 explicitly ignored, 0 failed. Includes normalization tests for deduplication, unavailable byte counters/application attribution, unknown direction/capabilities, demo source separation and empty observation.
+- This phase adds shared data only; router collection, AI inference and defense execution remain unimplemented. No router/LLM/real blocking validation is claimed.

@@ -21,10 +21,19 @@ public func activate(_ bytes: UnsafePointer<UInt8>?, _ length: UInt64, _ callbac
     }
 }
 @_cdecl("flowguard_host_abi_version")
-public func abiVersion() -> Int32 { 2 }
+public func abiVersion() -> Int32 { 3 }
 
 @_cdecl("flowguard_host_disable")
 public func disable(_ remove: Int32, _ callback: @escaping LifecycleCallback, _ token: UInt64) {
     guard canActivate() == 1 else { "signature_required".withCString { callback($0, token) }; return }
     DispatchQueue.main.async { controller.disable(remove: remove != 0) { status, _ in status.withCString { callback($0, token) } } }
+}
+
+@_cdecl("flowguard_host_persist_policy")
+public func persistPolicy(_ bytes: UnsafePointer<UInt8>?, _ length: UInt64, _ callback: @escaping LifecycleCallback, _ token: UInt64) {
+    guard canActivate() == 1 else { "signature_required".withCString { callback($0, token) }; return }
+    guard let bytes, length <= 4 * 1024 * 1024 else { "invalid_initial_policy".withCString { callback($0, token) }; return }
+    let policy = Data(bytes: bytes, count: Int(length))
+    guard (try? InitialPolicy.decode(policy)) != nil else { "invalid_initial_policy".withCString { callback($0, token) }; return }
+    DispatchQueue.main.async { controller.persist(policy: policy) { status, _ in status.withCString { callback($0, token) } } }
 }

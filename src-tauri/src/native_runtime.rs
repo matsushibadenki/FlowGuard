@@ -14,6 +14,7 @@ pub struct NativeRuntime {
     handle: *mut c_void,
     preflight: unsafe extern "C" fn() -> i32,
     activate: unsafe extern "C" fn(*const u8, u64, Callback, u64),
+    persist: unsafe extern "C" fn(*const u8, u64, Callback, u64),
     disable: unsafe extern "C" fn(i32, Callback, u64),
 }
 // Symbols are immutable; Swift dispatches signed lifecycle requests onto the main queue.
@@ -38,7 +39,7 @@ impl NativeRuntime {
             if abi.is_null()
                 || unsafe {
                     std::mem::transmute::<*mut c_void, unsafe extern "C" fn() -> i32>(abi)()
-                } != 2
+                } != 3
             {
                 unsafe {
                     dlclose(handle);
@@ -47,8 +48,9 @@ impl NativeRuntime {
             }
             let preflight = unsafe { dlsym(handle, c"flowguard_host_can_activate".as_ptr()) };
             let activate = unsafe { dlsym(handle, c"flowguard_host_activate".as_ptr()) };
+            let persist = unsafe { dlsym(handle, c"flowguard_host_persist_policy".as_ptr()) };
             let disable = unsafe { dlsym(handle, c"flowguard_host_disable".as_ptr()) };
-            if preflight.is_null() || activate.is_null() || disable.is_null() {
+            if preflight.is_null() || activate.is_null() || disable.is_null() || persist.is_null() {
                 unsafe {
                     dlclose(handle);
                 }
@@ -64,6 +66,12 @@ impl NativeRuntime {
                         *mut c_void,
                         unsafe extern "C" fn(*const u8, u64, Callback, u64),
                     >(activate)
+                },
+                persist: unsafe {
+                    std::mem::transmute::<
+                        *mut c_void,
+                        unsafe extern "C" fn(*const u8, u64, Callback, u64),
+                    >(persist)
                 },
                 disable: unsafe {
                     std::mem::transmute::<*mut c_void, unsafe extern "C" fn(i32, Callback, u64)>(
@@ -84,8 +92,50 @@ impl NativeRuntime {
     pub fn activate(&self, policy: &[u8], callback: Callback, token: u64) {
         unsafe { (self.activate)(policy.as_ptr(), policy.len() as u64, callback, token) }
     }
+    pub fn persist(&self, policy: &[u8], callback: Callback, token: u64) {
+        unsafe { (self.persist)(policy.as_ptr(), policy.len() as u64, callback, token) }
+    }
     pub fn disable(&self, remove: bool, callback: Callback, token: u64) {
         unsafe { (self.disable)(i32::from(remove), callback, token) }
+    }
+}
+static PERSIST_REPLIES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<u64, std::sync::mpsc::Sender<String>>>,
+> = std::sync::OnceLock::new();
+static PERSIST_TOKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+extern "C" fn persisted(status: *const c_char, token: u64) {
+    if let Some(sender) = PERSIST_REPLIES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .remove(&token)
+    {
+        let _ = sender.send(callback_status(status).unwrap_or_else(|| "failed".into()));
+    }
+}
+impl NativeRuntime {
+    /// Called on a Rust blocking worker; Swift preference operations remain on the main queue.
+    pub fn persist_blocking(&self, policy: &[u8]) -> Result<(), String> {
+        let token = PERSIST_TOKEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        PERSIST_REPLIES
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .insert(token, sender);
+        self.persist(policy, persisted, token);
+        let status = receiver.recv_timeout(std::time::Duration::from_secs(30));
+        PERSIST_REPLIES
+            .get()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .remove(&token);
+        match status {
+            Ok(status) if status == "policy_persisted" => Ok(()),
+            Ok(status) => Err(format!("startup_policy_{status}")),
+            Err(_) => Err("startup_policy_timeout".into()),
+        }
     }
 }
 // Runtime stays loaded for the app lifetime: pending Swift callbacks must not point into unloaded code.
@@ -139,6 +189,17 @@ mod tests {
                 .recv_timeout(std::time::Duration::from_secs(2))
                 .unwrap(),
             "signature_required"
+        );
+        runtime.persist(br#"{"rules":[]}"#, receive, 7);
+        assert_eq!(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap(),
+            "signature_required"
+        );
+        assert_eq!(
+            runtime.persist_blocking(br#"{"rules":[]}"#).unwrap_err(),
+            "startup_policy_signature_required"
         );
         for remove in [false, true] {
             runtime.disable(remove, receive, 7);

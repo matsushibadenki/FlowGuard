@@ -5,6 +5,9 @@ import FlowGuardPolicy
 public struct InitialPolicy: Codable {
     public static let key = "flowguard.initialPolicy.v1"
     public let rules: [PolicyRule]
+    public static func persisted(enabled: Bool, provider: String?, stored: Data?, requested: Data) -> Bool {
+        enabled && provider == "com.flowguard.filter" && stored == requested && (try? decode(requested)) != nil
+    }
     public static func decode(_ data: Data) throws -> InitialPolicy {
         guard data.count <= 4 * 1024 * 1024 else { throw NSError(domain: "FlowGuard.invalid_initial_policy", code: 1) }
         let policy = try JSONDecoder().decode(Self.self, from: data)

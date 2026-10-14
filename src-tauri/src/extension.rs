@@ -68,6 +68,8 @@ pub struct BridgeStatus {
     pub status: String,
     pub rule_count: usize,
     pub error: Option<String>,
+    #[serde(default)]
+    pub policy_digest: Option<String>,
 }
 // Fixed bundled helper and read-only operation; caller cannot choose a executable or service.
 pub fn bridge_status(contents: &Path) -> Result<BridgeStatus, String> {
@@ -87,6 +89,12 @@ pub fn bridge_status(contents: &Path) -> Result<BridgeStatus, String> {
         || status.instance_id.len() != 36
         || status.rule_count > 2000
         || !status.request_id.is_empty()
+        || status.error.is_some()
+        || (status.status == "ready"
+            && !status
+                .policy_digest
+                .as_ref()
+                .is_some_and(|d| d.len() == 64 && d.bytes().all(|b| b.is_ascii_hexdigit())))
     {
         return Err("invalid_bridge_reply".into());
     }
@@ -100,6 +108,15 @@ pub fn sync_rules(contents: &Path, rules: &[crate::model::Rule]) -> Result<Bridg
     }
     let payload = policy_payload(rules)?;
     let live: Vec<_> = rules.iter().filter(|r| r.source == "live").collect();
+    // Authenticated status plus an exact digest resolves an acknowledgement lost to timeout.
+    if let Ok(status) = bridge_status(contents) {
+        if status.status == "ready"
+            && status.error.is_none()
+            && status.policy_digest.as_deref() == Some(&policy_digest(rules))
+        {
+            return Ok(status);
+        }
+    }
     let helper = contents.join("MacOS/FlowGuardBridge");
     let (success, output) = crate::observer::run_bounded_input(
         helper.to_str().ok_or("invalid_bundle_path")?,
@@ -115,6 +132,7 @@ pub fn sync_rules(contents: &Path, rules: &[crate::model::Rule]) -> Result<Bridg
         || reply.status != "accepted"
         || reply.error.is_some()
         || reply.rule_count != live.len()
+        || reply.policy_digest.as_deref() != Some(&policy_digest(rules))
     {
         return Err("invalid_bridge_reply".into());
     }
@@ -137,4 +155,49 @@ pub fn policy_payload(rules: &[crate::model::Rule]) -> Result<Vec<u8>, String> {
         return Err("rule_payload_too_large".into());
     }
     Ok(payload)
+}
+
+pub fn policy_digest(rules: &[crate::model::Rule]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"FlowGuardPolicy/v1");
+    for rule in rules.iter().filter(|r| r.source == "live") {
+        for field in [
+            &rule.id,
+            &rule.app_key,
+            &rule.app,
+            &rule.destination,
+            &rule.port.to_string(),
+            &rule.direction,
+            &rule.action,
+            &rule.updated_at.to_string(),
+            &rule.source,
+        ] {
+            hash.update((field.len() as u64).to_be_bytes());
+            hash.update(field.as_bytes());
+        }
+    }
+    format!("{:x}", hash.finalize())
+}
+
+#[cfg(test)]
+mod digest_tests {
+    #[test]
+    fn empty_policy_matches_swift_contract() {
+        assert_eq!(
+            super::policy_digest(&[]),
+            "6bd8902048330975e577e9d4605d264456a0bcacc8eda9edc591be2383500783"
+        );
+    }
+    #[test]
+    fn nonempty_policy_matches_swift_and_changes_with_content() {
+        let rules: Vec<crate::model::Rule> = serde_json::from_str(r#"[{"id": "one", "appKey": "/Applications/Test.app/Contents/MacOS/Test", "app": "Test", "destination": "1.2.3.4", "port": 443, "direction": "both", "action": "block", "updatedAt": 1, "source": "live"}]"#).unwrap();
+        assert_eq!(
+            super::policy_digest(&rules),
+            "89a3fffc4b5a9dd520965a06291d106ee1f6d878a7bc3a778d992d79a9306afb"
+        );
+        let mut changed = rules.clone();
+        changed[0].action = "allow".into();
+        assert_ne!(super::policy_digest(&rules), super::policy_digest(&changed));
+    }
 }

@@ -34,8 +34,51 @@ pub struct Enforcement {
     pub status: ExtensionStatus,
     applied: Vec<Rule>,
     operation: u64,
+    target: Option<Vec<Rule>>,
+    recovery: bool,
+    retries: u8,
+    retry_at: u64,
 }
 impl Enforcement {
+    pub fn requested(&mut self, rules: &[Rule]) {
+        self.target = Some(
+            rules
+                .iter()
+                .filter(|r| r.source == "live")
+                .cloned()
+                .collect(),
+        );
+        self.recovery = false;
+        self.retries = 0;
+        self.retry_at = 0;
+    }
+    pub fn recovery_due(&self, current: &[Rule], now: u64) -> bool {
+        let live: Vec<_> = current
+            .iter()
+            .filter(|r| r.source == "live")
+            .cloned()
+            .collect();
+        self.recovery
+            && self.status.signed
+            && !self.status.busy
+            && self.retries < 3
+            && now >= self.retry_at
+            && self.target.as_ref() == Some(&live)
+            && crate::extension::policy_payload(&live).is_ok()
+            && ![
+                "disabled",
+                "removed",
+                "approval_required",
+                "restart_required",
+                "configuration_conflict",
+            ]
+            .contains(&self.status.stage.as_str())
+    }
+    pub fn recovering(&mut self, now: u64) {
+        self.retries += 1;
+        self.retry_at = now + 5 * (1u64 << self.retries);
+        self.recovery = false;
+    }
     pub fn generation(&self) -> u64 {
         self.operation
     }
@@ -82,6 +125,10 @@ impl Enforcement {
         {
             return Err("extension_inactive".into());
         }
+        if ["disabling", "removing"].contains(&stage) {
+            self.target = None;
+            self.recovery = false;
+        }
         self.operation += 1;
         self.status.busy = true;
         self.status.stage = stage.into();
@@ -114,6 +161,8 @@ impl Enforcement {
         self.status.busy = ["approval_required", "initial_sync"].contains(&stage);
         if ["disabled", "removed"].contains(&stage) {
             self.applied.clear();
+            self.target = None;
+            self.recovery = false;
             self.status.instance_id = None;
             self.status.provider_revision = None;
         }
@@ -126,6 +175,15 @@ impl Enforcement {
     pub fn fail(&mut self, operation: u64, error: String) {
         if self.operation != operation {
             return;
+        }
+        if ["applying", "initial_sync"].contains(&self.status.stage.as_str()) {
+            self.recovery = self.target.is_some()
+                && ![
+                    "startup_policy_configuration_conflict",
+                    "unsupported_or_invalid_rules",
+                    "startup_policy_signature_required",
+                ]
+                .contains(&error.as_str());
         }
         self.status.stage = "failed".into();
         self.status.error = Some(error);
@@ -146,6 +204,9 @@ impl Enforcement {
         self.status.instance_id = Some(instance);
         self.status.provider_revision = Some(revision);
         self.applied = rules;
+        self.recovery = false;
+        self.retries = 0;
+        self.retry_at = 0;
         self.status.busy = false;
         self.status.error = None;
         self.status.stage = "applied".into();
@@ -178,6 +239,7 @@ impl Enforcement {
             return;
         }
         if !same {
+            self.recovery = self.target.is_some();
             self.applied.clear();
             self.status.applied_rule_ids.clear();
             self.status.stage = "ready".into();
@@ -187,11 +249,33 @@ impl Enforcement {
             self.status.stage = "ready".into();
         }
         self.status.error = None;
+        if self.recovery && self.retries >= 3 {
+            self.status.stage = "failed".into();
+            self.status.error = Some("recovery_exhausted".into());
+        }
+    }
+    pub fn mismatch(&mut self) {
+        if self.status.busy {
+            return;
+        }
+        self.recovery = self.target.is_some();
+        self.applied.clear();
+        self.status.applied_rule_ids.clear();
+        self.status.stage = if self.retries >= 3 { "failed" } else { "ready" }.into();
+        if self.retries >= 3 {
+            self.status.error = Some("recovery_exhausted".into());
+        }
+    }
+    pub fn expected_digest(&self) -> Option<String> {
+        self.target
+            .as_ref()
+            .map(|r| crate::extension::policy_digest(r))
     }
     pub fn disconnected(&mut self, error: &str) {
         if self.status.busy {
             return;
         }
+        self.recovery = self.target.is_some();
         self.status.stage = "disconnected".into();
         self.status.applied_rule_ids.clear();
         self.status.error = Some(error.into());
@@ -294,5 +378,47 @@ mod tests {
         assert_eq!(state.status.stage, "signature_required");
         assert!(!state.status.busy);
         assert!(!state.lifecycle(op, "configuration_saved"));
+    }
+    #[test]
+    fn recovery_requires_explicit_intent_and_bounds_retries() {
+        let mut state = Enforcement::default();
+        state.configure(true, true, true);
+        state.observed("first", 0, true);
+        assert!(!state.recovery_due(&rules(), 100));
+        let op = state.begin("applying").unwrap();
+        state.requested(&rules());
+        state.accepted(op, "first".into(), 1, rules(), &rules());
+        state.observed("restarted", 0, true);
+        assert!(state.recovery_due(&rules(), 100));
+        let mut edited = rules();
+        edited[0].action = "allow".into();
+        assert!(!state.recovery_due(&edited, 100));
+        for now in [100, 120, 160] {
+            let op = state.begin("applying").unwrap();
+            state.recovering(now);
+            state.fail(op, "timeout".into());
+            assert!(!state.recovery_due(&rules(), now));
+        }
+        assert!(!state.recovery_due(&rules(), 1000));
+        let op = state.begin("applying").unwrap();
+        state.requested(&rules());
+        state.fail(op, "timeout".into());
+        assert!(state.recovery_due(&rules(), 1000));
+        let op = state.begin("disabling").unwrap();
+        state.fail(op, "timeout".into());
+        assert!(!state.recovery_due(&rules(), 1000));
+    }
+    #[test]
+    fn recovery_late_ack_cannot_overwrite_disable() {
+        let mut state = Enforcement::default();
+        state.configure(true, true, true);
+        let old = state.begin("applying").unwrap();
+        state.requested(&rules());
+        state.fail(old, "timeout".into());
+        let current = state.begin("removing").unwrap();
+        state.lifecycle(current, "removed");
+        state.accepted(old, "late".into(), 1, rules(), &rules());
+        assert_eq!(state.status.stage, "removed");
+        assert!(state.status.applied_rule_ids.is_empty());
     }
 }

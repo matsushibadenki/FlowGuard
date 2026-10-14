@@ -16,7 +16,7 @@ export type PortPreset = 'common' | 'web' | 'admin' | 'range';
 export interface PortRow {port:number;status:string;elapsedMs:number;observedAt:number}
 export interface PortComparison {status:string;baselineOperation:number|null;rows:{port:number;kind:string;previous:PortRow|null}[]}
 export interface PortSnapshot {family:string;sourceNetmask:string;comparison:PortComparison;operation:number;sourceAddress:string;requestedPorts:number[];selection:PortPreset|'';stage:string;target:string;interface:string;generation:number;completed:number;total:number;rows:PortRow[];error:string|null}
-export interface Snapshot {updates:UpdateSnapshot;services:ServiceSnapshot;portsFocus:number;ports:PortSnapshot;inventory:InventorySnapshot;discovery:DiscoverySnapshot;network:NetworkSnapshot;revision:number;extension:ExtensionStatus;document:Document;connections:Connection[];applications:ApplicationGroup[];history:Connection[];selectedId:string|null;firewall:{enabled:boolean|null;enforcement:string;observer:string;error:string|null};lastObserved:number|null;layout:{id:string;y:number}[]}
+export interface Snapshot {security:SecuritySnapshot;updates:UpdateSnapshot;services:ServiceSnapshot;portsFocus:number;ports:PortSnapshot;inventory:InventorySnapshot;discovery:DiscoverySnapshot;network:NetworkSnapshot;revision:number;extension:ExtensionStatus;document:Document;connections:Connection[];applications:ApplicationGroup[];history:Connection[];selectedId:string|null;firewall:{enabled:boolean|null;enforcement:string;observer:string;error:string|null};lastObserved:number|null;layout:{id:string;y:number}[]}
 export type Command = {type:'setAutoUpdates';enabled:boolean}|{type:'select';id:string}|{type:'setView';view:View}|{type:'setLocale';locale:Locale}|{type:'setMode';mode:'demo'|'live'}|{type:'setPanel';panel:'left'|'right'|'floating'}|{type:'saveRule';connectionId:string;action:Action;direction:Direction}|{type:'deleteRule';id:string}|{type:'restoreRules';rules:Rule[]};
 export interface DeviceChange {device:LanDevice;previous:LanDevice|null;kind:string;fields:string[]}
 export interface InventorySnapshot {generation:number;localAddress:string;netmask:string;status:string;baselineAt:number|null;rows:DeviceChange[];selectedId:string|null;panel:'docked'|'floating'}
@@ -26,3 +26,10 @@ export interface ServiceRow {port:number;candidate:string;service:string|null;st
 export interface ServiceSnapshot {operation:number;portOperation:number;generation:number;target:string;sourceAddress:string;interface:string;family:string;mode:string;stage:string;total:number;completed:number;rows:ServiceRow[];error:string|null;selectedPort:number|null}
 
 export interface UpdateSnapshot {stage:string;operation:number;currentVersion:string;version:string|null;notes:string|null;checkedAt:number|null;downloaded:number;total:number|null;error:string|null;development:boolean}
+
+export type SecuritySource = 'mac_socket' | 'router' | 'demo';
+export type Capability = 'available' | 'unavailable' | 'unknown';
+export interface RouterCapabilities {deviceDiscovery:Capability;trafficCounters:Capability;flowExport:Capability;securityLogs:Capability;firewallRead:Capability;firewallWrite:Capability;deviceQuarantine:Capability;configBackup:Capability}
+export interface SecurityFlow {id:string;source:SecuritySource;sourceId:string;localEndpoint:string;remoteAddress:string;remotePort:number;protocol:string;direction:string;appKey:string|null;pid:number|null;firstObservedAt:number;sampledAt:number|null;bytesSent:number|null;bytesReceived:number|null;counterBasis:string}
+export interface SecurityEvent {id:string;source:SecuritySource;sourceId:string;observedAt:number;kind:string;evidenceFlowIds:string[]}
+export interface SecuritySnapshot {flows:SecurityFlow[];events:SecurityEvent[];routerCapabilities:RouterCapabilities}

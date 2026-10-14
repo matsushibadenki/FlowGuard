@@ -11,6 +11,7 @@ mod network;
 mod observer;
 mod ports;
 mod renderer;
+mod security;
 mod services;
 mod state;
 mod updates;
@@ -425,15 +426,31 @@ fn disable_extension(app: tauri::AppHandle, remove: bool) -> Result<Snapshot, St
 }
 #[tauri::command]
 async fn sync_extension_rules(app: tauri::AppHandle) -> Result<Snapshot, String> {
-    let (operation, rules, snapshot) = app.state::<SharedState>().begin_extension("applying")?;
+    sync_extension(app, false).await
+}
+async fn sync_extension(app: tauri::AppHandle, recovery: bool) -> Result<Snapshot, String> {
+    let state = app.state::<SharedState>();
+    let (operation, rules, snapshot) = if recovery {
+        state.begin_recovery(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        )?
+    } else {
+        state.begin_extension("applying")?
+    };
     let _ = app.emit("state-changed", &snapshot);
     let sent = rules.clone();
+    let runtime = app.state::<HostRuntime>().0.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
         let contents = executable
             .parent()
             .and_then(|p| p.parent())
             .ok_or("bundle_path_unavailable")?;
+        let runtime = runtime.ok_or("native_runtime_unavailable")?;
+        runtime.persist_blocking(&extension::policy_payload(&sent)?)?;
         extension::sync_rules(contents, &sent)
     })
     .await
@@ -478,6 +495,7 @@ async fn refresh_extension(app: tauri::AppHandle) -> Result<Snapshot, String> {
     .await
     .map_err(|e| e.to_string())
     .and_then(|value| value);
+    let reachable = result.as_ref().is_ok_and(|reply| reply.status == "ready");
     let snapshot = app
         .state::<SharedState>()
         .extension_change(|extension, _| {
@@ -486,12 +504,30 @@ async fn refresh_extension(app: tauri::AppHandle) -> Result<Snapshot, String> {
             }
             match result {
                 Ok(reply) => {
-                    extension.observed(&reply.instance_id, reply.revision, reply.status == "ready")
+                    extension.observed(&reply.instance_id, reply.revision, reply.status == "ready");
+                    if let Some(expected) = extension.expected_digest() {
+                        if reply.policy_digest.as_deref() != Some(expected.as_str()) {
+                            extension.mismatch();
+                        }
+                    }
                 }
                 Err(error) => extension.disconnected(&error),
             }
         })?;
     let _ = app.emit("state-changed", &snapshot);
+    if reachable
+        && app.state::<SharedState>().inner.lock().is_ok_and(|s| {
+            s.extension.recovery_due(
+                &s.document.rules,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            )
+        })
+    {
+        return sync_extension(app, true).await;
+    }
     Ok(snapshot)
 }
 #[tauri::command]

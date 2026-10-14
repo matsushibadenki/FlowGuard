@@ -285,6 +285,25 @@ impl SharedState {
         session.revision += 1;
         Ok(session.snapshot())
     }
+    pub fn begin_recovery(&self, now: u64) -> Result<(u64, Vec<Rule>, Snapshot), String> {
+        let mut session = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if session.updates.snapshot.stage == "installing"
+            || !session.extension.recovery_due(&session.document.rules, now)
+        {
+            return Err("recovery_not_due".into());
+        }
+        let operation = session.extension.begin("applying")?;
+        session.extension.recovering(now);
+        let rules = session
+            .document
+            .rules
+            .iter()
+            .filter(|r| r.source == "live")
+            .cloned()
+            .collect();
+        session.revision += 1;
+        Ok((operation, rules, session.snapshot()))
+    }
     pub fn begin_extension(&self, stage: &str) -> Result<(u64, Vec<Rule>, Snapshot), String> {
         let mut session = self.inner.lock().map_err(|_| "state_unavailable")?;
         if session.updates.snapshot.stage == "installing" {
@@ -294,6 +313,10 @@ impl SharedState {
             crate::extension::policy_payload(&session.document.rules)?;
         }
         let operation = session.extension.begin(stage)?;
+        if ["activating", "applying"].contains(&stage) {
+            let rules = session.document.rules.clone();
+            session.extension.requested(&rules);
+        }
         session.revision += 1;
         Ok((
             operation,
@@ -733,6 +756,11 @@ impl Session {
         let connections = self.visible();
         let layout = renderer::layout(&connections);
         Snapshot {
+            security: crate::security::normalize(
+                &connections,
+                self.document.preferences.mode == "demo",
+                self.last_observed,
+            ),
             updates: self.updates.snapshot.clone(),
             services: self.services.clone(),
             ports_focus: self.ports_focus,
@@ -1452,5 +1480,28 @@ mod tests {
             })
             .is_err());
         assert_eq!(s.snapshot().unwrap().document.preferences.locale, "ja");
+    }
+    #[test]
+    fn recovery_admission_is_atomic_and_blocked_by_install() {
+        let state = state();
+        state
+            .extension_change(|e, _| e.configure(true, true, true))
+            .unwrap();
+        let (op, rules, _) = state.begin_extension("applying").unwrap();
+        state
+            .extension_change(|e, _| e.fail(op, "timeout".into()))
+            .unwrap();
+        state.inner.lock().unwrap().updates.snapshot.stage = "installing".into();
+        assert!(state.begin_recovery(100).is_err());
+        state.inner.lock().unwrap().updates.snapshot.stage = "idle".into();
+        let (new, sent, snapshot) = state.begin_recovery(100).unwrap();
+        assert_eq!(sent, rules);
+        assert!(snapshot.extension.busy);
+        assert!(new > op);
+        assert!(state.begin_recovery(101).is_err());
+        state
+            .extension_change(|e, current| e.accepted(new, "restarted".into(), 1, sent, current))
+            .unwrap();
+        assert!(state.begin_recovery(1000).is_err());
     }
 }

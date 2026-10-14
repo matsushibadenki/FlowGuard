@@ -102,3 +102,41 @@ extension ExtensionController {
         }
     }
 }
+
+extension ExtensionController {
+    /// Persist before live synchronization so a provider restart cannot restore an older policy.
+    public func persist(policy: Data, completion: @escaping (String, Error?) -> Void) {
+        guard BridgeSigning.teamIdentifier() != nil, Bundle.main.bundleIdentifier == "com.flowguard.desktop" else { completion("signature_required", nil); return }
+        guard self.completion == nil else { completion("busy", nil); return }
+        guard (try? InitialPolicy.decode(policy)) != nil else { completion("invalid_initial_policy", nil); return }
+        self.completion = completion
+        let manager = NEFilterManager.shared()
+        manager.loadFromPreferences { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let error { self.finish("failed", error); return }
+                guard manager.isEnabled, let config = manager.providerConfiguration,
+                      config.filterDataProviderBundleIdentifier == "com.flowguard.filter" else { self.finish("configuration_conflict", nil); return }
+                var vendor = config.vendorConfiguration ?? [:]
+                vendor[InitialPolicy.key] = policy
+                config.vendorConfiguration = vendor
+                manager.providerConfiguration = config
+                manager.saveToPreferences { error in
+                    DispatchQueue.main.async {
+                        if let error { self.finish("failed", error); return }
+                        manager.loadFromPreferences { error in
+                            DispatchQueue.main.async {
+                                if let error { self.finish("failed", error); return }
+                                guard InitialPolicy.persisted(enabled: manager.isEnabled,
+                                      provider: manager.providerConfiguration?.filterDataProviderBundleIdentifier,
+                                      stored: manager.providerConfiguration?.vendorConfiguration?[InitialPolicy.key] as? Data,
+                                      requested: policy) else { self.finish("failed", nil); return }
+                                self.finish("policy_persisted", nil)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -9,7 +9,7 @@ final class BridgeService: NSObject, NSXPCListenerDelegate, FilterBridgeProtocol
     private var clients: [NSXPCConnection] = []
     private let lock = NSLock()
     init(apply: @escaping ([PolicyRule]) throws -> Void) { self.apply = apply }
-    func start() throws {
+    func start(initial: [PolicyRule]) throws {
         guard let team = BridgeSigning.teamIdentifier(),
               let configuration = Bundle.main.object(forInfoDictionaryKey: "NetworkExtension") as? [String: Any],
               let service = configuration["NEMachServiceName"] as? String,
@@ -17,7 +17,7 @@ final class BridgeService: NSObject, NSXPCListenerDelegate, FilterBridgeProtocol
         let listener = NSXPCListener(machServiceName: service)
         listener.setConnectionCodeSigningRequirement(BridgeSigning.requirement(identifier: "com.flowguard.bridge", team: team))
         listener.delegate = self; self.listener = listener
-        receiver.setReady(true); listener.resume()
+        receiver.seed(initial); receiver.setReady(true); listener.resume()
     }
     func stop() {
         receiver.setReady(false); listener?.invalidate(); listener = nil

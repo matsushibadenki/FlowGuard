@@ -20,9 +20,11 @@ public final class FilterDataProvider: NEFilterDataProvider {
     }
 
     public override func startFilter(completionHandler: @escaping (Error?) -> Void) {
+        let initial: [PolicyRule]
         do {
             guard let data = filterConfiguration.vendorConfiguration?[InitialPolicy.key] as? Data else { throw NSError(domain: "FlowGuard.missing_initial_policy", code: 1) }
-            try replacePolicy(InitialPolicy.decode(data).rules)
+            initial = try InitialPolicy.decode(data).rules
+            try replacePolicy(initial)
         } catch { completionHandler(error); return }
         let network = NENetworkRule(remoteNetwork: nil, remotePrefix: 0, localNetwork: nil, localPrefix: 0, protocol: .TCP, direction: .any)
         let settings = NEFilterSettings(rules: [NEFilterRule(networkRule: network, action: .filterData)], defaultAction: .allow)
@@ -32,7 +34,7 @@ public final class FilterDataProvider: NEFilterDataProvider {
                 guard let self else { throw NSError(domain: "FlowGuardBridge", code: 2) }
                 try self.replacePolicy(rules)
             }
-            do { try service.start(); self.bridge = service; completionHandler(nil) }
+            do { try service.start(initial: initial); self.bridge = service; completionHandler(nil) }
             catch { completionHandler(error) }
         }
     }

@@ -74,4 +74,27 @@ final class BridgeTests: XCTestCase {
         let receiver = PolicyReceiver(); receiver.setReady(true); receiver.setReady(false)
         XCTAssertEqual(receiver.replace(try payload(receiver, rules: rules())) { _ in XCTFail() }.error, "provider_unavailable")
     }
+    func testPersistenceVerificationRejectsStaleDisabledAndForeignConfiguration() throws {
+        let current = try JSONEncoder().encode(InitialPolicy(rules: rules()))
+        let old = Data("{\"rules\":[]}".utf8)
+        XCTAssertTrue(InitialPolicy.persisted(enabled: true, provider: "com.flowguard.filter", stored: current, requested: current))
+        XCTAssertFalse(InitialPolicy.persisted(enabled: true, provider: "com.flowguard.filter", stored: old, requested: current))
+        XCTAssertFalse(InitialPolicy.persisted(enabled: false, provider: "com.flowguard.filter", stored: current, requested: current))
+        XCTAssertFalse(InitialPolicy.persisted(enabled: true, provider: "other.product", stored: current, requested: current))
+        XCTAssertFalse(InitialPolicy.persisted(enabled: true, provider: "com.flowguard.filter", stored: nil, requested: current))
+        XCTAssertFalse(InitialPolicy.persisted(enabled: true, provider: "com.flowguard.filter", stored: Data(), requested: Data()))
+    }
+
+    func testDigestTracksExactPolicyAndLostAcknowledgement() throws {
+        XCTAssertEqual(BridgeContract.digest([]), "6bd8902048330975e577e9d4605d264456a0bcacc8eda9edc591be2383500783")
+        XCTAssertEqual(BridgeContract.digest(try rules()), "89a3fffc4b5a9dd520965a06291d106ee1f6d878a7bc3a778d992d79a9306afb")
+        let receiver = PolicyReceiver(); receiver.seed(try rules()); receiver.setReady(true)
+        XCTAssertEqual(receiver.status().policyDigest, BridgeContract.digest(try rules()))
+        let before = receiver.status().policyDigest
+        let accepted = receiver.replace(try payload(receiver, rules: [])) { _ in }
+        XCTAssertNotEqual(accepted.policyDigest, before)
+        XCTAssertEqual(receiver.status().policyDigest, accepted.policyDigest)
+        receiver.setReady(false); XCTAssertNil(receiver.status().policyDigest)
+    }
+
 }

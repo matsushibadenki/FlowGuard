@@ -17,7 +17,7 @@ Layout:
 FlowGuard.app/Contents/
   MacOS/flowguard                         # Rust / Tauri host
   MacOS/FlowGuardBridge                   # Swift XPC client
-  Frameworks/libFlowGuardHostRuntime.dylib # Swift activation C ABI v2
+  Frameworks/libFlowGuardHostRuntime.dylib # Swift activation C ABI v3
   Library/SystemExtensions/
     com.flowguard.filter.systemextension/Contents/
       Info.plist
@@ -56,7 +56,7 @@ References: [Apple's traffic-filtering sample](https://developer.apple.com/docum
 
 ## Real unsigned FFI gate check
 
-After staging, run `cargo test --offline --manifest-path src-tauri/Cargo.toml -- --include-ignored`. The runtime test loads the actual release Swift dylib, checks ABI version 2 and invokes activation, disable and removal. It verifies the unsigned callback returns `signature_required`, without installing an extension or starting a production service.
+After staging, run `cargo test --offline --manifest-path src-tauri/Cargo.toml unsigned_runtime_gate_crosses_real_swift_ffi -- --ignored`. The runtime test loads the actual release Swift dylib, checks ABI version 3 and invokes activation, disable, removal and startup policy persistence. It verifies the unsigned callback returns `signature_required`, without installing an extension or starting a production service.
 
 ## Disable / removal and initial synchronization
 
