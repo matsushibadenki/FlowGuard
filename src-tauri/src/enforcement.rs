@@ -36,6 +36,7 @@ pub struct Enforcement {
     operation: u64,
     target: Option<Vec<Rule>>,
     recovery: bool,
+    emergency_latched: bool,
     retries: u8,
     retry_at: u64,
 }
@@ -59,6 +60,7 @@ impl Enforcement {
             .cloned()
             .collect();
         self.recovery
+            && !self.emergency_latched
             && self.status.signed
             && !self.status.busy
             && self.retries < 3
@@ -110,13 +112,16 @@ impl Enforcement {
         {
             return Err("extension_already_active".into());
         }
-        if self.status.busy {
+        if self.status.busy && (stage != "disabling" || self.status.stage == "disabling") {
             return Err("extension_busy".into());
         }
         if !self.status.packaged || !self.status.runtime_available {
             return Err("extension_not_packaged".into());
         }
         // Let activation traverse the actual Swift signature gate; applying requires a signed host.
+        if stage == "applying" && self.emergency_latched {
+            return Err("extension_inactive".into());
+        }
         if stage == "applying" && !self.status.signed {
             return Err("signature_required".into());
         }
@@ -125,7 +130,11 @@ impl Enforcement {
         {
             return Err("extension_inactive".into());
         }
+        if stage == "activating" {
+            self.emergency_latched = false;
+        }
         if ["disabling", "removing"].contains(&stage) {
+            self.emergency_latched = true;
             self.target = None;
             self.recovery = false;
         }
@@ -286,6 +295,7 @@ mod tests {
     use super::*;
     fn rules() -> Vec<Rule> {
         vec![Rule {
+            system_exception: false,
             timeout_action: "allow".into(),
             identity: Some(crate::identity::SigningIdentity {
                 authority: "developer".into(),
@@ -341,7 +351,7 @@ mod tests {
         let op = state.begin("activating").unwrap();
         assert!(state.lifecycle(op, "initial_sync"));
         assert!(state.status.busy);
-        assert!(state.begin("disabling").is_err());
+        assert!(state.begin("applying").is_err());
         let sent = rules();
         let mut current = sent.clone();
         current[0].action = "allow".into();
@@ -414,6 +424,43 @@ mod tests {
         state.fail(op, "timeout".into());
         assert!(!state.recovery_due(&rules(), 1000));
     }
+    #[test]
+    fn emergency_disable_preempts_busy_and_fences_every_old_completion() {
+        for stage in ["activating", "applying", "removing"] {
+            let mut state = Enforcement::default();
+            state.configure(true, true, true);
+            let old = state.begin(stage).unwrap();
+            state.requested(&rules());
+            let emergency = state.begin("disabling").unwrap();
+            assert!(emergency > old);
+            assert!(state.begin("disabling").is_err());
+            assert!(!state.lifecycle(old, "configuration_saved"));
+            state.fail(old, "late_timeout".into());
+            state.accepted(old, "old".into(), 1, rules(), &rules());
+            assert_eq!(state.status.stage, "disabling");
+            assert!(state.status.applied_rule_ids.is_empty());
+            assert!(!state.recovery_due(&rules(), u64::MAX));
+            assert!(state.lifecycle(emergency, "disabled"));
+            assert!(!state.recovery_due(&rules(), u64::MAX));
+        }
+    }
+
+    #[test]
+    fn failed_disable_does_not_silently_reenable_recovery() {
+        let mut state = Enforcement::default();
+        state.configure(true, true, true);
+        state.requested(&rules());
+        let operation = state.begin("disabling").unwrap();
+        assert!(state.lifecycle(operation, "failed"));
+        assert!(!state.recovery_due(&rules(), u64::MAX));
+        assert!(state.status.applied_rule_ids.is_empty());
+        assert_eq!(state.status.stage, "failed");
+        // A failed emergency cannot be bypassed by manual apply or automatic recovery.
+        assert!(state.begin("applying").is_err());
+        assert!(state.begin("activating").is_ok());
+        assert!(!state.emergency_latched);
+    }
+
     #[test]
     fn recovery_late_ack_cannot_overwrite_disable() {
         let mut state = Enforcement::default();

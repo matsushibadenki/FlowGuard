@@ -26,6 +26,8 @@ pub struct Connection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Rule {
+    #[serde(default)]
+    pub system_exception: bool,
     #[serde(default = "default_ask_action")]
     pub timeout_action: String,
     #[serde(default)]
@@ -43,6 +45,8 @@ pub struct Rule {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
+    #[serde(default)]
+    pub ask_notifications: bool,
     #[serde(default = "default_ask_action")]
     pub ask_timeout_action: String,
     pub locale: String,
@@ -62,6 +66,7 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             ask_timeout_action: default_ask_action(),
+            ask_notifications: false,
             locale: "ja".into(),
             view: "map".into(),
             panel: "right".into(),
@@ -162,6 +167,13 @@ pub struct Snapshot {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Command {
+    SetAskNotifications {
+        enabled: bool,
+    },
+    SetSystemException {
+        id: String,
+        enabled: bool,
+    },
     SetAskTimeoutAction {
         action: String,
     },
@@ -299,6 +311,7 @@ mod tests {
     fn rule_scope_includes_port_direction_and_source() {
         let c = demo_connections().remove(0);
         let mut r = Rule {
+            system_exception: false,
             timeout_action: "allow".into(),
             identity: None,
             id: "r".into(),

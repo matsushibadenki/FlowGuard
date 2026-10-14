@@ -156,7 +156,8 @@ impl SharedState {
         let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
         if matches!(
             &command,
-            Command::SetAskTimeoutAction { .. }
+            Command::SetSystemException { .. }
+                | Command::SetAskTimeoutAction { .. }
                 | Command::SaveRule { .. }
                 | Command::MigrateRule { .. }
                 | Command::DeleteRule { .. }
@@ -174,6 +175,33 @@ impl SharedState {
             return Err("update_installing".into());
         }
         match command {
+            Command::SetAskNotifications { enabled } => {
+                s.document.preferences.ask_notifications = enabled
+            }
+            Command::SetSystemException { id, enabled } => {
+                if expected_rules.is_none() {
+                    return Err("edit_conflict".into());
+                }
+                let rule = s
+                    .document
+                    .rules
+                    .iter_mut()
+                    .find(|r| r.id == id)
+                    .ok_or("invalid_rule")?;
+                if rule.source != "live"
+                    || crate::system_protection::preset(
+                        rule.identity.as_ref(),
+                        rule.port,
+                        &rule.direction,
+                    )
+                    .is_none()
+                {
+                    return Err("invalid_rule".into());
+                }
+                rule.system_exception = enabled;
+                rule.updated_at = now();
+            }
+
             Command::SetAskTimeoutAction { action } => {
                 if !["allow", "block"].contains(&action.as_str()) {
                     return Err("invalid_rule".into());
@@ -267,6 +295,7 @@ impl SharedState {
                     source, subject, c.destination, c.port, direction
                 );
                 let rule = Rule {
+                    system_exception: false,
                     timeout_action: s.document.preferences.ask_timeout_action.clone(),
                     identity,
                     id: id.clone(),
@@ -335,12 +364,16 @@ impl SharedState {
                 }) {
                     return Err("migration_conflict".into());
                 }
+                s.document.rules[index].system_exception = false;
                 s.document.rules[index].app_key = identity.key();
                 s.document.rules[index].identity = Some(identity);
                 s.document.rules[index].updated_at = now();
             }
             Command::DeleteRule { id } => s.document.rules.retain(|r| r.id != id),
-            Command::RestoreRules { rules } => {
+            Command::RestoreRules { mut rules } => {
+                for rule in &mut rules {
+                    rule.system_exception = false;
+                }
                 if rules.len() > 2000 || !rules.iter().all(validate_rule) {
                     return Err("invalid_backup".into());
                 }
@@ -961,6 +994,86 @@ mod tests {
         SharedState::load(path).unwrap()
     }
     #[test]
+    fn notification_opt_in_persists_and_rolls_back_on_failure() {
+        let state = state();
+        assert!(
+            !state
+                .snapshot()
+                .unwrap()
+                .document
+                .preferences
+                .ask_notifications
+        );
+        let enabled = state
+            .dispatch(Command::SetAskNotifications { enabled: true })
+            .unwrap();
+        assert!(enabled.document.preferences.ask_notifications);
+        let stored: Document = serde_json::from_slice(&fs::read(&state.path).unwrap()).unwrap();
+        assert!(stored.preferences.ask_notifications);
+        fs::remove_file(&state.path).unwrap();
+        fs::create_dir(&state.path).unwrap();
+        assert!(state
+            .dispatch(Command::SetAskNotifications { enabled: false })
+            .is_err());
+        assert!(
+            state
+                .snapshot()
+                .unwrap()
+                .document
+                .preferences
+                .ask_notifications
+        );
+        fs::remove_dir(&state.path).unwrap();
+    }
+    #[test]
+    fn protection_exceptions_require_review_conflict_guard_and_persist() {
+        let state = state();
+        let rules: Vec<Rule> = serde_json::from_str(r#"[{"id":"protected","appKey":"signed:v1:apple::com.apple.mDNSResponder","identity":{"authority":"apple","teamId":"","identifier":"com.apple.mDNSResponder"},"app":"DNS","destination":"1.1.1.1","port":53,"direction":"both","action":"block","updatedAt":1,"source":"live","systemException":true}]"#).unwrap();
+        let snapshot = state.dispatch(Command::RestoreRules { rules }).unwrap();
+        assert!(!snapshot.document.rules[0].system_exception);
+        let command = || Command::SetSystemException {
+            id: "protected".into(),
+            enabled: true,
+        };
+        assert!(state.dispatch(command()).is_err());
+        assert!(state.dispatch_checked(command(), Some(&[])).is_err());
+        let next = state
+            .dispatch_checked(command(), Some(&snapshot.document.rules))
+            .unwrap();
+        assert!(next.document.rules[0].system_exception);
+        let bytes = fs::read(&state.path).unwrap();
+        let stored: Document = serde_json::from_slice(&bytes).unwrap();
+        assert!(stored.rules[0].system_exception);
+        assert!(state
+            .dispatch_checked(
+                Command::SetSystemException {
+                    id: "protected".into(),
+                    enabled: false
+                },
+                Some(&snapshot.document.rules)
+            )
+            .is_err());
+        let disabled = state
+            .dispatch_checked(
+                Command::SetSystemException {
+                    id: "protected".into(),
+                    enabled: false,
+                },
+                Some(&next.document.rules),
+            )
+            .unwrap();
+        assert!(!disabled.document.rules[0].system_exception);
+        // Persistence failure must leave the shared state protected.
+        fs::remove_file(&state.path).unwrap();
+        fs::create_dir(&state.path).unwrap();
+        assert!(state
+            .dispatch_checked(command(), Some(&disabled.document.rules))
+            .is_err());
+        assert!(!state.snapshot().unwrap().document.rules[0].system_exception);
+        fs::remove_dir(&state.path).unwrap();
+    }
+
+    #[test]
     fn ipv6_ports_require_current_scoped_records_and_an_on_link_source() {
         let state = state();
         let address = |ip: &str, mask: &str, family: &str| crate::network::InterfaceAddress {
@@ -1530,6 +1643,7 @@ mod tests {
         s.extension_change(|extension, _| extension.configure(true, true, true))
             .unwrap();
         let rule = Rule {
+            system_exception: false,
             timeout_action: "ask".into(),
             identity: Some(crate::identity::SigningIdentity {
                 authority: "developer".into(),
@@ -1677,6 +1791,7 @@ mod tests {
         let mut rules = Vec::new();
         let c = demo_connections().remove(0);
         rules.push(Rule {
+            system_exception: false,
             timeout_action: "allow".into(),
             identity: None,
             id: "legacy".into(),
@@ -1717,6 +1832,7 @@ mod tests {
         c.identity = None;
         state.inner.lock().unwrap().connections = vec![c.clone()];
         let legacy = Rule {
+            system_exception: false,
             timeout_action: "allow".into(),
             identity: None,
             id: "legacy".into(),
@@ -1766,6 +1882,7 @@ mod tests {
             c.identity = Some(identity.clone());
             state.inner.lock().unwrap().connections = vec![c.clone()];
             let legacy = Rule {
+                system_exception: false,
                 timeout_action: "allow".into(),
                 identity: None,
                 id: "legacy".into(),

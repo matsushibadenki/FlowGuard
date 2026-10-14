@@ -86,8 +86,8 @@ final class BridgeTests: XCTestCase {
     }
 
     func testDigestTracksExactPolicyAndLostAcknowledgement() throws {
-        XCTAssertEqual(BridgeContract.digest([]), "dc4588f5d4949ea04f5b1c296dad6f24a990246a4e3139191bed4789eabc4e32")
-        XCTAssertEqual(BridgeContract.digest(try rules()), "c9e3e7608370bec8f372ebd9a7da81df695a2bebe2bd5651bc476b38a617ba60")
+        XCTAssertEqual(BridgeContract.digest([]), "4a162fedfe1bcffbf24b599f057dc8165220fd5ccf380e1771353b86baf20030")
+        XCTAssertEqual(BridgeContract.digest(try rules()), "951cc1156c80be1e11af7cff72d23e92064c76ae8844d75b2e4a36a06452239b")
         let receiver = PolicyReceiver(); receiver.seed(try rules()); receiver.setReady(true)
         XCTAssertEqual(receiver.status().policyDigest, BridgeContract.digest(try rules()))
         let before = receiver.status().policyDigest
@@ -102,16 +102,19 @@ final class BridgeTests: XCTestCase {
         XCTAssertThrowsError(try InitialPolicy.decode(legacy))
         let receiver = PolicyReceiver(); receiver.setReady(true)
         var object = try JSONSerialization.jsonObject(with: payload(receiver, rules: rules())) as! [String: Any]
-        object["protocolVersion"] = 1
-        let reply = receiver.replace(try JSONSerialization.data(withJSONObject: object)) { _ in XCTFail("old protocol must not apply") }
-        XCTAssertEqual(reply.error, "invalid_protocol")
+        for version in [1, 2, 3] {
+            object["protocolVersion"] = version
+            let reply = receiver.replace(try JSONSerialization.data(withJSONObject: object)) { _ in XCTFail("old protocol must not apply") }
+            XCTAssertEqual(reply.error, "invalid_protocol")
+        }
     }
 
-    func testSavingV3RemovesBothObsoletePolicySlots() throws {
+    func testSavingV4RemovesAllObsoletePolicySlots() throws {
         let policy = try JSONEncoder().encode(InitialPolicy(rules: rules()))
-        let vendor = InitialPolicy.vendorConfiguration(previous: [InitialPolicy.legacyKey: Data("old".utf8), "flowguard.initialPolicy.v2": Data("old-v2".utf8), "other": "retained"], policy: policy)
+        let vendor = InitialPolicy.vendorConfiguration(previous: [InitialPolicy.legacyKey: Data("old".utf8), "flowguard.initialPolicy.v2": Data("old-v2".utf8), "flowguard.initialPolicy.v3": Data("old-v3".utf8), "other": "retained"], policy: policy)
         XCTAssertNil(vendor[InitialPolicy.legacyKey])
         XCTAssertNil(vendor["flowguard.initialPolicy.v2"])
+        XCTAssertNil(vendor["flowguard.initialPolicy.v3"])
         XCTAssertEqual(vendor[InitialPolicy.key] as? Data, policy)
         XCTAssertEqual(vendor["other"] as? String, "retained")
     }

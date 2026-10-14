@@ -34,7 +34,7 @@ public struct AskAnswer: Codable {
     public let requestId: String
     public let action: RuleAction
     public init(instanceId: String, policyId: String, requestId: String, action: RuleAction) {
-        protocolVersion = 3; self.instanceId = instanceId; self.policyId = policyId
+        protocolVersion = 4; self.instanceId = instanceId; self.policyId = policyId
         self.requestId = requestId; self.action = action
     }
 }
@@ -130,7 +130,7 @@ public final class AskQueue {
             request.remainingSeconds = max(0, Int(ceil(item.deadline - clock())))
             return request
         }.sorted { $0.requestId < $1.requestId }
-        let snapshot = AskSnapshot(protocolVersion: 3, instanceId: instanceId, policyId: policyId, requests: requests, outcomes: outcomes)
+        let snapshot = AskSnapshot(protocolVersion: 4, instanceId: instanceId, policyId: policyId, requests: requests, outcomes: outcomes)
         lock.unlock(); callbacks.forEach { $0() }; return snapshot
     }
     public func answer(_ answer: AskAnswer) -> AskReply {
@@ -138,7 +138,7 @@ public final class AskQueue {
         var callbacks = expireLocked()
         var status = "invalid"
         var action: RuleAction?
-        if answer.protocolVersion == 3, answer.action != .ask, UUID(uuidString: answer.requestId) != nil {
+        if answer.protocolVersion == 4, answer.action != .ask, UUID(uuidString: answer.requestId) != nil {
             if answer.instanceId != instanceId || answer.policyId != policyId || !active { status = "stale" }
             else if let item = pending.removeValue(forKey: answer.requestId) {
                 record(item, action: answer.action, reason: "answered")
@@ -147,7 +147,7 @@ public final class AskQueue {
                 status = outcome.reason == "timed_out" ? "expired" : "already_handled"; action = outcome.action
             } else { status = "not_found" }
         }
-        let reply = AskReply(protocolVersion: 3, instanceId: instanceId, policyId: policyId,
+        let reply = AskReply(protocolVersion: 4, instanceId: instanceId, policyId: policyId,
             requestId: answer.requestId, status: status, action: action)
         lock.unlock(); callbacks.forEach { $0() }; return reply
     }

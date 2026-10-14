@@ -14,5 +14,6 @@ let package = Package(name: "FlowGuardFilter", platforms: [.macOS(.v13)], produc
     .executableTarget(name: "FlowGuardSystemExtension", dependencies: ["FlowGuardExtension"]),
     .executableTarget(name: "FlowGuardBridgeCLI", dependencies: ["FlowGuardHost", "FlowGuardBridge", "FlowGuardPolicy"]),
     .testTarget(name: "FlowGuardBridgeTests", dependencies: ["FlowGuardBridge", "FlowGuardPolicy"]),
+    .testTarget(name: "FlowGuardHostTests", dependencies: ["FlowGuardHost", "FlowGuardBridge"]),
     .testTarget(name: "FlowGuardPolicyTests", dependencies: ["FlowGuardPolicy"])
 ])

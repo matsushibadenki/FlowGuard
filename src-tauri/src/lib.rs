@@ -6,16 +6,19 @@ mod extension;
 pub mod gpu;
 mod identity;
 mod inventory;
+mod menubar;
 mod model;
 mod names;
 mod native_runtime;
 mod network;
+mod notifications;
 mod observer;
 mod ports;
 mod renderer;
 mod security;
 mod services;
 mod state;
+mod system_protection;
 mod updates;
 use model::{Command, Rule, Snapshot};
 use state::SharedState;
@@ -365,12 +368,17 @@ extern "C" fn lifecycle_callback(status: *const std::ffi::c_char, token: u64) {
     };
     let (app, operation, rules) = target;
     if status == "configuration_saved" {
+        let mut admitted = false;
         if let Ok(snapshot) = app.state::<SharedState>().extension_change(|extension, _| {
-            extension.lifecycle(operation, "initial_sync");
+            admitted = extension.lifecycle(operation, "initial_sync");
         }) {
             let _ = app.emit("state-changed", snapshot);
         }
+        if !admitted {
+            return;
+        }
         tauri::async_runtime::spawn(async move {
+            let initial_handle = app.clone();
             let result = tauri::async_runtime::spawn_blocking(move || {
                 let executable = std::env::current_exe().map_err(|e| e.to_string())?;
                 let contents = executable
@@ -379,7 +387,20 @@ extern "C" fn lifecycle_callback(status: *const std::ffi::c_char, token: u64) {
                     .ok_or("bundle_path_unavailable")?;
                 // Readiness probes are retryable; never retry an uncertain policy update.
                 for _ in 0..10 {
+                    let current = || {
+                        initial_handle
+                            .state::<SharedState>()
+                            .inner
+                            .lock()
+                            .is_ok_and(|s| s.extension.generation() == operation)
+                    };
+                    if !current() {
+                        return Err("operation_cancelled".into());
+                    }
                     if extension::bridge_status(contents).is_ok_and(|s| s.status == "ready") {
+                        if !current() {
+                            return Err("operation_cancelled".into());
+                        }
                         return extension::sync_rules(contents, &rules).map(|reply| (reply, rules));
                     }
                     std::thread::sleep(std::time::Duration::from_secs(1));
@@ -429,7 +450,7 @@ fn activate_extension(app: tauri::AppHandle) -> Result<Snapshot, String> {
         .lock()
         .map_err(|_| "state_unavailable")?
         .insert(token, (app.clone(), operation, rules));
-    runtime.activate(&payload, lifecycle_callback, token);
+    runtime.activate(&payload, operation, lifecycle_callback, token);
     app.state::<SharedState>().snapshot()
 }
 #[tauri::command]
@@ -451,7 +472,7 @@ fn disable_extension(app: tauri::AppHandle, remove: bool) -> Result<Snapshot, St
         .lock()
         .map_err(|_| "state_unavailable")?
         .insert(token, (app.clone(), operation, vec![]));
-    runtime.disable(remove, lifecycle_callback, token);
+    runtime.disable(remove, operation, lifecycle_callback, token);
     app.state::<SharedState>().snapshot()
 }
 #[tauri::command]
@@ -473,6 +494,7 @@ async fn sync_extension(app: tauri::AppHandle, recovery: bool) -> Result<Snapsho
     let _ = app.emit("state-changed", &snapshot);
     let sent = rules.clone();
     let runtime = app.state::<HostRuntime>().0.clone();
+    let operation_handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
         let contents = executable
@@ -480,7 +502,14 @@ async fn sync_extension(app: tauri::AppHandle, recovery: bool) -> Result<Snapsho
             .and_then(|p| p.parent())
             .ok_or("bundle_path_unavailable")?;
         let runtime = runtime.ok_or("native_runtime_unavailable")?;
-        runtime.persist_blocking(&extension::policy_payload(&sent)?)?;
+        runtime.persist_blocking(&extension::policy_payload(&sent)?, operation)?;
+        {
+            let state = operation_handle.state::<SharedState>();
+            let session = state.inner.lock().map_err(|_| "state_unavailable")?;
+            if session.extension.generation() != operation {
+                return Err("operation_cancelled".into());
+            }
+        }
         extension::sync_rules(contents, &sent)
     })
     .await
@@ -574,6 +603,7 @@ fn dispatch(
     if matches!(&command,Command::SetPanel{panel} if panel=="floating") {
         return Err("use_float_panel".into());
     }
+    let mute = matches!(&command, Command::SetAskNotifications { enabled: false });
     let snap = match state.dispatch_checked(command, Some(&expected_rules)) {
         Ok(snap) => snap,
         Err(error) => {
@@ -585,6 +615,9 @@ fn dispatch(
             return Err(error);
         }
     };
+    if mute {
+        notifications::clear(&app, snap.revision);
+    }
     app.emit("state-changed", &snap)
         .map_err(|e| e.to_string())?;
     Ok(snap)
@@ -654,20 +687,28 @@ pub fn run() {
                 })
                 .map_err(std::io::Error::other)?;
             app.manage(HostRuntime(runtime));
+            if let Err(error) = menubar::install(app.handle()) {
+                eprintln!("Menu bar unavailable: {error}");
+            }
             updates::schedule(app.handle().clone());
             let ask_handle = app.handle().clone();
             let ask_contents = contents.to_path_buf();
-            std::thread::spawn(move || loop {
-                if let Ok((op, instance)) = ask_handle.state::<SharedState>().begin_ask_poll() {
-                    let result = asks::poll(&ask_contents);
-                    if let Ok(snapshot) = ask_handle
-                        .state::<SharedState>()
-                        .finish_ask_poll(op, &instance, result)
-                    {
-                        let _ = ask_handle.emit("state-changed", snapshot);
+            std::thread::spawn(move || {
+                let mut planner = notifications::Planner::default();
+                loop {
+                    notifications::poll(&ask_handle, &mut planner);
+                    menubar::refresh(&ask_handle);
+                    if let Ok((op, instance)) = ask_handle.state::<SharedState>().begin_ask_poll() {
+                        let result = asks::poll(&ask_contents);
+                        if let Ok(snapshot) = ask_handle
+                            .state::<SharedState>()
+                            .finish_ask_poll(op, &instance, result)
+                        {
+                            let _ = ask_handle.emit("state-changed", snapshot);
+                        }
                     }
+                    std::thread::sleep(std::time::Duration::from_secs(1));
                 }
-                std::thread::sleep(std::time::Duration::from_secs(1));
             });
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
@@ -693,6 +734,18 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "main"
+                && window
+                    .app_handle()
+                    .try_state::<menubar::MenuBar>()
+                    .is_some()
+            {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    if window.hide().is_ok() {
+                        api.prevent_close();
+                    }
+                }
+            }
             if window.label() == "lan-details" && matches!(event, tauri::WindowEvent::Destroyed) {
                 let app = window.app_handle();
                 if let Ok(snapshot) = app.state::<SharedState>().lan_panel("docked") {
@@ -715,6 +768,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            notifications::notification_permission,
             answer_ask,
             check_update,
             download_update,

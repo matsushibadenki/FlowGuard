@@ -2,7 +2,7 @@ import Foundation
 import FlowGuardBridge
 import FlowGuardPolicy
 public struct BridgePreflight: Encodable {
-    public let protocolVersion = 3
+    public let protocolVersion = 4
     public let packaged: Bool
     public let signed: Bool
     public let status: String
@@ -21,7 +21,7 @@ public final class HostBridge {
         transact(update: nil) { [self] result in
             do {
                 let status = try JSONDecoder().decode(BridgeReply.self, from: result.get())
-                guard status.protocolVersion == 3, status.status == "ready", status.error == nil else { throw NSError(domain: "FlowGuardBridge.not_ready", code: 6) }
+                guard status.protocolVersion == 4, status.status == "ready", status.error == nil else { throw NSError(domain: "FlowGuardBridge.not_ready", code: 6) }
                 let update = PolicyUpdate(requestID: UUID().uuidString, expectedInstanceID: status.instanceID, expectedRevision: status.revision, rules: rules)
                 let payload = try JSONEncoder().encode(update)
                 transact(update: payload) { result in

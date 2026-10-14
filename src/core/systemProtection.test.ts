@@ -1,0 +1,23 @@
+import {describe,it,expect} from 'vitest';
+import {systemPreset,systemProtected} from './systemProtection';
+import {ruleApplied,defaultExtension} from './enforcement';
+import {validRules} from './rules';
+import type {Rule} from './types';
+const rule:Rule={id:'r',app:'DNS',appKey:'signed:v1:apple::com.apple.mDNSResponder',identity:{authority:'apple',teamId:'',identifier:'com.apple.mDNSResponder'},destination:'1.1.1.1',port:53,direction:'both',action:'block',source:'live',updatedAt:1};
+describe('system protection',()=>{
+ it('requires Apple subject and service, never name/path/port alone',()=>{
+  expect(systemPreset(rule)).toBe('systemDNS');
+  expect(systemPreset({...rule,identity:null})).toBeNull();
+  expect(systemPreset({...rule,identity:{authority:'developer',teamId:'ABCDE12345',identifier:'com.apple.mDNSResponder'}})).toBeNull();
+  expect(systemPreset({...rule,direction:'inbound'})).toBeNull();
+  expect(systemPreset({...rule,port:443})).toBeNull();
+ });
+ it('defaults legacy rules to protected and isolates demo/explicit exceptions',()=>{
+  expect(systemProtected(rule)).toBe(true);
+  expect(ruleApplied(rule,{...defaultExtension,stage:'applied',signed:true,appliedRuleIds:[rule.id]})).toBe(false);
+  expect(systemProtected({...rule,systemException:true})).toBe(false);
+  expect(systemProtected({...rule,source:'demo'})).toBe(false);
+  expect(validRules([{...rule,systemException:'true'}])).toBe(false);
+  expect(validRules([rule,{...rule,id:'other',systemException:true}])).toBe(true);
+ });
+});

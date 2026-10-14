@@ -17,8 +17,8 @@ export function sampleConnections():Connection[]{
 }
 function emit(value:Snapshot){if(snapshot&&value.revision<snapshot.revision)return;snapshot=value;for(const l of listeners)l();}
 function preview(){
- let document:Document={rules:[],preferences:{askTimeoutAction:'allow',locale:'ja',view:'map',panel:'right',mode:'demo',autoUpdates:true}};
- try {const stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored&&validRules(stored.rules)) {document.rules=stored.rules;if(['allow','block'].includes(stored.preferences?.askTimeoutAction))document.preferences.askTimeoutAction=stored.preferences.askTimeoutAction;if(['ja','en','zh-CN'].includes(stored.preferences?.locale))document.preferences.locale=stored.preferences.locale;if(typeof stored.preferences?.autoUpdates==='boolean')document.preferences.autoUpdates=stored.preferences.autoUpdates;}}catch{/* Corrupt preview storage is isolated from desktop documents. */}
+ let document:Document={rules:[],preferences:{askNotifications:false,askTimeoutAction:'allow',locale:'ja',view:'map',panel:'right',mode:'demo',autoUpdates:true}};
+ try {const stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored&&validRules(stored.rules)) {document.rules=stored.rules;if(typeof stored.preferences?.askNotifications==='boolean')document.preferences.askNotifications=stored.preferences.askNotifications;if(['allow','block'].includes(stored.preferences?.askTimeoutAction))document.preferences.askTimeoutAction=stored.preferences.askTimeoutAction;if(['ja','en','zh-CN'].includes(stored.preferences?.locale))document.preferences.locale=stored.preferences.locale;if(typeof stored.preferences?.autoUpdates==='boolean')document.preferences.autoUpdates=stored.preferences.autoUpdates;}}catch{/* Corrupt preview storage is isolated from desktop documents. */}
  const connections=sampleConnections();emit({asks:{requests:[],outcomes:[],busyIds:[],pollRevision:0,error:null,lastAnswer:null},security:{flows:[],events:[],routerCapabilities:{deviceDiscovery:"unknown",trafficCounters:"unknown",flowExport:"unknown",securityLogs:"unknown",firewallRead:"unknown",firewallWrite:"unknown",deviceQuarantine:"unknown",configBackup:"unknown"}},updates:{stage:"idle",operation:0,currentVersion:"0.1.0",version:null,notes:null,checkedAt:null,downloaded:0,total:null,error:null,development:true},services:{operation:0,portOperation:0,generation:0,target:"",sourceAddress:"",interface:"",family:"",mode:"",stage:"",total:0,completed:0,rows:[],error:null,selectedPort:null},portsFocus:0,ports:{family:"",sourceNetmask:"",comparison:{status:"",baselineOperation:null,rows:[]},operation:0,sourceAddress:"",requestedPorts:[],selection:"",stage:"",target:"",interface:"",generation:0,completed:0,total:0,rows:[],error:null},inventory:{generation:0,localAddress:"",netmask:"",status:"first",baselineAt:null,rows:[],selectedId:null,panel:"docked"},discovery:{nameMode:"none",namesCompleted:0,namesTotal:0,stage:"idle",interface:"",range:"",active:false,completed:0,total:0,devices:[],errors:[],observedAt:null},network:{addresses:[],observedAt:null,error:null},revision:0,extension:{...defaultExtension},document,connections,applications:groupApplications(connections),history:connections,selectedId:connections[0].id,firewall:{enabled:null,enforcement:'unavailable',observer:'demo',error:null},lastObserved:null,layout:connections.map((c,i)=>({id:c.id,y:72+i*100}))});
 }
 let initPromise:Promise<void>|undefined;
@@ -31,9 +31,11 @@ export function useStartupError(){return useSyncExternalStore(fn=>{listeners.add
 export async function dispatch(command:Command, expectedRules:Rule[]=snapshot?.document.rules??[]){
  if(native){const next=await invoke<Snapshot>('dispatch',{command,expectedRules});emit(next);return next;}
  if(!snapshot)throw Error('not_ready');
- if(['setAskTimeoutAction','saveRule','migrateRule','deleteRule','restoreRules'].includes(command.type)&&JSON.stringify(expectedRules)!==JSON.stringify(snapshot.document.rules))throw Error('edit_conflict');
+ if(['setSystemException','setAskTimeoutAction','saveRule','migrateRule','deleteRule','restoreRules'].includes(command.type)&&JSON.stringify(expectedRules)!==JSON.stringify(snapshot.document.rules))throw Error('edit_conflict');
  const next:Snapshot=structuredClone(snapshot);const doc=next.document;
  switch(command.type){
+ case 'setAskNotifications':doc.preferences.askNotifications=command.enabled;break;
+ case 'setSystemException':throw Error('desktop_required');
  case 'setAskTimeoutAction':doc.preferences.askTimeoutAction=command.action;for(const r of doc.rules){if(r.action==='ask'){r.timeoutAction=command.action;r.updatedAt=now();}}break;
  case 'select':if(!next.connections.some(c=>c.id===command.id))throw Error('connection_expired');next.selectedId=command.id;break;
  case 'setAutoUpdates':doc.preferences.autoUpdates=command.enabled;break;
@@ -49,7 +51,7 @@ export async function dispatch(command:Command, expectedRules:Rule[]=snapshot?.d
  }
  case 'migrateRule':throw Error('macos_required');
  case 'deleteRule':doc.rules=doc.rules.filter(r=>r.id!==command.id);break;
- case 'restoreRules':if(!validRules(command.rules))throw Error('invalid_backup');doc.rules=command.rules;break;
+ case 'restoreRules':if(!validRules(command.rules))throw Error('invalid_backup');doc.rules=command.rules.map(rule=>({...rule,systemException:false}));break;
  }
  localStorage.setItem(storageKey,JSON.stringify(doc));next.revision++;emit(next);return next;
 }
@@ -100,3 +102,5 @@ export async function answerAsk(request:import('./types').AskRequest,action:'all
  if(!native)throw Error('macos_required');
  const value=await invoke<Snapshot>('answer_ask',{requestId:request.requestId,instanceId:request.instanceId,policyId:request.policyId,action});emit(value);return value;
 }
+
+export async function notificationPermission(request=false):Promise<string>{if(!native)return 'unavailable';return invoke<string>('notification_permission',{request});}
