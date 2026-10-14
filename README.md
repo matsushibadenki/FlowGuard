@@ -1,5 +1,7 @@
 # FlowGuard for macOS
 
+![FlowGuard_ui](docs/img/flowguard.png)
+
 Macの通信を「アプリ → ルール → 接続先」で確認する、Tauri 2 + Rustのデスクトップアプリです。日本語・English・简体中文に対応しています。
 
 **この0.1.0は観測・ルール管理版です。保存したルールはOSに適用されず、実際の遮断・許可確認は行いません。** macOS標準ファイアウォールの状態は読み取ります。OSの設定変更、管理者権限の取得、拡張機能のインストールは行いません。
@@ -47,17 +49,17 @@ npm run tauri build
 
 ## 構成
 
-| 場所 | 内容 |
-| --- | --- |
-| `src/components/` | Reactの通信マップ、詳細パネル、履歴、設定、ルール管理 |
-| `src/core/store.ts` | Rustのスナップショット購読とコマンド。ブラウザ用デモアダプター |
-| `src-tauri/src/state.rs` | Rust所有のDocument / Session、保存失敗時のロールバック |
-| `src-tauri/src/observer.rs` | 固定の読み取り専用コマンド、実行ファイル識別、IPv4/IPv6パース |
-| `src-tauri/src/renderer.rs` | Rust側の小規模マップのシーン情報 |
-| `src-tauri/src/gpu.rs` | `gpu` featureのwgpu/Metal描画基盤。GPU上にテクスチャを保持 |
-| `native/FlowGuardFilter/` | コンパイル可能なSwiftポリシーとNetwork Extension候補ソース。未接続・未インストール |
-| `docs/ROADMAP.md` | 完了・次工程・保留の区別 |
-| `docs/ARCHITECTURE.md` | 観測と制御の境界、IPC、拡張機能の接続条件 |
+| 場所                        | 内容                                                                               |
+| --------------------------- | ---------------------------------------------------------------------------------- |
+| `src/components/`           | Reactの通信マップ、詳細パネル、履歴、設定、ルール管理                              |
+| `src/core/store.ts`         | Rustのスナップショット購読とコマンド。ブラウザ用デモアダプター                     |
+| `src-tauri/src/state.rs`    | Rust所有のDocument / Session、保存失敗時のロールバック                             |
+| `src-tauri/src/observer.rs` | 固定の読み取り専用コマンド、実行ファイル識別、IPv4/IPv6パース                      |
+| `src-tauri/src/renderer.rs` | Rust側の小規模マップのシーン情報                                                   |
+| `src-tauri/src/gpu.rs`      | `gpu` featureのwgpu/Metal描画基盤。GPU上にテクスチャを保持                         |
+| `native/FlowGuardFilter/`   | コンパイル可能なSwiftポリシーとNetwork Extension候補ソース。未接続・未インストール |
+| `docs/ROADMAP.md`           | 完了・次工程・保留の区別                                                           |
+| `docs/ARCHITECTURE.md`      | 観測と制御の境界、IPC、拡張機能の接続条件                                          |
 
 小規模マップはWebViewのUI要素として表示します。大量描画用のwgpu基盤はMetalで動作確認済みですが、ネイティブ描画サーフェスと画面の接続は次工程です。フレームバッファや通信内容をJavaScriptへ転送するAPIはありません。
 
@@ -80,7 +82,6 @@ FlowGuard visualizes established TCP connections and manages local firewall rule
 ## 简体中文
 
 FlowGuard将已建立的TCP连接可视化，并管理本地通信规则意图。当前版本**仅用于观测**：保存规则不会在系统中阻止通信，也不会弹出许可请求。运行 `npm ci` 和 `npm run tauri dev` 启动桌面应用，或运行 `npm run dev` 体验浏览器中的示例数据。Rust持有共享文档和会话状态，浮动详情面板订阅同一状态。经过签名的Network Extension集成及原生GPU画面呈现尚未完成。
-
 
 ### Network Extensionの署名なしパッケージ
 
