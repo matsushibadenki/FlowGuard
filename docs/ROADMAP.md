@@ -82,7 +82,7 @@
 - 🟢 [Done] 調査・拡張機能の操作中は適用を拒否。適用中は設定・ルールの更新／新規ジョブを停止。置き換え前の別バックアップを保持し、codesign・同一Team ID・Gatekeeper確認に失敗した場合は復旧。署名不正・旧版・キャンセル後の結果は適用可能にしない。
 - 🟢 [Done] ローカル更新署名鍵を生成し公開鍵のみをアプリへ登録。秘密鍵はGit除外・権限制限。GitHub CI、Developer ID署名→公証Accepted→staple→更新署名→latest.json／配布ZIP／チェックサム生成のスクリプトと手順を追加。GitHubへ秘密鍵・Apple認証情報を送らない。
 - 🟢 [Done] ループバック更新サーバーと専用テスト鍵で、実プラグインの取得・署名検証・一時アプリの置き換え・改ざん拒否を検証。別の一時アプリで置き換え失敗・署名確認失敗の復旧を検証。利用中のFlowGuardは変更しない。
-- 🟢 [Done] v0.1.0 Apple Silicon向けホスト・Network Extension同梱版をDeveloper ID署名し、公証Accepted・staple・Gatekeeper検証を完了。
+- 🟢 [Done] v0.1.0 Apple Silicon向けホスト・Network Extension同梱版をDeveloper ID署名し、公証Accepted・staple・Gatekeeper検証を完了し、GitHub Release v0.1.0で公開。
 - 🟠 [Next] 次の新しい安定版で署名済み実アプリの更新経路を通す。初回導入は通常インストールが必要。更新機能を持たない旧版からの自動移行はできない。
 - ⭕️ [Pending] Network Extension同梱の配布にはFlowGuardのDeveloper IDホスト／拡張機能プロビジョニングが必要。2026-10-14に再生成されたDeveloper IDプロファイルはApp ID・Team ID・期限・証明書と必要なNetwork Extensions／System Extension権限の一致を確認済み。証明書と`flowguard`公証プロファイルの認証は確認済み。署名済み実アプリの再起動・データ保持・稼働中Extension・Gatekeeper・権限／ディスク不足・Intelの通し確認は保留。初回公開はユーザー指定によりホスト・拡張用のDeveloper IDプロファイルを揃えてから同梱で行う。本体のみの公開には切り替えない。
 - 🔴 [Later] 複数アーキテクチャの公開統合、永続ダウンロード／再開、更新履歴・チャネルと鍵移行。手順は`docs/UPDATES.md`参照。
