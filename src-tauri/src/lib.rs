@@ -5,6 +5,8 @@ mod extension;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 mod identity;
+#[cfg(target_os = "macos")]
+mod instance;
 mod inventory;
 mod menubar;
 mod model;
@@ -671,7 +673,62 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let path = app.path().app_data_dir()?.join("document-v1.json");
-            app.manage(SharedState::load(path).map_err(std::io::Error::other)?);
+            #[cfg(target_os = "macos")]
+            let activation_path = instance::socket_path(&path)
+                .unwrap_or_else(|_| path.with_file_name("activation-v1.sock"));
+            #[cfg(target_os = "macos")]
+            if instance::request(&activation_path).unwrap_or(false) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+                app.handle().exit(0);
+                return Ok(());
+            }
+            let state = match SharedState::load(path) {
+                Ok(state) => state,
+                Err(error) => {
+                    #[cfg(target_os = "macos")]
+                    if error == state::ALREADY_RUNNING {
+                        // The owner may still be creating its listener after acquiring the lock.
+                        for _ in 0..10 {
+                            if instance::request(&activation_path).unwrap_or(false) {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.hide();
+                                }
+                                app.handle().exit(0);
+                                return Ok(());
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        }
+                    }
+                    return Err(std::io::Error::other(error).into());
+                }
+            };
+            app.manage(state);
+            #[cfg(target_os = "macos")]
+            {
+                let handle = app.handle().clone();
+                match instance::start(activation_path, move || {
+                    if handle.get_webview_window("main").is_none() {
+                        return false;
+                    }
+                    let app = handle.clone();
+                    handle
+                        .run_on_main_thread(move || {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.unminimize();
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        })
+                        .is_ok()
+                }) {
+                    Ok(server) => {
+                        app.manage(server);
+                    }
+                    Err(error) => eprintln!("Activation IPC unavailable: {error}"),
+                }
+            }
             let executable = std::env::current_exe()?;
             let contents = executable
                 .parent()
@@ -804,6 +861,16 @@ pub fn run() {
             float_panel,
             dock_panel
         ])
-        .run(tauri::generate_context!())
-        .expect("FlowGuard could not start");
+        .build(tauri::generate_context!())
+        .expect("FlowGuard could not start")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if matches!(event, tauri::RunEvent::Reopen { .. }) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }

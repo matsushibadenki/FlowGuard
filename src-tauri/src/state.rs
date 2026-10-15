@@ -1,3 +1,5 @@
+pub const ALREADY_RUNNING: &str =
+    "FlowGuard is already running for this document. Close the other instance and retry.";
 use crate::{enforcement::Enforcement, model::*, renderer};
 use std::{collections::HashSet, fs, path::PathBuf, sync::Mutex};
 pub struct SharedState {
@@ -49,7 +51,9 @@ impl SharedState {
         let document_lock = options
             .open(path.with_extension("lock"))
             .map_err(|e| e.to_string())?;
-        document_lock.try_lock().map_err(|_| "FlowGuard is already running for this document. Close the other instance and retry.".to_string())?;
+        document_lock
+            .try_lock()
+            .map_err(|_| ALREADY_RUNNING.to_string())?;
         let document = if path.exists() {
             let bytes = fs::read(&path).map_err(|e| e.to_string())?;
             serde_json::from_slice::<Document>(&bytes)
