@@ -316,3 +316,11 @@ Offline cargo check and Rust library tests pass with Tauri tray-icon enabled usi
 Rust: 71 passed, 16 existing host-only ignored; TypeScript: 77 passed; Swift: 32 passed and host native products build with UserNotifications. New Rust tests cover dedupe, batching/cooldown/hourly ceiling, opt-out/no unmute flood, no notifications for unsigned/busy/gone requests, default-off persistence and rollback. Browser preview checks default-off toggle, persistent mute, native permission buttons disabled, details and three languages at 375/1200px with no overflow/errors. Optional native capability absence returns unavailable.
 
 ⭕️ [Pending] Actual macOS notification permission requests/delivery, denied permission, Focus, opt-out versus delayed OS completion, native hidden-window return and real Provider ask events. No real notification or permission prompt was sent during verification. Swift tests compile the integration but do not prove notification delivery.
+
+## Unregistered TCP observation alerts (2026-10-15)
+
+Final counts: Rust 77 passed with 16 existing host-only ignored; TypeScript 77 passed; Swift 32 passed. Frontend build succeeded.
+
+Rust tests cover startup baseline, two distinct samples, repeated snapshot, error/mute recovery, unsigned exclusion, existing-rule handling with unknown direction, rule removal, loopback/protected/short-lived flows, 1,024-key cap, interface-change baseline and shared ask/observation budget. TypeScript tests/build and Swift package tests continue to pass. Temporary browser checks cover default-off opt-in, persistent mute, disabled native permission action and JA/EN/简体中文 at 375/1200px without page overflow/errors. No OS permission or notification was requested.
+
+⭕️ [Pending] Real macOS notification delivery and long-running observation noise, short-lived connection coverage, signed host behavior, VPN/proxy/same-address network changes, Focus and mute races. These are limited signed-process TCP observations, not a complete traffic feed or security verdict.

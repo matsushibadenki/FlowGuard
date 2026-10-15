@@ -175,6 +175,9 @@ impl SharedState {
             return Err("update_installing".into());
         }
         match command {
+            Command::SetUnknownNotifications { enabled } => {
+                s.document.preferences.unknown_notifications = enabled
+            }
             Command::SetAskNotifications { enabled } => {
                 s.document.preferences.ask_notifications = enabled
             }
@@ -1004,12 +1007,24 @@ mod tests {
                 .preferences
                 .ask_notifications
         );
+        assert!(
+            !state
+                .snapshot()
+                .unwrap()
+                .document
+                .preferences
+                .unknown_notifications
+        );
+        state
+            .dispatch(Command::SetUnknownNotifications { enabled: true })
+            .unwrap();
         let enabled = state
             .dispatch(Command::SetAskNotifications { enabled: true })
             .unwrap();
         assert!(enabled.document.preferences.ask_notifications);
         let stored: Document = serde_json::from_slice(&fs::read(&state.path).unwrap()).unwrap();
         assert!(stored.preferences.ask_notifications);
+        assert!(stored.preferences.unknown_notifications);
         fs::remove_file(&state.path).unwrap();
         fs::create_dir(&state.path).unwrap();
         assert!(state

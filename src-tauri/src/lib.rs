@@ -19,6 +19,7 @@ mod security;
 mod services;
 mod state;
 mod system_protection;
+mod unknown_flows;
 mod updates;
 use model::{Command, Rule, Snapshot};
 use state::SharedState;
@@ -603,7 +604,11 @@ fn dispatch(
     if matches!(&command,Command::SetPanel{panel} if panel=="floating") {
         return Err("use_float_panel".into());
     }
-    let mute = matches!(&command, Command::SetAskNotifications { enabled: false });
+    let mute = matches!(
+        &command,
+        Command::SetAskNotifications { enabled: false }
+            | Command::SetUnknownNotifications { enabled: false }
+    );
     let snap = match state.dispatch_checked(command, Some(&expected_rules)) {
         Ok(snap) => snap,
         Err(error) => {

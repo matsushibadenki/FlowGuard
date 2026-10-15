@@ -27,10 +27,16 @@ public func notification(_ operation: Int32, _ version: UInt64, _ bytes: UnsafeP
                 guard operation == 2 else { reply(authorized ? "authorized" : settings.authorizationStatus == .notDetermined ? "not_requested" : "denied"); return }
                 guard version >= revision, captured == epoch else { reply("stale"); return }
                 guard authorized else { reply("denied"); return }
-                guard let object = try? JSONSerialization.jsonObject(with:body) as? [String:Any], let count = object["count"] as? Int, count > 0, count <= 128, let locale = object["locale"] as? String else { reply("unavailable"); return }
+                guard let object = try? JSONSerialization.jsonObject(with:body) as? [String:Any], let count = object["count"] as? Int, count >= 0, count <= 128, let locale = object["locale"] as? String else { reply("unavailable"); return }
+                let unknown = object["unknownCount"] as? Int ?? 0
+                guard unknown >= 0, unknown <= 1024, count + unknown > 0 else { reply("unavailable"); return }
                 revision = version
                 let content = UNMutableNotificationContent(); content.title = "FlowGuard"
                 content.body = locale == "ja" ? "通信の確認待ち：\(count)件。メニューバーからFlowGuardを開いてください。" : locale == "zh-CN" ? "待确认连接：\(count)。请从菜单栏打开FlowGuard。" : "\(count) flow decisions pending. Open FlowGuard from the menu bar."
+                if unknown > 0 {
+                    let observed = locale == "ja" ? "新しく観測したルール未登録のTCP接続：\(unknown)件。攻撃・許可・遮断の判定ではありません。" : locale == "zh-CN" ? "新观测到的未注册TCP连接：\(unknown)。不代表攻击、允许或阻止判定。" : "\(unknown) newly observed TCP endpoints without rules. Not an attack or traffic verdict."
+                    content.body = observed + (count > 0 ? " " + content.body : "")
+                }
                 center.add(UNNotificationRequest(identifier:notificationID,content:content,trigger:nil)) { error in
                     DispatchQueue.main.async {
                         if captured != epoch { center.removePendingNotificationRequests(withIdentifiers:[notificationID]); center.removeDeliveredNotifications(withIdentifiers:[notificationID]) }

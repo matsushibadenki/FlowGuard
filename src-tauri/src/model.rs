@@ -46,6 +46,8 @@ pub struct Rule {
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
     #[serde(default)]
+    pub unknown_notifications: bool,
+    #[serde(default)]
     pub ask_notifications: bool,
     #[serde(default = "default_ask_action")]
     pub ask_timeout_action: String,
@@ -67,6 +69,7 @@ impl Default for Preferences {
         Self {
             ask_timeout_action: default_ask_action(),
             ask_notifications: false,
+            unknown_notifications: false,
             locale: "ja".into(),
             view: "map".into(),
             panel: "right".into(),
@@ -167,6 +170,9 @@ pub struct Snapshot {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Command {
+    SetUnknownNotifications {
+        enabled: bool,
+    },
     SetAskNotifications {
         enabled: bool,
     },
