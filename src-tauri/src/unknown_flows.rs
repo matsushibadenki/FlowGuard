@@ -60,7 +60,13 @@ impl Tracker {
                     c.port,
                     c.direction
                 );
-                if crate::system_protection::preset(Some(identity), c.port, &c.direction).is_some()
+                if crate::system_protection::preset(
+                    Some(identity),
+                    c.port,
+                    &c.direction,
+                    &c.protocol,
+                )
+                .is_some()
                 {
                     if self.seen.len() < 1024 {
                         self.seen.insert(key);

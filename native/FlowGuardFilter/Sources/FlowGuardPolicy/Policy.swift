@@ -15,20 +15,23 @@ public struct PolicyRule: Codable, Equatable {
     public let updatedAt: UInt64
     public let source: String
 }
+public enum FlowTransport { case tcp, udp, unknown }
 public struct FlowIdentity {
+    public let transport: FlowTransport
     public let identity: SigningIdentity?
     public let executable: String
     public let destination: String
     public let port: UInt16
     public let direction: RuleDirection
-    public init(executable: String, destination: String, port: UInt16, direction: RuleDirection, identity: SigningIdentity? = nil) {
-        self.identity = identity; self.executable = executable; self.destination = destination; self.port = port; self.direction = direction
+    public init(transport: FlowTransport, executable: String, destination: String, port: UInt16, direction: RuleDirection, identity: SigningIdentity? = nil) {
+        self.transport = transport; self.identity = identity; self.executable = executable; self.destination = destination; self.port = port; self.direction = direction
     }
 }
 public struct Policy {
     public let rules: [PolicyRule]
     public init(rules: [PolicyRule] = []) { self.rules = rules.filter { $0.source == "live" && $0.identity?.valid == true && $0.appKey == $0.identity?.key } }
     public func matchingRule(for flow: FlowIdentity) -> PolicyRule? {
+        guard flow.transport == .tcp else { return nil }
         // A specific direction overrides a both-directions fallback, newest first.
         let matches = rules.filter { $0.identity != nil && flow.identity?.valid == true && $0.identity == flow.identity && $0.destination == flow.destination && $0.port == flow.port && ($0.direction == .both || $0.direction == flow.direction) }
         let matched = matches.sorted { lhs, rhs in

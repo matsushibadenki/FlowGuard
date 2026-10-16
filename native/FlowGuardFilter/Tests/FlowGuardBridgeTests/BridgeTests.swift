@@ -24,7 +24,7 @@ final class BridgeTests: XCTestCase {
         let valid = try rules()
         let data = try JSONEncoder().encode(InitialPolicy(rules: valid))
         let initial = try InitialPolicy.decode(data)
-        let decision = Policy(rules: initial.rules).decision(for: FlowIdentity(executable: "/Applications/Test.app/Contents/MacOS/Test", destination: "1.2.3.4", port: 443, direction: .outbound, identity: SigningIdentity(authority: "developer", teamId: "ABCDE12345", identifier: "com.test.app")))
+        let decision = Policy(rules: initial.rules).decision(for: FlowIdentity(transport: .tcp, executable: "/Applications/Test.app/Contents/MacOS/Test", destination: "1.2.3.4", port: 443, direction: .outbound, identity: SigningIdentity(authority: "developer", teamId: "ABCDE12345", identifier: "com.test.app")))
         XCTAssertEqual(decision, .block)
         XCTAssertTrue(try InitialPolicy.decode(Data("{\"rules\":[]}".utf8)).rules.isEmpty)
     }

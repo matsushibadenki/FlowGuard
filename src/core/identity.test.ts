@@ -20,6 +20,7 @@ describe('signed subjects and safe legacy imports', () => {
       expect(ruleFor([signed],{...connection,identity:changed},'live')).toBeUndefined();
     }
   });
+  it('never saves or matches a TCP rule against UDP or unknown transport',()=>{for(const protocol of ['UDP','unknown',''])for(const mode of ['live','demo'] as const){expect(canSaveRule({...connection,protocol},mode)).toBe(false);expect(ruleFor([signed],{...connection,protocol},mode)).toBeUndefined();}});
   it('never matches or saves an unverified live process', () => {
     for(const identity of [null,undefined]) {
       expect(canSaveRule({...connection,identity},'live')).toBe(false);

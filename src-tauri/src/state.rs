@@ -8,6 +8,7 @@ pub struct SharedState {
     _document_lock: fs::File,
 }
 pub struct Session {
+    routers: crate::routers::Store,
     pub asks: crate::asks::Machine,
     pub updates: crate::updates::Machine,
     pub services: crate::services::Snapshot,
@@ -37,6 +38,73 @@ pub struct Session {
     pub revision: u64,
 }
 impl SharedState {
+    pub fn register_router(
+        &self,
+        source: crate::routers::Source,
+    ) -> Result<Snapshot, crate::routers::Error> {
+        let mut s = self
+            .inner
+            .lock()
+            .map_err(|_| crate::routers::Code::Internal)?;
+        if s.updates.snapshot.stage == "installing" {
+            return Err(crate::routers::Code::Busy.into());
+        }
+        s.routers.register(source)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn remove_router(&self, id: &str) -> Result<Snapshot, crate::routers::Error> {
+        let mut s = self
+            .inner
+            .lock()
+            .map_err(|_| crate::routers::Code::Internal)?;
+        s.routers.remove(id)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn stop_router(&self, id: &str) -> Result<Snapshot, crate::routers::Error> {
+        let mut s = self
+            .inner
+            .lock()
+            .map_err(|_| crate::routers::Code::Internal)?;
+        s.routers.stop(id)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn collect_router(
+        &self,
+        id: &str,
+        adapter: Box<dyn crate::routers::RouterAdapter>,
+        timeout: std::time::Duration,
+    ) -> Result<Snapshot, crate::routers::Error> {
+        let ticket = {
+            let mut s = self
+                .inner
+                .lock()
+                .map_err(|_| crate::routers::Code::Internal)?;
+            if s.updates.snapshot.stage == "installing" {
+                return Err(crate::routers::Code::Busy.into());
+            }
+            let ticket = s.routers.begin(id)?;
+            s.revision += 1;
+            ticket
+        };
+        let result = ticket.collect(adapter, timeout);
+        let mut s = self
+            .inner
+            .lock()
+            .map_err(|_| crate::routers::Code::Internal)?;
+        let result = s.routers.finish(&ticket, result, now());
+        if result
+            .as_ref()
+            .err()
+            .is_none_or(|error| error.code != crate::routers::Code::Stale)
+        {
+            s.revision += 1;
+        }
+        result?;
+        Ok(s.snapshot())
+    }
     pub fn load(path: PathBuf) -> Result<Self, String> {
         let parent = path.parent().ok_or("missing_data_directory")?;
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -89,6 +157,7 @@ impl SharedState {
             path,
             _document_lock: document_lock,
             inner: Mutex::new(Session {
+                routers: Default::default(),
                 asks: Default::default(),
                 updates: Default::default(),
                 services: Default::default(),
@@ -200,6 +269,7 @@ impl SharedState {
                         rule.identity.as_ref(),
                         rule.port,
                         &rule.direction,
+                        "TCP", // v4 rules encode only TCP intentions.
                     )
                     .is_none()
                 {
@@ -279,6 +349,9 @@ impl SharedState {
                     .into_iter()
                     .find(|c| c.id == connection_id)
                     .ok_or("connection_expired")?;
+                if c.protocol != "TCP" {
+                    return Err("unsupported_protocol".into());
+                }
                 if c.app_key.is_empty() {
                     return Err("application_identity_unavailable".into());
                 }
@@ -349,7 +422,8 @@ impl SharedState {
                     .iter()
                     .find(|c| c.id == connection_id)
                     .ok_or("connection_expired")?;
-                if legacy.source != "live"
+                if c.protocol != "TCP"
+                    || legacy.source != "live"
                     || legacy.identity.is_some()
                     || legacy.app_key != c.app_key
                     || legacy.destination != c.destination
@@ -545,6 +619,28 @@ impl SharedState {
         s.revision += 1;
         Ok(s.snapshot())
     }
+    pub fn lan_edit(
+        &self,
+        generation: u64,
+        command: crate::inventory::Edit,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if s.updates.snapshot.stage == "installing" {
+            return Err("update_installing".into());
+        }
+        s.inventory.edit(generation, command)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn lan_copy(&self, generation: u64) -> Result<String, String> {
+        let s = self.inner.lock().map_err(|_| "state_unavailable")?;
+        if s.inventory.snapshot.generation != generation
+            || ["idle", "running", "cancelling"].contains(&s.discovery.stage.as_str())
+        {
+            return Err("export_stale_or_busy".into());
+        }
+        s.inventory.selected_csv(&s.discovery)
+    }
     pub fn lan_csv(&self, generation: u64) -> Result<String, String> {
         let s = self.inner.lock().map_err(|_| "state_unavailable")?;
         if s.inventory.snapshot.generation != generation
@@ -575,7 +671,7 @@ impl SharedState {
         String,
     > {
         let mut s = self.inner.lock().map_err(|_| "state_lock")?;
-        if !crate::updates::can_install(&s.snapshot()) {
+        if s.routers.busy() || !crate::updates::can_install(&s.snapshot()) {
             return Err("update_install_unavailable".into());
         }
         let (op, update, bytes) = s.updates.install()?;
@@ -945,6 +1041,16 @@ impl SharedState {
     }
 }
 impl Session {
+    fn security_snapshot(&self) -> crate::security::SecuritySnapshot {
+        let demo = self.document.preferences.mode == "demo";
+        let base = crate::security::normalize(&self.visible(), demo, self.last_observed);
+        if demo {
+            base
+        } else {
+            self.routers.augment(base, now())
+        }
+    }
+
     pub fn visible(&self) -> Vec<Connection> {
         if self.document.preferences.mode == "demo" {
             self.demo.clone()
@@ -957,11 +1063,7 @@ impl Session {
         let layout = renderer::layout(&connections);
         Snapshot {
             asks: self.asks.snapshot.clone(),
-            security: crate::security::normalize(
-                &connections,
-                self.document.preferences.mode == "demo",
-                self.last_observed,
-            ),
+            security: self.security_snapshot(),
             updates: self.updates.snapshot.clone(),
             services: self.services.clone(),
             ports_focus: self.ports_focus,
@@ -999,6 +1101,90 @@ mod tests {
         ));
         let _ = fs::remove_file(&path);
         SharedState::load(path).unwrap()
+    }
+    #[test]
+    fn router_results_are_shared_ephemeral_and_isolated_from_demo() {
+        let _guard = crate::routers::tests::READ_LOCK.lock().unwrap();
+        let state = state();
+        state
+            .register_router(crate::routers::tests::source())
+            .unwrap();
+        {
+            state.inner.lock().unwrap().document.preferences.mode = "live".into();
+        }
+        let snapshot = state
+            .collect_router(
+                "home",
+                Box::new(crate::routers::tests::Fixture { at: now() }),
+                std::time::Duration::from_secs(1),
+            )
+            .unwrap();
+        assert_eq!(snapshot.security.flows.len(), 1);
+        assert_eq!(
+            snapshot.security.flows[0].source,
+            crate::security::ObservationSource::Router
+        );
+        assert_eq!(
+            state.snapshot().unwrap().security.router_sources[0].stage,
+            "ready"
+        );
+        assert!(snapshot.document.rules.is_empty());
+        assert!(!state.path.exists());
+        state.inner.lock().unwrap().document.preferences.mode = "demo".into();
+        let demo = state.snapshot().unwrap();
+        assert!(demo.security.router_sources.is_empty());
+        assert!(demo
+            .security
+            .flows
+            .iter()
+            .all(|flow| flow.source == crate::security::ObservationSource::Demo));
+        state.remove_router("home").unwrap();
+        state.inner.lock().unwrap().document.preferences.mode = "live".into();
+        assert!(state.snapshot().unwrap().security.router_sources.is_empty());
+        state.inner.lock().unwrap().updates.snapshot.stage = "installing".into();
+        assert!(state
+            .register_router(crate::routers::tests::source())
+            .is_err());
+        assert!(state
+            .collect_router(
+                "home",
+                Box::new(crate::routers::tests::Fixture { at: now() }),
+                std::time::Duration::from_secs(1)
+            )
+            .is_err());
+    }
+    #[test]
+    fn router_stop_preempts_collection_without_locking_the_shared_state() {
+        use crate::routers::*;
+        let _guard = crate::routers::tests::READ_LOCK.lock().unwrap();
+        let state = std::sync::Arc::new(state());
+        state
+            .register_router(crate::routers::tests::source())
+            .unwrap();
+        struct Waiting(std::sync::mpsc::Sender<()>);
+        impl RouterAdapter for Waiting {
+            fn collect(&mut self, _: &Source, budget: &Budget) -> Result<ReadOutput, Error> {
+                self.0.send(()).unwrap();
+                loop {
+                    budget.check()?;
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = state.clone();
+        let reader = std::thread::spawn(move || {
+            worker.collect_router(
+                "home",
+                Box::new(Waiting(tx)),
+                std::time::Duration::from_secs(1),
+            )
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+        let stopped = state.stop_router("home").unwrap();
+        let revision = stopped.revision;
+        assert_eq!(reader.join().unwrap().err().unwrap().code, Code::Stale);
+        assert_eq!(state.snapshot().unwrap().revision, revision);
     }
     #[test]
     fn notification_opt_in_persists_and_rolls_back_on_failure() {
@@ -1269,6 +1455,19 @@ mod tests {
         state.update_ports(op, result).unwrap();
         let snapshot = state.snapshot().unwrap();
         let plan = crate::services::Plan::new(&snapshot, &network, op, "auto").unwrap();
+        assert_eq!(
+            plan.clone()
+                .with_hostname(" Service.Example.Test ")
+                .unwrap()
+                .snapshot()
+                .hostname
+                .as_deref(),
+            Some("service.example.test")
+        );
+        assert!(plan.clone().with_hostname("https://example.com").is_err());
+        let mut http = plan.clone();
+        http.mode = "http".into();
+        assert!(http.with_hostname("service.example.test").is_err());
         assert_eq!(plan.tcp.ports, vec![22]);
         assert!(crate::services::Plan::new(&snapshot, &network, op + 1, "auto").is_err());
         assert!(crate::services::Plan::new(&snapshot, &network, op, "bad").is_err());
@@ -1310,6 +1509,7 @@ mod tests {
             product: None,
             response: None,
             tls: None,
+            tls_details: None,
             observed_at: 0,
         });
         assert!(state
@@ -1331,6 +1531,7 @@ mod tests {
             product: None,
             response: None,
             tls: None,
+            tls_details: None,
             observed_at: 0,
         });
         complete.completed = 1;
@@ -1598,7 +1799,44 @@ mod tests {
         );
         assert_eq!(state.lan_panel("docked").unwrap().inventory.panel, "docked");
         assert!(state.lan_csv(op).unwrap().contains("192.168.1.1"));
+        assert!(state.lan_copy(op).is_err());
+        state
+            .lan_edit(
+                op,
+                crate::inventory::Edit::Selection {
+                    ids: vec!["en0|192.168.1.1".into()],
+                    expected: vec![],
+                },
+            )
+            .unwrap();
+        let edited = state
+            .lan_edit(
+                op,
+                crate::inventory::Edit::Comment {
+                    id: "en0|192.168.1.1".into(),
+                    value: "shared comment".into(),
+                    expected: "".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            edited.inventory.comments["en0|192.168.1.1"],
+            "shared comment"
+        );
+        assert!(state.lan_copy(op).unwrap().contains("shared comment"));
         state.begin_discovery(&plan).unwrap();
+        assert!(state.lan_copy(op).is_err());
+        assert!(state
+            .lan_edit(
+                op,
+                crate::inventory::Edit::Selection {
+                    ids: vec![],
+                    expected: vec![]
+                }
+            )
+            .is_err());
+        assert!(state.snapshot().unwrap().inventory.comments.is_empty());
+        assert!(state.snapshot().unwrap().inventory.checked_ids.is_empty());
         assert!(state.lan_csv(op).is_err());
         assert!(state.snapshot().unwrap().inventory.selected_id.is_none());
     }
@@ -1696,6 +1934,32 @@ mod tests {
         let (_, sent, snapshot) = s.begin_extension("activating").unwrap();
         assert_eq!(sent, vec![valid]);
         assert!(snapshot.extension.busy);
+    }
+    #[test]
+    fn non_tcp_observations_cannot_create_tcp_intentions() {
+        let s = state();
+        for protocol in ["UDP", "unknown", ""] {
+            let mut c = crate::model::demo_connections().remove(0);
+            c.protocol = protocol.into();
+            {
+                let mut inner = s.inner.lock().unwrap();
+                inner.document.preferences.mode = "live".into();
+                inner.connections = vec![c.clone()];
+            }
+            let before = s.snapshot().unwrap();
+            assert_eq!(
+                s.dispatch(Command::SaveRule {
+                    connection_id: c.id,
+                    action: "block".into(),
+                    direction: "both".into()
+                })
+                .err()
+                .unwrap(),
+                "unsupported_protocol"
+            );
+            assert_eq!(s.snapshot().unwrap().revision, before.revision);
+            assert!(s.snapshot().unwrap().document.rules.is_empty());
+        }
     }
     #[test]
     fn saved_rules_remain_unapplied_and_roundtrip() {

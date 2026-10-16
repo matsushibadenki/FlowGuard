@@ -5,7 +5,11 @@ pub fn preset(
     identity: Option<&SigningIdentity>,
     port: u16,
     direction: &str,
+    protocol: &str,
 ) -> Option<&'static str> {
+    if protocol != "TCP" {
+        return None;
+    }
     let identity = identity.filter(|i| i.valid() && i.authority == "apple")?;
     if !["outbound", "both", "unknown"].contains(&direction) {
         return None;
@@ -26,19 +30,29 @@ mod tests {
             team_id: "".into(),
             identifier: "com.apple.mDNSResponder".into(),
         };
-        assert_eq!(preset(Some(&identity), 53, "outbound"), Some("systemDNS"));
-        assert_eq!(preset(Some(&identity), 53, "both"), Some("systemDNS"));
-        assert_eq!(preset(Some(&identity), 53, "inbound"), None);
-        assert_eq!(preset(Some(&identity), 443, "outbound"), None);
-        assert_eq!(preset(None, 53, "outbound"), None);
+        assert_eq!(
+            preset(Some(&identity), 53, "outbound", "TCP"),
+            Some("systemDNS")
+        );
+        assert_eq!(
+            preset(Some(&identity), 53, "both", "TCP"),
+            Some("systemDNS")
+        );
+        for protocol in ["UDP", "unknown", "", "tcp", "ICMP"] {
+            assert_eq!(preset(Some(&identity), 53, "outbound", protocol), None);
+        }
+        assert_eq!(preset(Some(&identity), 5353, "outbound", "UDP"), None);
+        assert_eq!(preset(Some(&identity), 53, "inbound", "TCP"), None);
+        assert_eq!(preset(Some(&identity), 443, "outbound", "TCP"), None);
+        assert_eq!(preset(None, 53, "outbound", "TCP"), None);
         identity.authority = "developer".into();
         identity.team_id = "ABCDE12345".into();
-        assert_eq!(preset(Some(&identity), 53, "outbound"), None);
+        assert_eq!(preset(Some(&identity), 53, "outbound", "TCP"), None);
         identity.authority = "apple".into();
         identity.team_id = "".into();
         identity.identifier = "com.apple.softwareupdated".into();
         assert_eq!(
-            preset(Some(&identity), 443, "outbound"),
+            preset(Some(&identity), 443, "outbound", "TCP"),
             Some("systemUpdates")
         );
     }

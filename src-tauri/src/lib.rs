@@ -17,10 +17,12 @@ mod notifications;
 mod observer;
 mod ports;
 mod renderer;
+pub mod routers;
 mod security;
 mod services;
 mod state;
 mod system_protection;
+mod tls_details;
 mod unknown_flows;
 mod updates;
 use model::{Command, Rule, Snapshot};
@@ -113,6 +115,7 @@ async fn start_services(
     app: tauri::AppHandle,
     operation: u64,
     mode: String,
+    hostname: Option<String>,
 ) -> Result<Snapshot, String> {
     let network = tauri::async_runtime::spawn_blocking(network::observe)
         .await
@@ -122,7 +125,8 @@ async fn start_services(
         &network,
         operation,
         &mode,
-    )?;
+    )?
+    .with_hostname(hostname.as_deref().unwrap_or(""))?;
     let (op, snapshot) = app.state::<SharedState>().begin_services(&plan)?;
     let _ = app.emit("state-changed", &snapshot);
     let handle = app.clone();
@@ -241,6 +245,41 @@ fn select_lan_device(app: tauri::AppHandle, id: String) -> Result<Snapshot, Stri
     let snapshot = app.state::<SharedState>().lan_selection(&id)?;
     let _ = app.emit("state-changed", &snapshot);
     Ok(snapshot)
+}
+#[tauri::command]
+fn edit_lan_inventory(
+    app: tauri::AppHandle,
+    generation: u64,
+    command: inventory::Edit,
+) -> Result<Snapshot, String> {
+    let result = app.state::<SharedState>().lan_edit(generation, command);
+    if let Ok(current) = app.state::<SharedState>().snapshot() {
+        let _ = app.emit("state-changed", current);
+    }
+    result
+}
+#[tauri::command]
+async fn copy_lan_selection(app: tauri::AppHandle, generation: u64) -> Result<(), String> {
+    let text = app.state::<SharedState>().lan_copy(generation)?;
+    if text.len() > 8 * 1024 * 1024 {
+        return Err("clipboard_payload_limit".into());
+    }
+    #[cfg(target_os = "macos")]
+    return tauri::async_runtime::spawn_blocking(move || {
+        let (ok, _) = observer::run_bounded_input("/usr/bin/pbcopy", &[], Some(text.into_bytes()))?;
+        if ok {
+            Ok(())
+        } else {
+            Err("clipboard_unavailable".into())
+        }
+    })
+    .await
+    .map_err(|_| "clipboard_unavailable")?;
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = text;
+        Err("clipboard_unavailable".into())
+    }
 }
 #[tauri::command]
 fn lan_csv(app: tauri::AppHandle, generation: u64) -> Result<String, String> {
@@ -830,6 +869,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            edit_lan_inventory,
+            copy_lan_selection,
             notifications::notification_permission,
             answer_ask,
             check_update,

@@ -152,6 +152,11 @@ impl Machine {
 pub fn can_install(s: &crate::model::Snapshot) -> bool {
     s.updates.stage == "ready"
         && !s.updates.development
+        && !s
+            .security
+            .router_sources
+            .iter()
+            .any(|source| source.stage == "collecting")
         && !s.extension.busy
         && ![
             "approval_required",

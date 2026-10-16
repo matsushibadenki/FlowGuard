@@ -222,6 +222,9 @@ pub enum Command {
 
 #[cfg(test)]
 pub fn rule_for<'a>(rules: &'a [Rule], connection: &Connection, source: &str) -> Option<&'a Rule> {
+    if connection.protocol != "TCP" {
+        return None;
+    }
     rules.iter().find(|r| {
         r.source == source
             && if source == "demo" {
@@ -333,6 +336,11 @@ mod tests {
         assert!(rule_for(&[r.clone()], &c, "demo").is_none());
         r.direction = "both".into();
         assert!(rule_for(&[r.clone()], &c, "demo").is_some());
+        for protocol in ["UDP", "unknown", ""] {
+            let mut other = c.clone();
+            other.protocol = protocol.into();
+            assert!(rule_for(&[r.clone()], &other, "demo").is_none());
+        }
         assert!(rule_for(&[r.clone()], &c, "live").is_none());
         r.port = 80;
         assert!(rule_for(&[r], &c, "demo").is_none());

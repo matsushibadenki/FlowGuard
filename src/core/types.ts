@@ -21,11 +21,12 @@ export interface PortSnapshot {family:string;sourceNetmask:string;comparison:Por
 export interface Snapshot {asks?:AskSnapshot;security:SecuritySnapshot;updates:UpdateSnapshot;services:ServiceSnapshot;portsFocus:number;ports:PortSnapshot;inventory:InventorySnapshot;discovery:DiscoverySnapshot;network:NetworkSnapshot;revision:number;extension:ExtensionStatus;document:Document;connections:Connection[];applications:ApplicationGroup[];history:Connection[];selectedId:string|null;firewall:{enabled:boolean|null;enforcement:string;observer:string;error:string|null};lastObserved:number|null;layout:{id:string;y:number}[]}
 export type Command = {type:'setUnknownNotifications';enabled:boolean}| {type:'setAskNotifications';enabled:boolean}| {type:'setSystemException';id:string;enabled:boolean}| {type:'setAskTimeoutAction';action:'allow'|'block'}|{type:'setAutoUpdates';enabled:boolean}|{type:'select';id:string}|{type:'setView';view:View}|{type:'setLocale';locale:Locale}|{type:'setMode';mode:'demo'|'live'}|{type:'setPanel';panel:'left'|'right'|'floating'}|{type:'saveRule';connectionId:string;action:Action;direction:Direction}|{type:'migrateRule';id:string;connectionId:string}|{type:'deleteRule';id:string}|{type:'restoreRules';rules:Rule[]};
 export interface DeviceChange {device:LanDevice;previous:LanDevice|null;kind:string;fields:string[]}
-export interface InventorySnapshot {generation:number;localAddress:string;netmask:string;status:string;baselineAt:number|null;rows:DeviceChange[];selectedId:string|null;panel:'docked'|'floating'}
+export interface InventorySnapshot {checkedIds?:string[];comments?:Record<string,string>;columns?:string[];generation:number;localAddress:string;netmask:string;status:string;baselineAt:number|null;rows:DeviceChange[];selectedId:string|null;panel:'docked'|'floating'}
 
 export type ServiceMode='auto'|'http'|'https'|'ssh'|'smtp';
-export interface ServiceRow {port:number;candidate:string;service:string|null;status:string;method:string;product:string|null;response:string|null;tls:string|null;observedAt:number}
-export interface ServiceSnapshot {operation:number;portOperation:number;generation:number;target:string;sourceAddress:string;interface:string;family:string;mode:string;stage:string;total:number;completed:number;rows:ServiceRow[];error:string|null;selectedPort:number|null}
+export interface TlsDetails {serverName:string;verification:string;reason:string;certificate:{issuer:string|null;notBefore:number|null;notAfter:number|null}|null}
+export interface ServiceRow {tlsDetails?:TlsDetails|null;port:number;candidate:string;service:string|null;status:string;method:string;product:string|null;response:string|null;tls:string|null;observedAt:number}
+export interface ServiceSnapshot {hostname?:string|null;operation:number;portOperation:number;generation:number;target:string;sourceAddress:string;interface:string;family:string;mode:string;stage:string;total:number;completed:number;rows:ServiceRow[];error:string|null;selectedPort:number|null}
 
 export interface UpdateSnapshot {stage:string;operation:number;currentVersion:string;version:string|null;notes:string|null;checkedAt:number|null;downloaded:number;total:number|null;error:string|null;development:boolean}
 
@@ -34,7 +35,10 @@ export type Capability = 'available' | 'unavailable' | 'unknown';
 export interface RouterCapabilities {deviceDiscovery:Capability;trafficCounters:Capability;flowExport:Capability;securityLogs:Capability;firewallRead:Capability;firewallWrite:Capability;deviceQuarantine:Capability;configBackup:Capability}
 export interface SecurityFlow {id:string;source:SecuritySource;sourceId:string;localEndpoint:string;remoteAddress:string;remotePort:number;protocol:string;direction:string;appKey:string|null;pid:number|null;firstObservedAt:number;sampledAt:number|null;bytesSent:number|null;bytesReceived:number|null;counterBasis:string}
 export interface SecurityEvent {id:string;source:SecuritySource;sourceId:string;observedAt:number;kind:string;evidenceFlowIds:string[]}
-export interface SecuritySnapshot {flows:SecurityFlow[];events:SecurityEvent[];routerCapabilities:RouterCapabilities}
+export type RouterErrorCode='invalid_config'|'busy'|'timeout'|'cancelled'|'authentication'|'source_mismatch'|'invalid_payload'|'limit'|'replay'|'stale'|'unavailable'|'internal';
+export interface RouterSourceStatus {id:string;endpoint:string;location:'lan_before_nat'|'wan_after_nat'|'unknown';stage:'idle'|'collecting'|'ready'|'cancelled'|'failed'|'stale';authentication:'unknown'|'verified'|'unverified';sampledAt:number|null;error:{code:RouterErrorCode;retryable:boolean}|null}
+export interface FlowCorrelation {macFlowId:string;routerFlowId:string;basis:'same_tuple_near_sample_candidate_only'}
+export interface SecuritySnapshot {routerSources?:RouterSourceStatus[];correlations?:FlowCorrelation[];flows:SecurityFlow[];events:SecurityEvent[];routerCapabilities:RouterCapabilities}
 
 export interface AskRequest {requestId:string;instanceId:string;policyId:string;ruleId:string;identity:SigningIdentity;app:string;destination:string;port:number;direction:'inbound'|'outbound';timeoutAction:'allow'|'block';remainingSeconds:number}
 export interface AskOutcome {request:AskRequest;action:'allow'|'block';reason:'answered'|'timed_out'|'policy_changed'|'provider_stopped'|'capacity'|'transport_unavailable'}

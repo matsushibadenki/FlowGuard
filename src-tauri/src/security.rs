@@ -63,6 +63,8 @@ pub struct SecurityEvent {
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecuritySnapshot {
+    pub router_sources: Vec<crate::routers::SourceStatus>,
+    pub correlations: Vec<crate::routers::Correlation>,
     pub flows: Vec<SecurityFlow>,
     pub events: Vec<SecurityEvent>,
     pub router_capabilities: RouterCapabilities,

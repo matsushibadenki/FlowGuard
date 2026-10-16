@@ -43,7 +43,7 @@ final class TransportTests: XCTestCase {
         let endpoint = Endpoint(); endpoint.receiver.setReady(true); endpoint.asks.activate()
         let data = Data(#"{"id":"ask","appKey":"signed:v1:developer:ABCDE12345:com.test.app","identity":{"authority":"developer","teamId":"ABCDE12345","identifier":"com.test.app"},"app":"Test","destination":"1.2.3.4","port":443,"direction":"both","action":"ask","timeoutAction":"block","updatedAt":1,"source":"live"}"#.utf8)
         let rule = try JSONDecoder().decode(PolicyRule.self, from: data)
-        let flow = FlowIdentity(executable: "", destination: rule.destination, port: rule.port, direction: .outbound, identity: rule.identity)
+        let flow = FlowIdentity(transport: .tcp, executable: "", destination: rule.destination, port: rule.port, direction: .outbound, identity: rule.identity)
         let resumed = expectation(description: "flow callback")
         XCTAssertNotNil(endpoint.asks.enqueue(rule: rule, flow: flow) { action in XCTAssertEqual(action, .allow); resumed.fulfill() })
         let listener = NSXPCListener.anonymous(); listener.delegate = endpoint; listener.resume()

@@ -12,6 +12,9 @@ pub struct Change {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InventorySnapshot {
+    pub checked_ids: Vec<String>,
+    pub comments: BTreeMap<String, String>,
+    pub columns: Vec<String>,
     pub generation: u64,
     pub local_address: String,
     pub netmask: String,
@@ -24,6 +27,9 @@ pub struct InventorySnapshot {
 impl Default for InventorySnapshot {
     fn default() -> Self {
         Self {
+            checked_ids: vec![],
+            comments: BTreeMap::new(),
+            columns: COLUMNS.iter().map(|s| s.to_string()).collect(),
             generation: 0,
             local_address: String::new(),
             netmask: String::new(),
@@ -34,6 +40,37 @@ impl Default for InventorySnapshot {
             panel: "docked".into(),
         }
     }
+}
+pub const COLUMNS: &[&str] = &[
+    "change",
+    "inspect",
+    "address",
+    "family",
+    "interface",
+    "mac",
+    "name",
+    "nameSource",
+    "response",
+    "source",
+    "observed",
+    "comment",
+];
+#[derive(serde::Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum Edit {
+    Selection {
+        ids: Vec<String>,
+        expected: Vec<String>,
+    },
+    Comment {
+        id: String,
+        value: String,
+        expected: String,
+    },
+    Columns {
+        values: Vec<String>,
+        expected: Vec<String>,
+    },
 }
 #[derive(Default)]
 pub struct Inventory {
@@ -79,6 +116,8 @@ impl Inventory {
         self.snapshot.netmask = plan.local.netmask.clone();
         self.snapshot.status = "running".into();
         self.snapshot.rows.clear();
+        self.snapshot.checked_ids.clear();
+        self.snapshot.comments.clear();
         self.snapshot.selected_id = None;
         self.snapshot.baseline_at = None;
     }
@@ -142,6 +181,12 @@ impl Inventory {
             }
             self.baseline = Some((self.scope.clone(), result.clone()));
         }
+        self.snapshot
+            .checked_ids
+            .retain(|id| self.snapshot.rows.iter().any(|r| &r.device.id == id));
+        self.snapshot
+            .comments
+            .retain(|id, _| self.snapshot.rows.iter().any(|r| &r.device.id == id));
         if !self
             .snapshot
             .rows
@@ -154,6 +199,87 @@ impl Inventory {
     pub fn invalidate(&mut self, result: &DiscoverySnapshot) {
         self.baseline = None;
         self.update(result);
+    }
+    pub fn edit(&mut self, generation: u64, command: Edit) -> Result<(), String> {
+        if self.snapshot.generation != generation || self.snapshot.status == "running" {
+            return Err("lan_stale".into());
+        }
+        match command {
+            Edit::Selection { mut ids, expected } => {
+                if expected != self.snapshot.checked_ids {
+                    return Err("lan_conflict".into());
+                }
+                if ids.len() > 2048
+                    || ids
+                        .iter()
+                        .any(|id| !self.snapshot.rows.iter().any(|r| &r.device.id == id))
+                {
+                    return Err("lan_stale".into());
+                }
+                ids.sort();
+                ids.dedup();
+                self.snapshot.checked_ids = ids;
+            }
+            Edit::Comment {
+                id,
+                value,
+                expected,
+            } => {
+                if !self.snapshot.rows.iter().any(|r| r.device.id == id) {
+                    return Err("lan_stale".into());
+                }
+                if self
+                    .snapshot
+                    .comments
+                    .get(&id)
+                    .map(String::as_str)
+                    .unwrap_or("")
+                    != expected
+                {
+                    return Err("lan_conflict".into());
+                }
+                if value.chars().count() > 500
+                    || value.len() > 2000
+                    || value.chars().any(|c| c.is_control() && c != '\n')
+                {
+                    return Err("lan_comment_invalid".into());
+                }
+                if value.is_empty() {
+                    self.snapshot.comments.remove(&id);
+                } else {
+                    self.snapshot.comments.insert(id, value);
+                }
+            }
+            Edit::Columns { values, expected } => {
+                if expected != self.snapshot.columns {
+                    return Err("lan_conflict".into());
+                }
+                let unique: std::collections::HashSet<_> = values.iter().collect();
+                if values.len() > COLUMNS.len()
+                    || unique.len() != values.len()
+                    || !values.iter().any(|v| v == "address")
+                    || !values.iter().any(|v| v == "inspect")
+                    || values.iter().any(|v| !COLUMNS.contains(&v.as_str()))
+                {
+                    return Err("lan_columns_invalid".into());
+                }
+                self.snapshot.columns = values;
+            }
+        }
+        Ok(())
+    }
+    pub fn selected_csv(&self, job: &DiscoverySnapshot) -> Result<String, String> {
+        if self.snapshot.checked_ids.is_empty() {
+            return Err("lan_selection_empty".into());
+        }
+        let mut selected = self.snapshot.clone();
+        selected
+            .rows
+            .retain(|r| self.snapshot.checked_ids.contains(&r.device.id));
+        if selected.rows.len() != self.snapshot.checked_ids.len() {
+            return Err("lan_stale".into());
+        }
+        Ok(csv(&selected, job))
     }
     pub fn select(&mut self, id: &str) -> Result<(), String> {
         if !self.snapshot.rows.iter().any(|r| r.device.id == id) {
@@ -205,6 +331,7 @@ pub fn csv(inventory: &InventorySnapshot, job: &DiscoverySnapshot) -> String {
         "previous_evidence_source",
         "previous_collected_at_unix",
         "result_errors",
+        "comment",
     ];
     let mut text = String::from("\u{feff}");
     text.push_str(&headers.map(cell).join(","));
@@ -252,6 +379,7 @@ pub fn csv(inventory: &InventorySnapshot, job: &DiscoverySnapshot) -> String {
             p.map(|d| d.source.clone()).unwrap_or_default(),
             p.map(|d| d.observed_at.to_string()).unwrap_or_default(),
             job.errors.join("|"),
+            inventory.comments.get(&d.id).cloned().unwrap_or_default(),
         ];
         text.push_str(&values.iter().map(|v| cell(v)).collect::<Vec<_>>().join(","));
         text.push_str("\r\n");
@@ -299,6 +427,143 @@ mod tests {
             observed_at: Some(2),
             ..Default::default()
         }
+    }
+    #[test]
+    fn workbench_selection_comments_and_columns_are_scoped_and_conflict_checked() {
+        let mut i = Inventory::default();
+        i.begin(&plan(), 7);
+        i.update(&result(vec![device("192.168.1.2"), device("192.168.1.3")]));
+        let id = i.snapshot.rows[0].device.id.clone();
+        i.edit(
+            7,
+            Edit::Selection {
+                ids: vec![id.clone(), id.clone()],
+                expected: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(i.snapshot.checked_ids, vec![id.clone()]);
+        assert!(i
+            .edit(
+                7,
+                Edit::Selection {
+                    ids: vec![],
+                    expected: vec![]
+                }
+            )
+            .is_err());
+        i.edit(
+            7,
+            Edit::Comment {
+                id: id.clone(),
+                value: "=注記,\"a\"\n次の行".into(),
+                expected: "".into(),
+            },
+        )
+        .unwrap();
+        assert!(i
+            .edit(
+                7,
+                Edit::Comment {
+                    id: id.clone(),
+                    value: "stale".into(),
+                    expected: "".into()
+                }
+            )
+            .is_err());
+        let text = i.selected_csv(&result(vec![])).unwrap();
+        assert!(text.contains("192.168.1.2"));
+        assert!(!text.contains("192.168.1.3"));
+        assert!(text.contains("comment"));
+        assert!(text.contains("name_status"));
+        assert!(text.contains("collected_at_unix"));
+        assert!(text.contains("'="));
+        assert_eq!(i.snapshot.comments[&id], "=注記,\"a\"\n次の行");
+        let columns = i.snapshot.columns.clone();
+        i.edit(
+            7,
+            Edit::Columns {
+                values: vec!["address".into(), "inspect".into()],
+                expected: columns.clone(),
+            },
+        )
+        .unwrap();
+        assert!(i
+            .edit(
+                7,
+                Edit::Columns {
+                    values: columns.clone(),
+                    expected: columns
+                }
+            )
+            .is_err());
+        i.begin(&plan(), 8);
+        assert!(i.snapshot.checked_ids.is_empty());
+        assert!(i.snapshot.comments.is_empty());
+        assert_eq!(i.snapshot.columns, vec!["address", "inspect"]);
+        assert!(i
+            .edit(
+                7,
+                Edit::Selection {
+                    ids: vec![],
+                    expected: vec![]
+                }
+            )
+            .is_err());
+        assert!(i.selected_csv(&result(vec![])).is_err());
+    }
+    #[test]
+    fn workbench_rejects_running_invalid_columns_and_oversized_comments() {
+        let mut i = Inventory::default();
+        i.begin(&plan(), 1);
+        assert!(i
+            .edit(
+                1,
+                Edit::Selection {
+                    ids: vec![],
+                    expected: vec![]
+                }
+            )
+            .is_err());
+        i.update(&result(vec![device("192.168.1.2")]));
+        let id = i.snapshot.rows[0].device.id.clone();
+        for values in [
+            vec!["address".into()],
+            vec!["address".into(), "inspect".into(), "address".into()],
+            vec!["address".into(), "inspect".into(), "bogus".into()],
+        ] {
+            assert!(i
+                .edit(
+                    1,
+                    Edit::Columns {
+                        values,
+                        expected: i.snapshot.columns.clone()
+                    }
+                )
+                .is_err());
+        }
+        for value in ["a".repeat(501), "tab\t".into(), "bad\0".into()] {
+            assert!(i
+                .edit(
+                    1,
+                    Edit::Comment {
+                        id: id.clone(),
+                        value,
+                        expected: "".into()
+                    }
+                )
+                .is_err());
+        }
+        assert!(i
+            .edit(
+                1,
+                Edit::Selection {
+                    ids: vec!["missing".into()],
+                    expected: vec![]
+                }
+            )
+            .is_err());
+        assert!(i.snapshot.comments.is_empty());
     }
     #[test]
     fn compares_records_without_treating_timestamps_as_changes() {

@@ -93,7 +93,7 @@ public final class AskQueue {
     }
     public func enqueue(rule: PolicyRule, flow: FlowIdentity, completion: @escaping (RuleAction) -> Void) -> AskRequest? {
         lock.lock(); defer { lock.unlock() }
-        guard rule.action == .ask,
+        guard flow.transport == .tcp, rule.action == .ask,
               let identity = flow.identity, identity.valid, rule.identity == identity,
               rule.appKey == identity.key, rule.destination == flow.destination, rule.port == flow.port,
               flow.direction != .both, rule.direction == .both || rule.direction == flow.direction,

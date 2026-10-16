@@ -8,7 +8,7 @@ final class SystemProtectionTests: XCTestCase {
         return try JSONDecoder().decode(PolicyRule.self, from: Data(json.utf8))
     }
     func flow(_ direction: RuleDirection = .outbound, identity: SigningIdentity? = SigningIdentity(authority:"apple",teamId:"",identifier:"com.apple.mDNSResponder"), port: UInt16 = 53) -> FlowIdentity {
-        FlowIdentity(executable:"/untrusted/path",destination:"1.1.1.1",port:port,direction:direction,identity:identity)
+        FlowIdentity(transport: .tcp, executable:"/untrusted/path",destination:"1.1.1.1",port:port,direction:direction,identity:identity)
     }
     func testDefaultProtectionOverridesBlockAndAskAndMissingLegacyFlag() throws {
         for action in ["block","ask"] {
@@ -23,6 +23,18 @@ final class SystemProtectionTests: XCTestCase {
         XCTAssertNil(Policy(rules:[try rule(exception:true,destination:"9.9.9.9")]).decision(for:flow()))
         XCTAssertNil(Policy(rules:[try rule(exception:true),try rule(direction:"outbound")]).decision(for:flow()))
         XCTAssertEqual(Policy(rules:[try rule()]).decision(for:flow(.inbound)),.block)
+    }
+    func testTransportCannotInheritTCPProtectionOrExceptions() throws {
+        let subject = SigningIdentity(authority:"apple",teamId:"",identifier:"com.apple.mDNSResponder")
+        for transport in [FlowTransport.udp, .unknown] {
+            for port: UInt16 in [53,5353,22,443,5900] {
+                let value = FlowIdentity(transport:transport,executable:"",destination:"1.1.1.1",port:port,direction:.outbound,identity:subject)
+                XCTAssertNil(SystemProtection.preset(for:value))
+                for action in ["allow","block","ask"] {
+                    XCTAssertNil(Policy(rules:[try rule(action:action,exception:true,port:Int(port))]).matchingRule(for:value))
+                }
+            }
+        }
     }
     func testIdentityPortAndDirectionAloneNeverClaimProtection() {
         XCTAssertNil(SystemProtection.preset(for:flow(identity:nil)))

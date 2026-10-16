@@ -17,6 +17,7 @@ pub struct Snapshot {
     pub interface: String,
     pub family: String,
     pub mode: String,
+    pub hostname: Option<String>,
     pub stage: String,
     pub total: usize,
     pub completed: usize,
@@ -35,6 +36,7 @@ pub struct Row {
     pub product: Option<String>,
     pub response: Option<String>,
     pub tls: Option<String>,
+    pub tls_details: Option<crate::tls_details::Details>,
     pub observed_at: u64,
 }
 #[derive(Clone)]
@@ -42,6 +44,7 @@ pub struct Plan {
     pub tcp: ports::Plan,
     pub port_operation: u64,
     pub mode: String,
+    pub hostname: Option<String>,
 }
 impl Plan {
     pub fn new(
@@ -97,7 +100,15 @@ impl Plan {
             tcp,
             port_operation: operation,
             mode: mode.into(),
+            hostname: None,
         })
+    }
+    pub fn with_hostname(mut self, value: &str) -> Result<Self, String> {
+        self.hostname = crate::tls_details::hostname(value)?;
+        if self.hostname.is_some() && !["auto", "https"].contains(&self.mode.as_str()) {
+            return Err("service_hostname_mode".into());
+        }
+        Ok(self)
     }
     pub fn snapshot(&self) -> Snapshot {
         let t = self.tcp.snapshot();
@@ -109,6 +120,7 @@ impl Plan {
             interface: t.interface,
             family: t.family,
             mode: self.mode.clone(),
+            hostname: self.hostname.clone(),
             stage: "running".into(),
             total: self.tcp.ports.len(),
             ..Default::default()
@@ -273,6 +285,7 @@ fn probe(p: &Plan, port: u16, config: Option<Arc<rustls::ClientConfig>>) -> Row 
         product: None,
         response: None,
         tls: None,
+        tls_details: None,
         observed_at: now(),
     };
     if mode == "unsupported" {
@@ -282,22 +295,53 @@ fn probe(p: &Plan, port: u16, config: Option<Arc<rustls::ClientConfig>>) -> Row 
     let result = (|| -> Result<Vec<u8>, String> {
         let mut s =
             ports::connect(p.tcp.local, p.tcp.target, Some(&p.tcp.interface), port).map_err(io)?;
-        let host = if p.tcp.target.is_ipv6() {
+        let host = if mode == "https" && p.hostname.is_some() {
+            p.hostname.clone().unwrap()
+        } else if p.tcp.target.is_ipv6() {
             format!("[{}]", p.tcp.target)
         } else {
             p.tcp.target.to_string()
         };
         let request=format!("HEAD / HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\nUser-Agent: FlowGuard/0.1\r\n\r\n");
         if mode == "https" {
-            let config = config.ok_or("tls_roots_unavailable")?;
+            r.tls_details = Some(crate::tls_details::Details {
+                server_name: p
+                    .hostname
+                    .clone()
+                    .unwrap_or_else(|| p.tcp.target.to_string()),
+                verification: "not_completed".into(),
+                reason: "not_completed".into(),
+                certificate: None,
+            });
+            let config = config.ok_or_else(|| {
+                r.tls_details.as_mut().unwrap().reason = "roots_unavailable".into();
+                "tls_roots_unavailable"
+            })?;
             let mut c = rustls::ClientConnection::new(
                 config,
-                rustls::pki_types::ServerName::IpAddress(p.tcp.target.into()),
+                match &p.hostname {
+                    Some(name) => rustls::pki_types::ServerName::try_from(name.clone())
+                        .map_err(|_| "tls_name")?,
+                    None => rustls::pki_types::ServerName::IpAddress(p.tcp.target.into()),
+                },
             )
             .map_err(|_| "tls_error")?;
             s.set_nonblocking(true).map_err(io)?;
             while c.is_handshaking() {
                 retry(end, || c.complete_io(&mut s)).map_err(|e| {
+                    let details = r.tls_details.as_mut().unwrap();
+                    details.reason = crate::tls_details::reason(&e).into();
+                    details.verification =
+                        if matches!(details.reason.as_str(), "timeout" | "handshake_failed") {
+                            "not_completed"
+                        } else {
+                            "failed"
+                        }
+                        .into();
+                    details.certificate = c
+                        .peer_certificates()
+                        .and_then(|certs| certs.first())
+                        .and_then(|cert| crate::tls_details::certificate(cert.as_ref()));
                     if e.kind() == std::io::ErrorKind::TimedOut {
                         io(e)
                     } else {
@@ -305,6 +349,13 @@ fn probe(p: &Plan, port: u16, config: Option<Arc<rustls::ClientConfig>>) -> Row 
                     }
                 })?;
             }
+            let details = r.tls_details.as_mut().unwrap();
+            details.verification = "verified".into();
+            details.reason = "verified".into();
+            details.certificate = c
+                .peer_certificates()
+                .and_then(|certs| certs.first())
+                .and_then(|cert| crate::tls_details::certificate(cert.as_ref()));
             r.tls = c.protocol_version().map(|version| {
                 match version {
                     rustls::ProtocolVersion::TLSv1_2 => "TLS 1.2",
@@ -414,7 +465,7 @@ pub fn run(p: Plan, mut publish: impl FnMut(Snapshot), cancelled: impl Fn() -> b
     publish(result);
 }
 pub fn csv(s: &Snapshot, generation: u64, ports: u64) -> String {
-    let mut out=String::from("\u{feff}operation,port_operation,generation,stale,stage,error,mode,target,source,interface,family,port,candidate,service,status,method,product_reported,response,tls,observed_at_unix\r\n");
+    let mut out=String::from("\u{feff}operation,port_operation,generation,stale,stage,error,mode,target,source,interface,family,port,candidate,service,status,method,product_reported,response,tls,observed_at_unix,requested_hostname,tls_server_name,tls_verification,tls_reason,certificate_issuer,certificate_not_before_unix,certificate_not_after_unix\r\n");
     for r in &s.rows {
         let cells = vec![
             s.operation.to_string(),
@@ -437,6 +488,36 @@ pub fn csv(s: &Snapshot, generation: u64, ports: u64) -> String {
             r.response.clone().unwrap_or_default(),
             r.tls.clone().unwrap_or_default(),
             r.observed_at.to_string(),
+            s.hostname.clone().unwrap_or_default(),
+            r.tls_details
+                .as_ref()
+                .map(|d| d.server_name.clone())
+                .unwrap_or_default(),
+            r.tls_details
+                .as_ref()
+                .map(|d| d.verification.clone())
+                .unwrap_or_default(),
+            r.tls_details
+                .as_ref()
+                .map(|d| d.reason.clone())
+                .unwrap_or_default(),
+            r.tls_details
+                .as_ref()
+                .and_then(|d| d.certificate.as_ref())
+                .and_then(|c| c.issuer.clone())
+                .unwrap_or_default(),
+            r.tls_details
+                .as_ref()
+                .and_then(|d| d.certificate.as_ref())
+                .and_then(|c| c.not_before)
+                .map(|t| t.to_string())
+                .unwrap_or_default(),
+            r.tls_details
+                .as_ref()
+                .and_then(|d| d.certificate.as_ref())
+                .and_then(|c| c.not_after)
+                .map(|t| t.to_string())
+                .unwrap_or_default(),
         ];
         out.push_str(
             &cells
@@ -462,6 +543,7 @@ mod tests {
             product: None,
             response: None,
             tls: None,
+            tls_details: None,
             observed_at: 0,
         }
     }
@@ -545,6 +627,7 @@ mod tests {
                 },
                 port_operation: 1,
                 mode: mode.into(),
+                hostname: None,
             };
             assert_eq!(probe(&p, port, None).service.as_deref(), Some(expected));
             server.join().unwrap();
@@ -566,7 +649,11 @@ mod tests {
                 "test certificate generation failed"
             );
         };
-        for (name, san) in [("local", "IP:127.0.0.1,IP:::1"), ("wrong", "IP:127.0.0.2")] {
+        for (name, san) in [
+            ("local", "IP:127.0.0.1,IP:::1"),
+            ("wrong", "IP:127.0.0.2"),
+            ("dns", "DNS:service.example.test"),
+        ] {
             if name == "local" {
                 run(&[
                     "genpkey",
@@ -614,15 +701,25 @@ mod tests {
             std::fs::read(fixture.path().join("local.der")).unwrap(),
         );
         let system_roots = tls_config().expect("macOS trust roots available");
-        for (address, mismatch) in [("127.0.0.1", false), ("::1", false), ("127.0.0.1", true)] {
-            let cert = if mismatch {
-                rustls::pki_types::CertificateDer::from(
-                    std::fs::read(fixture.path().join("wrong.der")).unwrap(),
-                )
-            } else {
+        for (address, variant, hostname, mismatch) in [
+            ("127.0.0.1", "local", None, false),
+            ("::1", "local", None, false),
+            ("127.0.0.1", "wrong", None, true),
+            ("127.0.0.1", "dns", Some("service.example.test"), false),
+            ("::1", "dns", Some("service.example.test"), false),
+            ("127.0.0.1", "dns", Some("other.example.test"), true),
+            ("127.0.0.1", "dns", None, true),
+        ] {
+            let cert = if variant == "local" {
                 cert.clone()
+            } else {
+                rustls::pki_types::CertificateDer::from(
+                    std::fs::read(fixture.path().join(format!("{variant}.der"))).unwrap(),
+                )
             };
-            for trusted in [true, false] {
+            for (trusted, time_shift) in
+                [(true, 0i64), (false, 0), (true, 3 * 86400), (true, -86400)]
+            {
                 let listener = std::net::TcpListener::bind((address, 0)).unwrap();
                 let port = listener.local_addr().unwrap().port();
                 let config = rustls::ServerConfig::builder_with_provider(Arc::new(
@@ -651,6 +748,14 @@ mod tests {
                     let mut b = [0; 512];
                     if let Ok(n) = tls.read(&mut b) {
                         assert!(b[..n].starts_with(b"HEAD / HTTP/1.1\r\n"));
+                        if let Some(hostname) = hostname {
+                            assert_eq!(tls.conn.server_name(), Some(hostname));
+                            assert!(std::str::from_utf8(&b[..n])
+                                .unwrap()
+                                .contains(&format!("Host: {hostname}:{port}\r\n")));
+                        } else {
+                            assert!(tls.conn.server_name().is_none());
+                        }
                         let _ = tls.write_all(b"HTTP/1.1 200 OK\r\nServer: LocalTLS/1\r\n\r\n");
                     }
                 });
@@ -658,13 +763,25 @@ mod tests {
                 if trusted {
                     roots.add(cert.clone()).unwrap();
                 }
-                let client = rustls::ClientConfig::builder_with_provider(Arc::new(
+                let mut client = rustls::ClientConfig::builder_with_provider(Arc::new(
                     rustls::crypto::ring::default_provider(),
                 ))
                 .with_safe_default_protocol_versions()
                 .unwrap()
                 .with_root_certificates(roots)
                 .with_no_client_auth();
+                #[derive(Debug)]
+                struct TestTime(u64);
+                impl rustls::time_provider::TimeProvider for TestTime {
+                    fn current_time(&self) -> Option<rustls::pki_types::UnixTime> {
+                        Some(rustls::pki_types::UnixTime::since_unix_epoch(
+                            Duration::from_secs(self.0),
+                        ))
+                    }
+                }
+                if time_shift != 0 {
+                    client.time_provider = Arc::new(TestTime((now() as i64 + time_shift) as u64));
+                }
                 let source = crate::network::observe()
                     .addresses
                     .into_iter()
@@ -696,6 +813,7 @@ mod tests {
                     },
                     port_operation: 1,
                     mode: "https".into(),
+                    hostname: hostname.map(str::to_string),
                 };
                 let client = if trusted {
                     Arc::new(client)
@@ -703,13 +821,46 @@ mod tests {
                     system_roots.clone()
                 };
                 let r = probe(&plan, port, Some(client));
-                if trusted && !mismatch {
+                if trusted && !mismatch && time_shift == 0 {
                     assert_eq!(r.service.as_deref(), Some("HTTPS"));
                     assert!(r.tls.is_some());
                     assert_eq!(r.product.as_deref(), Some("LocalTLS/1"));
+                    let details = r.tls_details.as_ref().unwrap();
+                    assert_eq!(details.verification, "verified");
+                    let metadata = details.certificate.as_ref().unwrap();
+                    assert!(metadata
+                        .issuer
+                        .as_ref()
+                        .unwrap()
+                        .contains("FlowGuard loopback test"));
+                    assert!(metadata.not_before.unwrap() <= now() as i64);
+                    assert!(metadata.not_after.unwrap() > now() as i64);
+                    let exported = csv(
+                        &Snapshot {
+                            hostname: plan.hostname.clone(),
+                            rows: vec![r.clone()],
+                            ..Default::default()
+                        },
+                        1,
+                        1,
+                    );
+                    assert!(exported.contains("certificate_not_after_unix"));
+                    assert!(exported.contains("FlowGuard loopback test"));
                 } else {
                     assert_eq!(r.status, "tls_error");
                     assert!(r.service.is_none());
+                    assert_eq!(
+                        r.tls_details.as_ref().unwrap().reason,
+                        if !trusted {
+                            "unknown_issuer"
+                        } else if time_shift > 0 {
+                            "expired"
+                        } else if time_shift < 0 {
+                            "not_yet_valid"
+                        } else {
+                            "name_mismatch"
+                        }
+                    );
                 }
                 server.join().unwrap();
             }
@@ -746,6 +897,7 @@ mod tests {
             },
             port_operation: 7,
             mode: "http".into(),
+            hostname: None,
         };
         let mut snapshots = vec![];
         run(p.clone(), |s| snapshots.push(s), || false);

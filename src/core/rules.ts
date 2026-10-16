@@ -2,6 +2,7 @@
 import {sameIdentity,validIdentity,identityKey} from './identity';
 import type {Connection, Rule} from './types';
 export function ruleFor(rules:Rule[], c:Connection, source:string) {
+  if(c.protocol!=='TCP') return undefined;
   return rules.filter(r=>r.source===source && (source==='demo'?r.appKey===c.appKey:(validIdentity(r.identity)&&r.appKey===identityKey(r.identity)&&sameIdentity(r.identity,c.identity))) && r.destination===c.destination && r.port===c.port && (r.direction==='both'||r.direction===c.direction)).sort((a,b)=>Number(b.direction!=='both')-Number(a.direction!=='both')||b.updatedAt-a.updatedAt)[0];
 }
 export function validRules(value:unknown): value is Rule[] {

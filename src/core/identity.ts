@@ -11,7 +11,7 @@ export function sameIdentity(a: SigningIdentity | null | undefined, b: SigningId
   return validIdentity(a) && validIdentity(b) && a.authority === b.authority && a.teamId === b.teamId && a.identifier === b.identifier;
 }
 export function canSaveRule(c: Connection, mode: 'live' | 'demo') {
-  return !!c.appKey && (mode === 'demo' || validIdentity(c.identity));
+  return c.protocol==='TCP' && !!c.appKey && (mode === 'demo' || validIdentity(c.identity));
 }
 export function legacyRule(r: Rule) { return r.source === 'live' && !r.identity; }
 export function identityLabel(i: SigningIdentity) { return `${i.authority === 'apple' ? 'Apple' : i.teamId} / ${i.identifier}`; }

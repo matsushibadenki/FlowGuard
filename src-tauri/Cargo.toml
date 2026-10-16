@@ -17,6 +17,7 @@ default = []
 gpu = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
 
 [dependencies]
+time = "=0.3.55"
 sha2 = "0.10"
 tauri-plugin-updater = "=2.10.1"
 semver = "1"

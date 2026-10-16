@@ -58,7 +58,7 @@ public final class FilterDataProvider: NEFilterDataProvider {
               let port = UInt16(remote.port),
               flow.direction == .inbound || flow.direction == .outbound,
               let signingIdentity = SigningIdentity.verified(auditToken: flow.sourceAppAuditToken) else { return .allow() }
-        let identity = FlowIdentity(executable: "", destination: remote.hostname, port: port,
+        let identity = FlowIdentity(transport: .tcp, executable: "", destination: remote.hostname, port: port,
                                     direction: flow.direction == .inbound ? .inbound : .outbound, identity: signingIdentity)
         lock.lock()
         guard let rule = policy.matchingRule(for: identity) else { lock.unlock(); return .allow() }

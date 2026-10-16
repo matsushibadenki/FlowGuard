@@ -8,26 +8,26 @@ final class PolicyTests: XCTestCase {
         return try JSONDecoder().decode(PolicyRule.self, from: Data(json.utf8))
     }
     let signing = SigningIdentity(authority: "developer", teamId: "ABCDE12345", identifier: "com.test.app")
-    let flow = FlowIdentity(executable: "/Applications/Mail.app/Contents/MacOS/Mail", destination: "1.2.3.4", port: 993, direction: .outbound, identity: SigningIdentity(authority: "developer", teamId: "ABCDE12345", identifier: "com.test.app"))
+    let flow = FlowIdentity(transport: .tcp, executable: "/Applications/Mail.app/Contents/MacOS/Mail", destination: "1.2.3.4", port: 993, direction: .outbound, identity: SigningIdentity(authority: "developer", teamId: "ABCDE12345", identifier: "com.test.app"))
     func testDemoRulesCannotEnforce() throws {
         XCTAssertNil(Policy(rules: [try rule("demo")]).decision(for: flow))
     }
     func testExactIdentityAndPort() throws {
         let policy = Policy(rules: [try rule()])
         XCTAssertEqual(policy.decision(for: flow), .block)
-        XCTAssertNil(policy.decision(for: FlowIdentity(executable: "/other/Mail", destination: "1.2.3.4", port: 993, direction: .outbound)))
-        XCTAssertNil(policy.decision(for: FlowIdentity(executable: flow.executable, destination: "1.2.3.4", port: 443, direction: .outbound, identity: signing)))
+        XCTAssertNil(policy.decision(for: FlowIdentity(transport: .tcp, executable: "/other/Mail", destination: "1.2.3.4", port: 993, direction: .outbound)))
+        XCTAssertNil(policy.decision(for: FlowIdentity(transport: .tcp, executable: flow.executable, destination: "1.2.3.4", port: 443, direction: .outbound, identity: signing)))
     }
     func testSpecificDirectionHasPriority() throws {
         let policy = Policy(rules: [try rule(), try rule("live", "outbound", "allow", 2)])
         XCTAssertEqual(policy.decision(for: flow), .allow)
-        XCTAssertEqual(policy.decision(for: FlowIdentity(executable: flow.executable, destination: flow.destination, port: flow.port, direction: .inbound, identity: signing)), .block)
+        XCTAssertEqual(policy.decision(for: FlowIdentity(transport: .tcp, executable: flow.executable, destination: flow.destination, port: flow.port, direction: .inbound, identity: signing)), .block)
     }
     func testPublisherIdentitySurvivesMovesButNeverMatchesUnsignedOrAnotherSigner() throws {
         let policy = Policy(rules: [try rule()])
-        XCTAssertEqual(policy.decision(for: FlowIdentity(executable: "/Moved/Mail", destination: flow.destination, port: flow.port, direction: .outbound, identity: signing)), .block)
+        XCTAssertEqual(policy.decision(for: FlowIdentity(transport: .tcp, executable: "/Moved/Mail", destination: flow.destination, port: flow.port, direction: .outbound, identity: signing)), .block)
         for identity in [nil, SigningIdentity(authority: "developer", teamId: "ZZZZZ12345", identifier: signing.identifier), SigningIdentity(authority: "developer", teamId: signing.teamId, identifier: "com.impostor")] {
-            XCTAssertNil(policy.decision(for: FlowIdentity(executable: flow.executable, destination: flow.destination, port: flow.port, direction: .outbound, identity: identity)))
+            XCTAssertNil(policy.decision(for: FlowIdentity(transport: .tcp, executable: flow.executable, destination: flow.destination, port: flow.port, direction: .outbound, identity: identity)))
         }
         XCTAssertNil(SigningIdentity.verified(auditToken: nil))
         XCTAssertNil(SigningIdentity.verified(auditToken: Data(repeating: 0, count: 31)))

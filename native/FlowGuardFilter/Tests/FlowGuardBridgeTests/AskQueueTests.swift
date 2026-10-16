@@ -10,7 +10,7 @@ final class AskQueueTests: XCTestCase {
         return try JSONDecoder().decode(PolicyRule.self, from: data)
     }
     func flow(_ rule: PolicyRule) -> FlowIdentity {
-        FlowIdentity(executable: "", destination: rule.destination, port: rule.port, direction: .outbound, identity: rule.identity)
+        FlowIdentity(transport: .tcp, executable: "", destination: rule.destination, port: rule.port, direction: .outbound, identity: rule.identity)
     }
     func answer(_ request: AskRequest, _ action: RuleAction) -> AskAnswer {
         AskAnswer(instanceId: request.instanceId, policyId: request.policyId, requestId: request.requestId, action: action)
@@ -63,10 +63,19 @@ final class AskQueueTests: XCTestCase {
         XCTAssertEqual(queue.snapshot().outcomes.last?.reason, "provider_stopped")
         XCTAssertEqual(queue.answer(answer(next, .allow)).status, "stale")
     }
+    func testUnsupportedTransportNeverQueuesOrInvokesFallback() throws {
+        let queue = AskQueue(); queue.activate(); let rule = try rule("block")
+        for transport in [FlowTransport.udp, .unknown] {
+            let value=FlowIdentity(transport:transport,executable:"",destination:rule.destination,port:rule.port,direction:.outbound,identity:rule.identity)
+            XCTAssertNil(queue.enqueue(rule:rule,flow:value) { _ in XCTFail("unsupported transport must not reach an ask fallback") })
+        }
+        XCTAssertTrue(queue.snapshot().requests.isEmpty)
+        XCTAssertTrue(queue.snapshot().outcomes.isEmpty)
+    }
     func testUnsignedAndDifferentScopeNeverQueue() throws {
         let queue = AskQueue(); queue.activate(); let rule = try rule()
-        XCTAssertNil(queue.enqueue(rule: rule, flow: FlowIdentity(executable: "/same/path", destination: rule.destination, port: rule.port, direction: .outbound)) { _ in XCTFail() })
-        XCTAssertNil(queue.enqueue(rule: rule, flow: FlowIdentity(executable: "", destination: "other", port: rule.port, direction: .outbound, identity: rule.identity)) { _ in XCTFail() })
+        XCTAssertNil(queue.enqueue(rule: rule, flow: FlowIdentity(transport: .tcp, executable: "/same/path", destination: rule.destination, port: rule.port, direction: .outbound)) { _ in XCTFail() })
+        XCTAssertNil(queue.enqueue(rule: rule, flow: FlowIdentity(transport: .tcp, executable: "", destination: "other", port: rule.port, direction: .outbound, identity: rule.identity)) { _ in XCTFail() })
         XCTAssertTrue(queue.snapshot().requests.isEmpty)
     }
 }

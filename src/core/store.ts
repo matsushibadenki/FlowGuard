@@ -1,3 +1,4 @@
+import {lanColumns,validLanColumns,type LanEdit} from './lan-workbench';
 // パス: src/core/store.ts
 import {useSyncExternalStore} from 'react';
 import {invoke,isTauri} from '@tauri-apps/api/core';
@@ -89,7 +90,7 @@ export async function lanPortsCsv(operation:number):Promise<string>{if(!native)t
 
 export async function openLanPorts(id:string,generation:number){if(!native)throw Error("desktop_required");emit(await invoke<Snapshot>("open_lan_ports",{id,generation}));}
 
-export async function startServices(operation:number,mode:import('./types').ServiceMode){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('start_services',{operation,mode}));}
+export async function startServices(operation:number,mode:import('./types').ServiceMode,hostname=''){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('start_services',{operation,mode,hostname}));}
 export async function stopServices(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('stop_services'));}
 export async function servicesCsv(operation:number):Promise<string>{if(!native)throw Error('desktop_required');return invoke<string>('services_csv',{operation});}
 export async function selectService(operation:number,port:number){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('select_service',{operation,port}));}
@@ -105,3 +106,24 @@ export async function answerAsk(request:import('./types').AskRequest,action:'all
 }
 
 export async function notificationPermission(request=false):Promise<string>{if(!native)return 'unavailable';return invoke<string>('notification_permission',{request});}
+
+export async function editLanInventory(generation:number,command:LanEdit):Promise<Snapshot>{
+ if(native){const next=await invoke<Snapshot>('edit_lan_inventory',{generation,command});emit(next);return next;}
+ if(!snapshot||snapshot.inventory.generation!==generation||snapshot.inventory.status==='running')throw Error('lan_stale');
+ const inventory={...snapshot.inventory,checkedIds:[...(snapshot.inventory.checkedIds??[])],comments:{...snapshot.inventory.comments},columns:[...(snapshot.inventory.columns??lanColumns)]};
+ if(command.type==='selection'){
+  if(JSON.stringify(command.expected)!==JSON.stringify(inventory.checkedIds))throw Error('lan_conflict');
+  if(command.ids.length>2048||command.ids.some(id=>!inventory.rows.some(r=>r.device.id===id)))throw Error('lan_stale');
+  inventory.checkedIds=[...new Set(command.ids)].sort();
+ }else if(command.type==='comment'){
+  if(!inventory.rows.some(r=>r.device.id===command.id))throw Error('lan_stale');
+  if((inventory.comments[command.id]??'')!==command.expected)throw Error('lan_conflict');
+  if([...command.value].length>500||new TextEncoder().encode(command.value).length>2000||/[\x00-\x09\x0b-\x1f\x7f]/.test(command.value))throw Error('lan_comment_invalid');
+  if(command.value)inventory.comments[command.id]=command.value;else delete inventory.comments[command.id];
+ }else{
+  if(JSON.stringify(command.expected)!==JSON.stringify(inventory.columns))throw Error('lan_conflict');
+  if(!validLanColumns(command.values))throw Error('lan_columns_invalid');inventory.columns=command.values;
+ }
+ const next={...snapshot,inventory,revision:snapshot.revision+1};emit(next);return next;
+}
+export async function copyLanSelection(generation:number):Promise<void>{if(!native)throw Error('desktop_required');return invoke('copy_lan_selection',{generation});}
