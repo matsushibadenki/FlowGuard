@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-// Fixed, read-only tools. No shell, sudo, arbitrary arguments, DNS lookups or packet payloads.
+// Fixed tools selected by native callers; observer operations are read-only. No shell, sudo, arbitrary arguments, DNS lookups or packet payloads.
 pub(crate) fn run_bounded(binary: &str, args: &[&str]) -> Result<(bool, String), String> {
     run_bounded_input(binary, args, None)
 }
@@ -13,26 +13,31 @@ pub(crate) fn run_bounded_diagnostic(
     binary: &str,
     args: &[&str],
 ) -> Result<(bool, String), String> {
-    run_bounded_impl(binary, args, None, true)
+    run_bounded_impl(binary, args, None, true, None)
 }
 pub(crate) fn run_bounded_input(
     binary: &str,
     args: &[&str],
     input: Option<Vec<u8>>,
 ) -> Result<(bool, String), String> {
-    run_bounded_impl(binary, args, input, false)
+    run_bounded_impl(binary, args, input, false, None)
+}
+// Only the fixed signed firewall helper needs time for the explicit OS authentication dialog.
+pub(crate) fn run_firewall_helper(binary: &str, args: &[&str]) -> Result<(bool, String), String> {
+    run_bounded_impl(binary, args, None, false, Some(Duration::from_secs(120)))
 }
 fn run_bounded_impl(
     binary: &str,
     args: &[&str],
     input: Option<Vec<u8>>,
     capture_errors: bool,
+    timeout: Option<Duration>,
 ) -> Result<(bool, String), String> {
-    let deadline = if input.is_some() {
+    let deadline = timeout.unwrap_or(if input.is_some() {
         Duration::from_secs(12)
     } else {
         Duration::from_secs(6)
-    };
+    });
     let mut child = Command::new(binary)
         .args(args)
         .stdin(if input.is_some() {

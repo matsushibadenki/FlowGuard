@@ -2,8 +2,12 @@ mod asks;
 mod discovery;
 mod enforcement;
 mod extension;
+mod firewall_control;
 #[cfg(feature = "gpu")]
 pub mod gpu;
+mod gpu_panel;
+#[cfg(feature = "gpu")]
+mod gpu_scene;
 mod identity;
 #[cfg(target_os = "macos")]
 mod instance;
@@ -21,6 +25,7 @@ pub mod routers;
 mod security;
 mod services;
 mod state;
+mod syslog;
 mod system_protection;
 mod tls_details;
 mod unknown_flows;
@@ -109,6 +114,69 @@ async fn install_update(app: tauri::AppHandle) -> Result<Snapshot, String> {
         return Ok(s);
     }
     app.restart()
+}
+#[tauri::command]
+async fn control_firewall(
+    app: tauri::AppHandle,
+    action: firewall_control::Action,
+    expected: Option<bool>,
+    acknowledged: bool,
+) -> Result<Snapshot, String> {
+    let executable = std::env::current_exe().map_err(|_| "bundle_path_unavailable")?;
+    let contents = executable
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or("bundle_path_unavailable")?
+        .to_path_buf();
+    let (op, snapshot) =
+        app.state::<SharedState>()
+            .begin_firewall_control(action, expected, acknowledged)?;
+    let _ = app.emit("state-changed", snapshot);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        firewall_control::execute(&contents, action, expected)
+    })
+    .await
+    .unwrap_or_else(|_| Err("result_unknown".into()));
+    let snapshot = app
+        .state::<SharedState>()
+        .finish_firewall_control(op, result)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
+#[tauri::command]
+async fn start_syslog(app: tauri::AppHandle, config: syslog::Config) -> Result<Snapshot, String> {
+    let network = tauri::async_runtime::spawn_blocking(network::observe)
+        .await
+        .map_err(|_| "address_unavailable")?;
+    let (ticket, snapshot) = app.state::<SharedState>().begin_syslog(config, &network)?;
+    let _ = app.emit("state-changed", &snapshot);
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        syslog::run(ticket, |result| {
+            if let Ok(snapshot) = handle.state::<SharedState>().update_syslog(result) {
+                let _ = handle.emit("state-changed", snapshot);
+            }
+        })
+    });
+    Ok(snapshot)
+}
+#[tauri::command]
+fn stop_syslog(app: tauri::AppHandle, operation: u64) -> Result<Snapshot, String> {
+    let snapshot = app.state::<SharedState>().stop_syslog(operation)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
+#[tauri::command]
+fn clear_syslog(app: tauri::AppHandle, operation: u64) -> Result<Snapshot, String> {
+    let snapshot = app.state::<SharedState>().clear_syslog(operation)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
+#[tauri::command]
+fn select_syslog(app: tauri::AppHandle, operation: u64, id: u64) -> Result<Snapshot, String> {
+    let snapshot = app.state::<SharedState>().select_syslog(operation, id)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
 }
 #[tauri::command]
 async fn start_services(
@@ -836,6 +904,20 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if window.label() == "main"
+                && matches!(
+                    event,
+                    tauri::WindowEvent::Resized(_)
+                        | tauri::WindowEvent::CloseRequested { .. }
+                        | tauri::WindowEvent::Destroyed
+                )
+            {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    gpu_panel::destroy();
+                } else {
+                    gpu_panel::suspend();
+                }
+            }
+            if window.label() == "main"
                 && window
                     .app_handle()
                     .try_state::<menubar::MenuBar>()
@@ -878,6 +960,15 @@ pub fn run() {
             cancel_update,
             install_update,
             start_services,
+            gpu_panel::gpu_panel_available,
+            gpu_panel::open_gpu_panel,
+            gpu_panel::sync_gpu_panel,
+            gpu_panel::close_gpu_panel,
+            control_firewall,
+            start_syslog,
+            stop_syslog,
+            clear_syslog,
+            select_syslog,
             stop_services,
             services_csv,
             select_service,
@@ -902,7 +993,7 @@ pub fn run() {
             float_panel,
             dock_panel
         ])
-        .build(tauri::generate_context!())
+        .build(app_context())
         .expect("FlowGuard could not start")
         .run(|app, event| {
             #[cfg(target_os = "macos")]
@@ -914,4 +1005,13 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(all(feature = "gpu-qa", target_os = "macos"))]
+pub fn run_gpu_panel_check() -> Result<(), String> {
+    gpu_panel::run_check()
+}
+
+fn app_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
 }

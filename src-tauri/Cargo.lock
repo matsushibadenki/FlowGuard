@@ -891,13 +891,17 @@ dependencies = [
 
 [[package]]
 name = "flowguard"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "bytemuck",
  "flate2",
  "libc",
  "minisign-verify",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-quartz-core",
  "plist",
  "pollster",
  "reqwest",

@@ -1,5 +1,5 @@
 //! Dense-map native GPU backend. All buffers and the rendered texture stay in Rust/wgpu.
-//! Native-surface presentation is not connected to the WebView's compact UI map yet.
+//! The macOS panel presents directly to a retained CAMetalLayer; no CPU frame readback.
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 #[repr(C)]
@@ -8,11 +8,18 @@ struct Vertex {
     position: [f32; 2],
     color: [f32; 4],
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Route {
     pub from: [f32; 2],
     pub to: [f32; 2],
     pub color: [f32; 4],
+}
+#[derive(Default)]
+struct Mesh {
+    routes: Vec<Route>,
+    size: (u32, u32),
+    buffer: Option<wgpu::Buffer>,
+    vertices: u32,
 }
 pub struct NativeRenderer {
     device: wgpu::Device,
@@ -22,6 +29,8 @@ pub struct NativeRenderer {
     view: wgpu::TextureView,
     width: u32,
     height: u32,
+    format: wgpu::TextureFormat,
+    mesh: std::sync::Mutex<Mesh>,
 }
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 impl NativeRenderer {
@@ -30,18 +39,36 @@ impl NativeRenderer {
             backends: wgpu::Backends::METAL,
             ..Default::default()
         });
+        Self::new_for_surface(&instance, None, width, height).await
+    }
+    pub(crate) async fn new_for_surface(
+        instance: &wgpu::Instance,
+        surface: Option<&wgpu::Surface<'_>>,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, String> {
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: None,
+                compatible_surface: surface,
                 force_fallback_adapter: false,
             })
             .await
             .map_err(|e| e.to_string())?;
+        let format = match surface {
+            Some(surface) => surface
+                .get_capabilities(&adapter)
+                .formats
+                .into_iter()
+                .find(|f| f.is_srgb())
+                .ok_or("surface_format_unavailable")?,
+            None => FORMAT,
+        };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("FlowGuard native renderer"),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                required_limits: wgpu::Limits::downlevel_defaults()
+                    .using_resolution(adapter.limits()),
                 ..Default::default()
             })
             .await
@@ -71,7 +98,7 @@ impl NativeRenderer {
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: FORMAT,
+                    format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -80,7 +107,7 @@ impl NativeRenderer {
             cache: None,
         });
         let (width, height) = (width.clamp(1, 4096), height.clamp(1, 4096));
-        let texture = Self::texture(&device, width, height);
+        let texture = Self::texture(&device, width, height, format);
         let view = texture.create_view(&Default::default());
         Ok(Self {
             device,
@@ -90,9 +117,16 @@ impl NativeRenderer {
             view,
             width,
             height,
+            format,
+            mesh: Default::default(),
         })
     }
-    fn texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
+    fn texture(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> wgpu::Texture {
         device.create_texture(&wgpu::TextureDescriptor {
             label: Some("FlowGuard GPU-owned map"),
             size: wgpu::Extent3d {
@@ -103,7 +137,7 @@ impl NativeRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: FORMAT,
+            format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         })
@@ -113,41 +147,84 @@ impl NativeRenderer {
         if (width, height) == (self.width, self.height) {
             return;
         }
-        self.texture = Self::texture(&self.device, width, height);
+        self.texture = Self::texture(&self.device, width, height, self.format);
         self.view = self.texture.create_view(&Default::default());
         self.width = width;
         self.height = height;
     }
     /// Routes use normalized [0,1] positions. This method never returns a pixel buffer.
+    pub(crate) fn configure_surface(&self, surface: &wgpu::Surface<'_>) {
+        surface.configure(
+            &self.device,
+            &wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: self.format,
+                width: self.width,
+                height: self.height,
+                present_mode: wgpu::PresentMode::Fifo,
+                desired_maximum_frame_latency: 2,
+                alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                view_formats: vec![],
+            },
+        );
+    }
+    pub(crate) fn present(
+        &self,
+        surface: &wgpu::Surface<'_>,
+        routes: &[Route],
+    ) -> Result<bool, String> {
+        let frame = match surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                self.configure_surface(surface);
+                return Ok(false);
+            }
+            Err(wgpu::SurfaceError::Timeout) => return Ok(false),
+            Err(_) => return Err("surface_unavailable".into()),
+        };
+        let view = frame.texture.create_view(&Default::default());
+        self.draw(routes, &view)?;
+        frame.present();
+        Ok(true)
+    }
     pub fn render(&self, routes: &[Route]) -> Result<(), String> {
+        self.draw(routes, &self.view)
+    }
+    fn draw(&self, routes: &[Route], view: &wgpu::TextureView) -> Result<(), String> {
         if routes.len() > 10_000 {
             return Err("scene_limit".into());
         }
-        let mut vertices = Vec::with_capacity(routes.len() * 32 * 6);
-        for route in routes {
-            if route
-                .from
-                .iter()
-                .chain(route.to.iter())
-                .chain(route.color.iter())
-                .any(|v| !v.is_finite())
-            {
-                return Err("invalid_scene".into());
+        let mut mesh = self.mesh.lock().map_err(|_| "renderer_lock")?;
+        if mesh.routes != routes || mesh.size != (self.width, self.height) {
+            let mut vertices = Vec::with_capacity(routes.len() * 32 * 6);
+            for route in routes {
+                if route
+                    .from
+                    .iter()
+                    .chain(route.to.iter())
+                    .chain(route.color.iter())
+                    .any(|v| !v.is_finite())
+                {
+                    return Err("invalid_scene".into());
+                }
+                append_route(&mut vertices, *route, self.width, self.height);
             }
-            append_route(&mut vertices, *route, self.width, self.height);
+            mesh.buffer = if vertices.is_empty() {
+                None
+            } else {
+                Some(
+                    self.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("FlowGuard native route vertices"),
+                            contents: bytemuck::cast_slice(&vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        }),
+                )
+            };
+            mesh.vertices = vertices.len() as u32;
+            mesh.routes = routes.to_vec();
+            mesh.size = (self.width, self.height);
         }
-        let buffer = if vertices.is_empty() {
-            None
-        } else {
-            Some(
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("FlowGuard native route vertices"),
-                        contents: bytemuck::cast_slice(&vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            )
-        };
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -157,7 +234,7 @@ impl NativeRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("FlowGuard route pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.view,
+                    view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -174,16 +251,23 @@ impl NativeRenderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            if let Some(buffer) = buffer.as_ref() {
+            if let Some(buffer) = mesh.buffer.as_ref() {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_vertex_buffer(0, buffer.slice(..));
-                pass.draw(0..vertices.len() as u32, 0..1);
+                pass.draw(0..mesh.vertices, 0..1);
             }
         }
         self.queue.submit(Some(encoder.finish()));
         Ok(())
     }
-    /// Borrowed only by a future native compositor. No serialization or IPC readback API.
+    #[cfg(feature = "gpu-qa")]
+    pub(crate) fn wait_for_completion(&self) -> Result<(), String> {
+        self.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map(|_| ())
+            .map_err(|_| "gpu_wait_failed".into())
+    }
+    /// Borrowed only by a native compositor. No serialization or IPC readback API.
     pub fn texture_view(&self) -> &wgpu::TextureView {
         &self.view
     }

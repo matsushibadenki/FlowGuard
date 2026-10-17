@@ -20,6 +20,8 @@ jobs:
         run: npm ci
       - name: Verify frontend
         run: npm test && npm run build
+      - name: Verify release submission payload gate
+        run: python3 scripts/test_release.py
       - name: Verify Rust and update signature policy
         working-directory: src-tauri
         run: cargo test --locked --lib

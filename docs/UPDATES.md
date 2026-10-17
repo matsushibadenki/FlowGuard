@@ -21,14 +21,35 @@ The local `.release-secrets/updater.key` is the long-lived updater signing key; 
 
 The preparation script requires Python 3.11 or newer. --resume-prepared-app resumes signing an unfinished staged bundle without rebuilding; it refuses completed assets. App ID and Team ID are included explicitly in generated signing entitlements.
 
-All versions in package.json, Cargo.toml and tauri.conf.json must agree. The script builds the release app, embeds the Swift bridge/extension before signing, signs nested binaries and bundles with hardened runtime, submits a temporary archive to notarytool, requires Accepted, staples and assesses the app, then creates the downloadable zip, updater tar.gz/signature, latest.json and checksums. The signature is created after notarization/stapling and explicitly binds the version. It prepares assets locally under ignored `release/<version>/<architecture>/` without publication.
+All versions in package.json, Cargo.toml and tauri.conf.json must agree. The default command builds the release app, embeds the Swift bridge/extension/firewall helper, signs nested binaries with explicit IPC identifiers and hardened runtime, verifies host/extension versions and signing requirements, and prepares notarization.zip plus preparation.json locally. It stops before sending the app to Apple and does not generate a public latest.json. A positive integer macOS bundleVersion is required and copied to the extension. The sidebar uses the running application version.
+
+After explicit approval of that specific app archive and destination, repeat the command with `--submit-prepared --expected-notarization-sha256 <approved-SHA256>`. This phase neither rebuilds nor re-signs: it checks the archive hash and the staged bundle digest against preparation.json before using notarytool. Accepted, staple/validate and Gatekeeper are required before creating the downloadable zip, updater tar.gz/signature, latest.json and checksums. Changed payloads require new review. The public updater key remains unchanged. The signature is created after notarization/stapling and explicitly binds the version. It prepares assets locally under ignored `release/<version>/<architecture>/` without publication.
 
 The existing Developer ID certificate and `flowguard` Keychain profile have been checked. Regenerated Developer ID profiles supplied on 2026-10-14 match both bundle IDs, team and signing certificate and include the required content-filter-provider-systemextension capability; the host also includes system-extension.install. A release containing the Network Extension requires those host/extension profiles. `--observe-only` explicitly prepares a host-only release without the unprovisioned extension; this must be an intentional distribution choice, not a silent fallback. The selected initial distribution scope is the full host plus Network Extension bundle; both required profiles are now available in the ignored docs-private directory. Neither preparing nor installing an update activates the Network Extension.
 
 ## Publishing after preparation
 
-Review the notes and verified artifacts, commit/tag the matching version, and push the tag. Run the same release command with `--publish` only when publication is intended. It requires the remote tag, creates a draft release, uploads only public distribution files and checksums, then publishes it. Existing versions/assets are never overwritten. The signature private key stays local; GitHub receives no signing/notarization secrets. `.github/workflows/verify.yml` runs frontend, Rust and controlled updater tests on pushes/PRs, not production publication.
+Review the notes and verified artifacts, commit/tag the matching version, and push the tag. If publication has also been explicitly approved and the matching source tag is already remote, add `--publish` to the explicit `--submit-prepared` invocation. To publish files after submission has already completed, review and upload the five final public assets with GitHub Releases separately; do not rebuild or overwrite the prepared version. It requires the remote tag, creates a draft release, uploads only public distribution files and checksums, then publishes it. Existing versions/assets are never overwritten. The signature private key stays local; GitHub receives no signing/notarization secrets. `.github/workflows/verify.yml` runs frontend, Rust and controlled updater tests on pushes/PRs, not production publication.
 
 The initial installer must be downloaded/installed normally; older builds without an updater cannot bootstrap themselves. A subsequent newer stable release exercises the real installed-app update route. One architecture is prepared per invocation; merge both architecture entries into one latest.json before publishing a multi-architecture release. The current script never silently replaces another architecture's feed entry. Intel/universal and activated-extension update recovery remain Pending.
 
 Implementation follows the [Tauri 2 updater contract](https://v2.tauri.app/plugin/updater/); app-specific signature-version and archive checks are stricter than the bundled plugin's defaults.
+
+## 0.1.1 signed candidate verification (2026-10-17)
+
+The local 0.1.1/build 2 candidate is Developer ID signed, including the extension, bridge/runtime and firewall helper. Apple notarization submission is Pending explicit payload approval; there is no public 0.1.1 feed yet. Details and the exact archive hash are in [0.1.1-validation.md](releases/0.1.1-validation.md).
+
+`python3 scripts/prepare-update-verification.py release/0.1.1/aarch64` creates locally signed updater test assets under the separate `verification/` directory. These are not notarized, are not public release assets, and must never be uploaded. The integration test uses a loopback server solely in test configuration; production HTTPS/host policies remain unchanged.
+
+```sh
+FLOWGUARD_RELEASE_DIRECTORY="$PWD/release/0.1.1/aarch64/verification" \
+FLOWGUARD_PREVIOUS_APP="$PWD/release/0.1.0/aarch64/FlowGuard.app" \
+FLOWGUARD_EXPECT_GATEKEEPER_REJECTION=1 \
+cargo test --manifest-path src-tauri/Cargo.toml --lib --offline \
+  updates::signed_upgrade_tests::production_key_signed_upgrade_on_disposable_app \
+  -- --ignored --nocapture --test-threads=1
+```
+
+This checks the production public key, downloaded signed archive, tamper rejection, failed-replacement rollback of the real signed old app, rejection of the unnotarized new candidate and restoration. All mutations are in a newly created temporary directory; the test never launches either application. An external test document is preserved byte-for-byte, which does not establish running-app data migration or restart success.
+
+After approved notarization produces final root assets, set `FLOWGUARD_RELEASE_DIRECTORY` to `release/0.1.1/aarch64` and omit `FLOWGUARD_EXPECT_GATEKEEPER_REJECTION` to require a successful verified installation. Running-app restart, live extension continuity and public HTTPS delivery still require separate confirmation. `python3 scripts/test_release.py` validates the exact-payload submission gate without network, keys or OS control.

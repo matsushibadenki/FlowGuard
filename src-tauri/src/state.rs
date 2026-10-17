@@ -8,6 +8,8 @@ pub struct SharedState {
     _document_lock: fs::File,
 }
 pub struct Session {
+    firewall_control: crate::firewall_control::Machine,
+    syslog: crate::syslog::Machine,
     routers: crate::routers::Store,
     pub asks: crate::asks::Machine,
     pub updates: crate::updates::Machine,
@@ -38,6 +40,68 @@ pub struct Session {
     pub revision: u64,
 }
 impl SharedState {
+    pub fn begin_firewall_control(
+        &self,
+        action: crate::firewall_control::Action,
+        expected: Option<bool>,
+        acknowledged: bool,
+    ) -> Result<(u64, Snapshot), String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.updates.snapshot.stage == "installing" {
+            return Err("update_installing".into());
+        }
+        let op = s.firewall_control.begin(action, expected, acknowledged)?;
+        s.revision += 1;
+        Ok((op, s.snapshot()))
+    }
+    pub fn finish_firewall_control(
+        &self,
+        op: u64,
+        result: Result<crate::firewall_control::Reply, String>,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        s.firewall_control.finish(op, result)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+
+    pub fn begin_syslog(
+        &self,
+        config: crate::syslog::Config,
+        network: &crate::network::NetworkSnapshot,
+    ) -> Result<(crate::syslog::Ticket, Snapshot), String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.updates.snapshot.stage == "installing" {
+            return Err("update_installing".into());
+        }
+        let ticket = s.syslog.begin(config, network)?;
+        s.revision += 1;
+        Ok((ticket, s.snapshot()))
+    }
+    pub fn update_syslog(&self, result: crate::syslog::Snapshot) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        s.syslog.apply(result)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn stop_syslog(&self, operation: u64) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        s.syslog.stop(operation)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn clear_syslog(&self, operation: u64) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        s.syslog.clear(operation)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn select_syslog(&self, operation: u64, id: u64) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        s.syslog.select(operation, id)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
     pub fn register_router(
         &self,
         source: crate::routers::Source,
@@ -157,6 +221,8 @@ impl SharedState {
             path,
             _document_lock: document_lock,
             inner: Mutex::new(Session {
+                firewall_control: Default::default(),
+                syslog: Default::default(),
                 routers: Default::default(),
                 asks: Default::default(),
                 updates: Default::default(),
@@ -671,7 +737,7 @@ impl SharedState {
         String,
     > {
         let mut s = self.inner.lock().map_err(|_| "state_lock")?;
-        if s.routers.busy() || !crate::updates::can_install(&s.snapshot()) {
+        if s.syslog.busy() || s.routers.busy() || !crate::updates::can_install(&s.snapshot()) {
             return Err("update_install_unavailable".into());
         }
         let (op, update, bytes) = s.updates.install()?;
@@ -1062,6 +1128,8 @@ impl Session {
         let connections = self.visible();
         let layout = renderer::layout(&connections);
         Snapshot {
+            firewall_control: self.firewall_control.snapshot.clone(),
+            syslog: self.syslog.snapshot.clone(),
             asks: self.asks.snapshot.clone(),
             security: self.security_snapshot(),
             updates: self.updates.snapshot.clone(),
@@ -1101,6 +1169,74 @@ mod tests {
         ));
         let _ = fs::remove_file(&path);
         SharedState::load(path).unwrap()
+    }
+    #[test]
+    fn firewall_control_is_shared_ephemeral_and_excludes_installation() {
+        let state = state();
+        {
+            let mut s = state.inner.lock().unwrap();
+            s.updates.snapshot.stage = "ready".into();
+            s.updates.snapshot.development = false;
+        }
+        assert!(crate::updates::can_install(&state.snapshot().unwrap()));
+        let before = std::fs::read(&state.path).ok();
+        let (op, snap) = state
+            .begin_firewall_control(crate::firewall_control::Action::Status, None, false)
+            .unwrap();
+        assert!(snap.firewall_control.busy);
+        assert!(state.snapshot().unwrap().firewall_control.busy);
+        assert!(!crate::updates::can_install(&snap));
+        assert!(state
+            .begin_firewall_control(crate::firewall_control::Action::Register, None, true)
+            .is_err());
+        state
+            .finish_firewall_control(op, Err("timeout".into()))
+            .unwrap();
+        assert!(!state.snapshot().unwrap().firewall_control.busy);
+        assert_eq!(std::fs::read(&state.path).ok(), before);
+        state.inner.lock().unwrap().updates.snapshot.stage = "installing".into();
+        assert!(state
+            .begin_firewall_control(crate::firewall_control::Action::Status, None, false)
+            .is_err());
+    }
+    #[test]
+    fn syslog_job_is_shared_ephemeral_and_update_install_gated() {
+        let state = state();
+        let (ticket, started) = state
+            .begin_syslog(
+                crate::syslog::tests::config(),
+                &crate::syslog::tests::network(),
+            )
+            .unwrap();
+        assert_eq!(started.syslog.stage, "starting");
+        assert_eq!(state.snapshot().unwrap().syslog.operation, ticket.operation);
+        assert!(!state.path.exists());
+        state.stop_syslog(ticket.operation).unwrap();
+        let before = state.snapshot().unwrap();
+        let late = crate::syslog::Snapshot {
+            operation: ticket.operation,
+            stage: "listening".into(),
+            ..Default::default()
+        };
+        assert!(state.update_syslog(late).is_err());
+        assert_eq!(state.snapshot().unwrap().revision, before.revision);
+        state
+            .update_syslog(crate::syslog::Snapshot {
+                operation: ticket.operation,
+                stage: "stopped".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        state.clear_syslog(ticket.operation).unwrap();
+        assert!(state.snapshot().unwrap().syslog.rows.is_empty());
+        state.inner.lock().unwrap().updates.snapshot.stage = "installing".into();
+        assert!(state
+            .begin_syslog(
+                crate::syslog::tests::config(),
+                &crate::syslog::tests::network()
+            )
+            .is_err());
+        assert!(!state.path.exists());
     }
     #[test]
     fn router_results_are_shared_ephemeral_and_isolated_from_demo() {

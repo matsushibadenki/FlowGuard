@@ -28,9 +28,11 @@ Apple references: [NEFilterDataProvider](https://developer.apple.com/documentati
 
 ## GPU boundary
 
-The compact communication diagram is currently a bounded code-native UI graphic in the WebView. Rust owns the renderer module and capped scene descriptions. The optional `gpu` feature implements a wgpu/Metal route pipeline, bounded mesh tessellation, resize handling and a GPU-owned render target. The native compositor connection remains unfinished; the default build does not initialize this renderer.
+The regular application/destination map remains in the WebView. A lazily opened dense-map panel now presents directly to a retained CAMetalLayer/NSView inside the main Tauri window. The default `gpu` feature includes this integration; `--no-default-features` retains a build without it. Rust's main-thread controller owns the Surface, renderer and native views, reading connections and the selection from the shared Session. It never copies diagnostic or log bodies into the renderer.
 
-GPU commands, geometry, buffers and textures remain in Rust/wgpu. JavaScript receives application state, identifiers and small scene metadata, never image buffers or rendered frames. There is intentionally no GPU readback or frame IPC API. The Metal smoke check submits a route to the GPU-owned texture without exporting pixels.
+The panel draws at most 10,000 observations, retains the selected connection at the cap, clips to the DOM slot and protection header, scales for AppKit/backing pixels, and handles resize, hide, stale leases and teardown. Gray lines mean observed, blue means selected; neither means a firewall verdict. Native hit testing passes through to the underlying WebView. Unchanged frames and vertex buffers are reused. Surface Lost/Outdated is reconfigured; fatal errors return to the regular map.
+
+JavaScript sends geometry, visibility and lifecycle commands, and receives small status/count metadata. Routes, vertices, buffers and textures stay in Rust/wgpu. No pixel readback or frame IPC API exists. The opt-in `gpu-qa` harness uses a temporary document and dedicated Tauri WebView to test actual Metal presentation and GPU completion without running observers or OS control. Signed distribution, full UI compositing/input and multi-display/lifecycle validation remain Pending. See [native-gpu-panel.md](native-gpu-panel.md).
 
 ## Local data
 
@@ -182,3 +184,14 @@ UDP and scoped management grants are future work, not active presets. Expanding 
 [Router adapter contract](router-adapters.md) defines the implemented native read/control separation, peer-attestation boundary, schema, limits and remaining device integration. The session owns a bounded router store and projects accepted real observations into SecuritySnapshot only in live mode. Read workers run outside the shared-state mutex; exact operation fences reject cancelled/replaced/deleted sources, and update installation excludes active reads. Source status and candidate correlations are typed in Rust/TypeScript. No Tauri endpoint accepts raw batches or peer authentication claims, and no startup router I/O or control dispatcher is added.
 
 Authenticated LAN-before-NAT tuple/time matches produce candidate links only; source observations and counters are never merged. Anonymous, WAN, unknown-position, scoped-unparseable and demo evidence cannot gain process ownership or write capability. Concrete device transports, credential storage and management UI remain future integration work, not simulated capabilities.
+
+
+## Syslog receiver (2026-10-17)
+
+[Syslog receiver contract](syslog-receiver.md) documents the shipped subset and limits. A Rust-owned Machine manages a single explicitly started IPv4 UDP/newline-TCP listener, operation fence, stop flag, bounded rows/counters and shared selection. Native commands re-read local interfaces before admitting a start, require explicit acknowledgement that IP filtering is unauthenticated, and reject wildcards/public/privileged bindings. Only OS bind success produces Listening. Socket I/O runs outside the state mutex and sockets close before a terminal update. Late callbacks cannot add evidence after stop, clear or a new operation. An active listener blocks software installation.
+
+The top-level shared syslog snapshot is separate from normalized security flows, events and router capabilities. Incoming text never attests identity or write authority. PRI/severity are self-reported, receipt times are local, and all source/content trust is explicitly unverified. Plain text rendering and control-character filtering keep payloads inert; no model, command execution, automatic rule mutation, persistent log storage or router configuration is introduced. Defaults do not listen or auto-resume. Browser preview has no reception path. Transport delivery and OS permissions beyond loopback remain Pending.
+
+### 標準ファイアウォール用ヘルパー（2026-10-17）
+
+Network Extensionとは独立した`firewall_control`をRust共有状態で管理する。手動操作だけで同梱CLIを起動し、SMAppService登録と管理者承認を経たroot daemonへ相互署名要件付きXPCで固定の全体スイッチ変更を依頼する。管理者認証は操作ごとにCLIで取得し、daemonで検証する。期待状態の照合と変更後の再読取、接続・期限の検証、更新インストール排他を設ける。認証外部形式をRust／JSへ送らず、OS設定は文書やアプリ再起動から復元しない。実OS適用はPending。詳細は[macos-firewall-helper.md](macos-firewall-helper.md)。

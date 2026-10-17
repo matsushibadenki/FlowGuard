@@ -362,3 +362,40 @@ Rust tests cover startup baseline, two distinct samples, repeated snapshot, erro
 - Production coordinator/shared-state tests use synthetic adapters: total deadline, pre-cancelled read, noncooperative adapter return bound, global two-worker saturation, stop while state remains accessible, late-result/revision fencing, live snapshot integration, no document persistence, demo isolation and installation gate. Exact-action/source/peer and expiring control authorization checks pass; no authorization issuer/control dispatcher exists in production.
 - TypeScript: 84 passed; production build passed; git diff whitespace check passed. Added update eligibility coverage for active router collection and typed source/error/correlation metadata. No router management UI or new rendered view was added, so browser mock-up is not claimed as device validation. Existing shared UI tests remain passing. Swift code is unchanged in this increment.
 - ⭕️ [Pending] Real managed router authentication and transport peer verification, genuine LAN/WAN flow/counter semantics, firmware/reboot/sleep behavior and native UI integration. No real router, network scan, credential lookup, privileged action or settings change was performed. Native adapter code must bound network reads and attest only cryptographically authenticated peers; payload validation itself does not perform a TLS handshake. Up to two faulty in-process workers can remain occupied until exit, but cannot create unlimited workers or publish late data.
+
+
+## Syslog receiver (2026-10-17)
+
+- Rust library: 103 passed, 20 ignored (18 existing host tests plus 2 new explicit loopback tests). New tests cover acknowledged/configured private IPv4 and current interfaces, no wildcard/public/privileged listener, PRI/UTF-8/control and bidi handling, inert command/HTML text, fragmented CRLF including exact length limit, rate/retention/byte/frame limits, source rejection, shared selection and frozen evidence after stop, clear/restart operation fencing, no document persistence and installation gating.
+- Explicit `syslog::tests::actual_ -- --ignored --test-threads=1`: 2 passed on host. Real ephemeral IPv4 loopback UDP/TCP sockets exercise reception, OS peer matching and rejection, oversized UDP, invalid payload, fragmented TCP/CRLF and incomplete EOF, exclusive live bind, duration/stop and port release/rebind. No LAN packets, router connection, OS filter change or root port was used. Production configuration still requires ports >=1024 and duration >=30 seconds; host fixtures use internal ephemeral/short-lived plans only.
+- TypeScript: 88 passed; production build passed; git diff whitespace check passed. Browser plugin not available, so bundled Playwright with Chrome and task-owned localhost:1421 used temporary synthetic snapshots. Checked source/port/transport/acknowledgement form and preview start disabled, filtering, 50-row paging, active shared config, literal `<script>` text without executing it, and JA/EN/简体中文 at 1200/375px without root overflow, JS errors or Vite overlay. Screenshots are outside the repository. Narrow-view card padding was corrected and rechecked. No mock data ships or opens a receiving socket in preview.
+- ⭕️ [Pending] Native macOS UI-to-command integration and local-network permission/refusal, actual managed-LAN senders, OS inbound firewall behavior, interface changes, sleep/VPN and real-world loss/floods/format variants. Network/OS loss cannot be counted, sender IP is not authentication, and severity is reported data. These checks prove the bounded receiver subset, not complete RFC parsing, security diagnosis, authenticated router identity or enforcement. Swift code is unchanged in this increment.
+
+## 2026-10-17 標準ファイアウォール用ヘルパー
+
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib --offline`: 106 passed、20 ignored。固定引数・確認要求・未知の状態／期待値不一致・busy・遅延応答拒否・文書非変更・更新インストール排他を含む。
+- `npm test`: 91 passed、18 files。既知状態・同梱側承認・確認チェック・native実行・busy／errorによる変更可否と更新インストール排他、3言語キーの一致を確認。`npm run build`成功。
+- Swift package: 39 passed（既存34＋Firewall 5）。固定コマンド、厳格な読み取り値、認証／接続状態／期待値の拒否、変更後の再読み取りと確認失敗を検証。テストはroot操作やOS認証を行わない。
+- 未署名ステージング生成が成功。LaunchDaemonのBundleProgram・固定引数・MachServicesを確認。Team IDのない同梱ヘルパーのstatus／register／enable／daemonがすべて`signature_required`でOS API前に拒否されることを実行確認。
+- Browser plugin not availableのためbundled Playwright＋Chromeを使用。`http://127.0.0.1:1421`でJA／EN／简体中文、1200／375px、状態未確認・操作中・承認待ち・エラー、プレビューの全OS操作無効化を確認。ページ識別・コンソール／Vite overlay・横はみ出しの問題なし。スクリーンショット`/tmp/flowguard-firewall-{ja,en,zh-CN}-{1200,375}.png`、日本語375pxを視認。
+- `/tmp/flowguard-firewall-interaction.cjs`ではテスト時だけnative表示とコマンドをモック。確認前の変更拒否、確認後の期待状態付きenable、確認の自動解除、共有busyによる全ボタン無効化、未登録時のregisterを確認。実OSコマンドは呼び出さない。
+- ⭕️ [Pending] Developer ID署名・公証済み新ヘルパーの導入、SMAppService登録／承認／解除、実管理者認証／キャンセル、異署名拒否とroot XPC、socketfilterfwの実設定変更／再読取、OS・アプリの再起動／更新時。詳細は`macos-firewall-helper.md`。実OSのファイアウォール設定は変更していない。
+
+## 2026-10-17 wgpuネイティブパネル接続
+
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib --offline`: GPU有効の標準構成で111 passed、20 ignored。元の106件に加え、矩形／viewport／クリップ包含、開く前・終了済み・別世代・逆順要求の拒否、有限なメッシュ、最大10,000件の決定的配置と上限外の選択接続の保持を確認。
+- `cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib --offline`: 108 passed、20 ignored。GPUを含めない構成も確認。
+- `npm test`: 95 passed、19 files。部分スクロールでも元の描画矩形を維持し、viewport・スクロールコンテナ・保護状態バーでクリップする計算、不正／ゼロ／領域外の非表示、3言語キーの一致を確認。`npm run build`成功。
+- `cargo build --manifest-path src-tauri/Cargo.toml --bin flowguard --offline`: 標準のGPU有効アプリをビルド。既存の未接続ルーターAPIのdead_codeと依存`block`のfuture-incompatibility警告は残るが、この変更でエラーは発生していない。
+- `cargo build --manifest-path src-tauri/Cargo.toml --example native_panel_check --features gpu-qa --offline`後に専用確認アプリを実行。一時文書＋about:blankの独立Tauri WebViewで、実Metal Surfaceに10,000／10,001件をpresentし、device.pollでGPU完了を待機。部分クリップ・リサイズ停止／再描画・非表示・終了後の遅延拒否・旧leaseのcloseに影響されない再作成・解放／Destroyed相当の拒否が成功。native hitTestの通過も検査。実ユーザー文書・観測・ネットワーク・OS設定・更新処理は使わない。環境のbacking scaleは1。
+- Browser plugin not availableのためbundled Playwright＋Chromeを使用。`http://127.0.0.1:1421`で、プレビューの操作無効化と、IPCだけをモックした開く→矩形同期→画面切替で閉じる→描画失敗時の通常表示への復帰を検証。JA／EN／简体中文・1200／375pxの表示、スクロール／リサイズのクリップ、経路やフレームを含まない要求を確認。ページ識別・console・Vite overlay・横はみ出しの問題なし。`/tmp/flowguard-gpu-ui-qa.cjs`、スクリーンショット`/tmp/flowguard-gpu-{ja,en,zh-CN}-{1200,375}.png`。日本語375pxを視認。これらのブラウザ画像はGPUピクセルの証拠にはしていない。
+- ⭕️ [Pending] 署名済み配布アプリでの実UIとの重なり・実ホイール操作・保護状態バーの視認、Retina／HiDPI実表示、複数ディスプレイ、全画面／スリープ復帰、長時間負荷・メモリ／電力、device lossと別macOS／Intel環境。詳細は`native-gpu-panel.md`。
+
+## 2026-10-17 署名済み安定版更新候補 0.1.1
+
+- Rust通常111 passed／21 ignored、フロントエンド95 passed、Pythonの公証ペイロードゲート3 passed。フロントエンド・Tauri releaseビルド成功。
+- Developer IDで0.1.1/build 2をローカル署名し、deep/strict・Team／識別子の要件・署名済みpreflightが成功。本体と拡張機能の版を揃え、ブリッジの署名IDを修正。ローカル署名専用段階はApple公証送信の前で終了する。
+- `updates::signed_upgrade_tests::production_key_signed_upgrade_on_disposable_app`を明示実行し1 passed。実公開鍵と実プラグイン、旧署名アプリの一時コピーで検証。改ざん拒否、破損時の署名復旧、公証前候補の`Unnotarized Developer ID`拒否→旧版復旧と外部テスト文書保持が成功。利用中のアプリや文書は変更せず、アプリ起動も行わない。初回の一時サーバー試験はaccepted socketのnonblocking継承で失敗したため、blockingへ明示設定して再実行・成功。製品のネットワーク方針は変更していない。
+- Browser plugin not availableのためbundled Playwright＋Chrome。localhost:1421でJA／EN／简体中文の動的0.1.1版表示、375pxで横はみ出し／Vite overlay／runtime errorなし。`/tmp/flowguard-011-version-375.png`を視認。
+- `cargo fmt --check`、`git diff --check`、Python構文検証が成功。Apple公証ZIPは7,584,489 bytes、SHA-256 `f91dc8dd53380c1132bbdf8a97e9198132dcd8bb4bcad53ed6f0bcc6c2d8fdc2`。
+- ⭕️ [Pending] 自動承認レビューがアプリZIPのApple送信への明示承認不足で公証を拒否。ZIPとハッシュを準備して承認待ち。公証後の正常適用・再起動／実文書保持・公開HTTPSフィードと稼働中拡張機能の継続確認は未完了。詳細は`releases/0.1.1-validation.md`。ローカル検証専用非公証成果物を公開用と混同しない。

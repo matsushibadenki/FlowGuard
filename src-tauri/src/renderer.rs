@@ -1,7 +1,7 @@
 use crate::model::{Connection, NodeLayout};
 // Rust owns the bounded scene description. WebViews receive identifiers and positions,
 // never packet contents, image buffers, or frame data. This small map is UI chrome;
-// a dense native wgpu surface is a separately tracked integration.
+// the dense-map panel separately reads shared connections into a bounded Rust/wgpu scene.
 pub const MAX_VISIBLE_NODES: usize = 6;
 pub fn layout(connections: &[Connection]) -> Vec<NodeLayout> {
     connections

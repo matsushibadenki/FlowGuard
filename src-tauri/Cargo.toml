@@ -1,6 +1,6 @@
 [package]
 name = "flowguard"
-version = "0.1.0"
+version = "0.1.1"
 description = "A visual macOS network observer and firewall rule workbench"
 authors = ["FlowGuard"]
 edition = "2021"
@@ -13,8 +13,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [features]
-default = []
-gpu = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
+default = ["gpu"]
+gpu = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:objc2-quartz-core"]
+
+gpu-qa = ["gpu"]
 
 [dependencies]
 time = "=0.3.55"
@@ -27,7 +29,7 @@ base64 = "0.22"
 tar = "0.4"
 flate2 = "1"
 plist = "1"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "sync"] }
 rustls = { version = "=0.23.43", default-features = false, features = ["std", "ring", "tls12"] }
 rustls-native-certs = "=0.8.4"
 socket2 = { version = "0.6.5", features = ["all"] }
@@ -43,3 +45,9 @@ pollster = { version = "0.4", optional = true }
 [dev-dependencies]
 tempfile = "3"
 tauri = { version = "2", features = ["test"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6.5", optional = true }
+objc2-app-kit = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSView", "NSWindow", "objc2-quartz-core"] }
+objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSGeometry"] }
+objc2-quartz-core = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CALayer", "CAMetalLayer"] }

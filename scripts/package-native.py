@@ -38,11 +38,24 @@ extension = output / 'Contents/Library/SystemExtensions/com.flowguard.filter.sys
 (extension / 'Contents/MacOS').mkdir(parents=True)
 shutil.copy2(bin_path / 'FlowGuardSystemExtension', extension / 'Contents/MacOS/FlowGuardSystemExtension')
 shutil.copy2(bin_path / 'FlowGuardBridgeCLI', output / 'Contents/MacOS/FlowGuardBridge')
+shutil.copy2(bin_path / 'FlowGuardFirewallHelper', output / 'Contents/MacOS/FlowGuardFirewallHelper')
+daemons = output / 'Contents/Library/LaunchDaemons'
+daemons.mkdir(parents=True, exist_ok=True)
+with (daemons / 'com.flowguard.firewall-helper.plist').open('wb') as f:
+    plistlib.dump({'Label': 'com.flowguard.firewall-helper',
+                  'BundleProgram': 'Contents/MacOS/FlowGuardFirewallHelper',
+                  'ProgramArguments': ['FlowGuardFirewallHelper', '--daemon'],
+                  'MachServices': {'com.flowguard.firewall-helper': True},
+                  'ProcessType': 'Interactive'}, f)
 frameworks = output / 'Contents/Frameworks'
 frameworks.mkdir(parents=True, exist_ok=True)
 shutil.copy2(bin_path / 'libFlowGuardHostRuntime.dylib', frameworks / 'libFlowGuardHostRuntime.dylib')
 with (ROOT / 'native/FlowGuardFilter/Packaging/Extension-Info.plist').open('rb') as f:
     info = plistlib.load(f)
+with (output / 'Contents/Info.plist').open('rb') as f:
+    version_info = plistlib.load(f)
+info['CFBundleShortVersionString'] = version_info['CFBundleShortVersionString']
+info['CFBundleVersion'] = version_info['CFBundleVersion']
 info['NetworkExtension']['NEMachServiceName'] = args.team_id + '.com.flowguard.filter'
 with (extension / 'Contents/Info.plist').open('wb') as f:
     plistlib.dump(info, f)

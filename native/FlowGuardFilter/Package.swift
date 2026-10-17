@@ -2,11 +2,15 @@
 import PackageDescription
 let package = Package(name: "FlowGuardFilter", platforms: [.macOS(.v13)], products: [
     .library(name: "FlowGuardHostRuntime", type: .dynamic, targets: ["FlowGuardHost"]),
+    .executable(name: "FlowGuardFirewallHelper", targets: ["FlowGuardFirewallHelper"]),
     .library(name: "FlowGuardPolicy", targets: ["FlowGuardPolicy"]),
     .library(name: "FlowGuardExtension", targets: ["FlowGuardExtension"]),
     .executable(name: "FlowGuardSystemExtension", targets: ["FlowGuardSystemExtension"]),
     .executable(name: "FlowGuardBridgeCLI", targets: ["FlowGuardBridgeCLI"])
 ], targets: [
+    .target(name: "FlowGuardFirewall"),
+    .executableTarget(name: "FlowGuardFirewallHelper", dependencies: ["FlowGuardFirewall", "FlowGuardBridge"]),
+    .testTarget(name: "FlowGuardFirewallTests", dependencies: ["FlowGuardFirewall"]),
     .target(name: "FlowGuardPolicy"),
     .target(name: "FlowGuardBridge", dependencies: ["FlowGuardPolicy"]),
     .target(name: "FlowGuardExtension", dependencies: ["FlowGuardPolicy", "FlowGuardBridge"]),

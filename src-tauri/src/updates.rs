@@ -157,6 +157,8 @@ pub fn can_install(s: &crate::model::Snapshot) -> bool {
             .router_sources
             .iter()
             .any(|source| source.stage == "collecting")
+        && !["starting", "listening", "stopping"].contains(&s.syslog.stage.as_str())
+        && !s.firewall_control.busy
         && !s.extension.busy
         && ![
             "approval_required",
@@ -741,5 +743,203 @@ mod release_tests {
             .unwrap();
             archive(&bytes, version).unwrap();
         }
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod signed_upgrade_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    fn plist(path: &std::path::Path) -> plist::Dictionary {
+        plist::Value::from_file(path)
+            .unwrap()
+            .into_dictionary()
+            .unwrap()
+    }
+    fn verify_code(bundle: &std::path::Path) -> bool {
+        std::process::Command::new("/usr/bin/codesign")
+            .args(["--verify", "--deep", "--strict"])
+            .arg(bundle)
+            .status()
+            .unwrap()
+            .success()
+    }
+    #[test]
+    #[ignore = "explicit local signed release and disposable copy; Gatekeeper may access Apple trust services"]
+    fn production_key_signed_upgrade_on_disposable_app() {
+        let directory = std::path::PathBuf::from(
+            std::env::var("FLOWGUARD_RELEASE_DIRECTORY").expect("new release assets"),
+        );
+        let source = std::path::PathBuf::from(
+            std::env::var("FLOWGUARD_PREVIOUS_APP").expect("previous signed app"),
+        );
+        let expect_rejection =
+            std::env::var("FLOWGUARD_EXPECT_GATEKEEPER_REJECTION").as_deref() == Ok("1");
+        let old = plist(&source.join("Contents/Info.plist"));
+        let current = old["CFBundleShortVersionString"].as_string().unwrap();
+        assert_eq!(
+            old["CFBundleIdentifier"].as_string(),
+            Some("com.flowguard.desktop")
+        );
+        assert!(verify_code(&source));
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(directory.join("latest.json")).unwrap()).unwrap();
+        let version = metadata["version"].as_str().unwrap();
+        let target = tauri_plugin_updater::target().unwrap();
+        let original_url = metadata["platforms"][&target]["url"].as_str().unwrap();
+        validate_release(current, version, original_url).unwrap();
+        let data = std::fs::read(directory.join(original_url.rsplit('/').next().unwrap())).unwrap();
+        let signed = metadata["platforms"][&target]["signature"]
+            .as_str()
+            .unwrap();
+        assert!(data.len() <= MAX_DOWNLOAD);
+        signature(&data, signed, &public_key(), version).unwrap();
+        archive(&data, version).unwrap();
+        if expect_rejection {
+            let candidate = directory.parent().unwrap().join("FlowGuard.app");
+            assert!(verify_code(&candidate));
+            let assessment = std::process::Command::new("/usr/sbin/spctl")
+                .args(["--assess", "--type", "execute", "--verbose=4"])
+                .arg(&candidate)
+                .output()
+                .unwrap();
+            let details = String::from_utf8_lossy(&assessment.stderr);
+            assert!(
+                !assessment.status.success() && details.contains("Unnotarized Developer ID"),
+                "Expected an unnotarized-candidate policy rejection: {details}"
+            );
+            println!("PASS candidate explicitly rejected as Unnotarized Developer ID");
+        }
+        let root = tempfile::tempdir().unwrap();
+        // Every mutation is confined to this newly created temporary directory.
+        let bundle = root.path().join("FlowGuard.app");
+        assert!(std::process::Command::new("/usr/bin/ditto")
+            .arg(&source)
+            .arg(&bundle)
+            .status()
+            .unwrap()
+            .success());
+        let document = root.path().join("Application Support/document-v1.json");
+        std::fs::create_dir_all(document.parent().unwrap()).unwrap();
+        let document_bytes=br#"{"rules":[],"preferences":{"locale":"ja","view":"map","mode":"demo","panel":"right"}}"#;
+        std::fs::write(&document, document_bytes).unwrap();
+        // The real signed old app must be restored even if a replacement destroys its executable.
+        assert!(replace_with_backup(
+            &bundle,
+            || {
+                std::fs::write(
+                    bundle.join("Contents/MacOS/flowguard"),
+                    b"controlled failed replacement",
+                )
+                .unwrap();
+                Ok(())
+            },
+            || false
+        )
+        .is_err());
+        assert!(verify_code(&bundle));
+        assert_eq!(
+            plist(&bundle.join("Contents/Info.plist"))["CFBundleShortVersionString"].as_string(),
+            Some(current)
+        );
+        for tampered in [true, false] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let address = listener.local_addr().unwrap();
+            let endpoint = format!("http://{address}/latest.json");
+            let mut manifest = metadata.clone();
+            manifest["platforms"][&target]["url"] =
+                format!("http://{address}/FlowGuard.app.tar.gz").into();
+            let mut artifact = data.clone();
+            if tampered {
+                artifact[0] ^= 1;
+            }
+            let server = std::thread::spawn(move || {
+                let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                for body in [serde_json::to_vec(&manifest).unwrap(), artifact] {
+                    let mut stream = loop {
+                        match listener.accept() {
+                            Ok((s, _)) => break s,
+                            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                assert!(
+                                    std::time::Instant::now() < deadline,
+                                    "test server deadline"
+                                );
+                                std::thread::sleep(Duration::from_millis(10));
+                            }
+                            Err(e) => panic!("{e}"),
+                        }
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(20)))
+                        .unwrap();
+                    let mut request = [0u8; 4096];
+                    stream.read(&mut request).unwrap();
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .unwrap();
+                    stream.write_all(&body).unwrap();
+                }
+            });
+            let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+            context.package_info_mut().version = current.parse().unwrap();
+            // Loopback transport is test-only; production endpoint/redirect policies are unchanged.
+            context.config_mut().plugins.0.insert("updater".into(),serde_json::json!({"dangerousInsecureTransportProtocol":true,"pubkey":public_key(),"endpoints":[endpoint]}));
+            let app = tauri::test::mock_builder()
+                .plugin(tauri_plugin_updater::Builder::new().build())
+                .build(context)
+                .unwrap();
+            let update = tauri::async_runtime::block_on(
+                app.updater_builder()
+                    .executable_path(bundle.join("Contents/MacOS/flowguard"))
+                    .timeout(Duration::from_secs(20))
+                    .build()
+                    .unwrap()
+                    .check(),
+            )
+            .unwrap()
+            .expect("strictly newer stable update");
+            assert_eq!(update.version, version);
+            let downloaded = tauri::async_runtime::block_on(update.download(|_, _| {}, || {}));
+            if tampered {
+                assert!(downloaded.is_err());
+                assert!(verify_code(&bundle));
+            } else {
+                let bytes = downloaded.unwrap();
+                signature(&bytes, signed, &public_key(), version).unwrap();
+                archive(&bytes, version).unwrap();
+                let result = install_with_backup(update, Arc::new(bytes), &bundle);
+                if expect_rejection {
+                    assert_eq!(result, Err("install_failed".into()));
+                    assert_eq!(
+                        plist(&bundle.join("Contents/Info.plist"))["CFBundleShortVersionString"]
+                            .as_string(),
+                        Some(current)
+                    );
+                } else {
+                    result.unwrap();
+                    assert_eq!(
+                        plist(&bundle.join("Contents/Info.plist"))["CFBundleShortVersionString"]
+                            .as_string(),
+                        Some(version)
+                    );
+                }
+                assert!(verify_code(&bundle));
+            }
+            assert_eq!(std::fs::read(&document).unwrap(), document_bytes);
+            assert!(!root
+                .path()
+                .join(format!(".FlowGuard-update-backup-{}", std::process::id()))
+                .exists());
+            server.join().unwrap();
+        }
+        println!("PASS production key: tamper rejected; signed copy transaction {}; old signed rollback and external test document preserved; no app launched",if expect_rejection{"Gatekeeper rejection restored the previous app"}else{"verified and installed"});
     }
 }

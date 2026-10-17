@@ -1,4 +1,5 @@
 // パス: src/components/FlowMap.tsx
+import {GpuMap} from './GpuMap';
 import {useMemo, useState} from 'react';
 import type {Connection, Snapshot} from '../core/types';
 import {buildAppRows, representativeConnection, type AppRow, type SortKey} from '../core/mapModel';
@@ -29,6 +30,7 @@ export function FlowMap({snapshot, connections, t, select, clearFilters, hideLoo
     if (c) select(c);
   }
   return <section className="flowmap-redesign" aria-label={t('map')}>
+    <GpuMap snapshot={snapshot}/>
     {snapshot.connections.length === 0 ? <div className="surface"><Empty t={t}/></div> : <>
       {model.rows.length === 0 && <div className="map-no-matches surface"><p>{t('noMatches')}</p>
         {clearFilters && <button className="secondary-button" onClick={clearFilters}>{t('clearFilters')}</button>}</div>}
