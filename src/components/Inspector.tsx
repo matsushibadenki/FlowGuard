@@ -1,3 +1,4 @@
+import {TemporaryProtection} from './TemporaryProtection';
 import {FlowNameEvidence} from './FlowNames';
 import {PanelDragHandle} from './PanelDocking';
 import {DestinationNamesControl} from './DestinationNames';
@@ -27,6 +28,6 @@ export function Inspector({snapshot,connection,t,onError,isFloating=false,mapEdi
  {connection.protocol!=='TCP'&&<p className="helper" role="status">{t('tcpRulesOnly')}</p>}
  {snapshot.document.preferences.mode==='live'&&systemPreset({...connection,direction},connection.protocol)&&<p className="system-protection-warning" role="status">{t(systemPreset({...connection,direction},connection.protocol)!)} · {t('systemProtectedHelp')}</p>}
  {action==='ask'&&<p className="helper">{t('askEditorTimeout').replace('{action}',t(snapshot.document.preferences.askTimeoutAction??'allow'))}</p>}<button className="primary-button" disabled={busy||!canSaveRule(connection,snapshot.document.preferences.mode)} onClick={()=>void save()}>{busy?t('saving'):t(mapEditor?(snapshot.document.preferences.mode==='live'&&snapshot.extension.stage==='applied'?'saveRule':'mapSaveIntent'):'saveIntent')}</button><p className="save-status" aria-live="polite">{existing&&existing.action===action&&existing.direction===direction&&ruleApplied(existing,snapshot.extension)?t('applied'):saved?t('saved'):t('pending')}</p></div>
- <details className="technical-details"><summary>{t('identity')}</summary><dl><dt>{t('local')}</dt><dd>{connection.local}</dd><dt>{t('identity')}</dt><dd>{connection.appKey||t('noIdentity')}</dd><dt>{t('process')}</dt><dd>{connection.pid||'—'}</dd></dl></details></>}
+ <TemporaryProtection snapshot={snapshot} connection={connection}/><details className="technical-details"><summary>{t('identity')}</summary><dl><dt>{t('local')}</dt><dd>{connection.local}</dd><dt>{t('identity')}</dt><dd>{connection.appKey||t('noIdentity')}</dd><dt>{t('process')}</dt><dd>{connection.pid||'—'}</dd></dl></details></>}
  <Notice snapshot={snapshot} t={t} compact/>{!isFloating&&<button className="float-button" disabled={!native} title={!native?t('browserDemo'):undefined} onClick={()=>void floatPanel().catch(onError)}><ExternalLink size={17}/>{t('float')}</button>}</aside>;
 }

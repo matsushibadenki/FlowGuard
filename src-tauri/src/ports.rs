@@ -7,6 +7,7 @@ use std::{
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub selected_port: Option<u16>,
     pub comparison: Comparison,
     pub operation: u64,
     pub source_address: String,
@@ -285,6 +286,7 @@ impl Plan {
     }
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
+            selected_port: None,
             source_address: display_address(self.local, &self.interface),
             family: if self.target.is_ipv4() {
                 "IPv4"

@@ -23,7 +23,7 @@ public func activate(_ bytes: UnsafePointer<UInt8>?, _ length: UInt64, _ generat
     }
 }
 @_cdecl("flowguard_host_abi_version")
-public func abiVersion() -> Int32 { 4 }
+public func abiVersion() -> Int32 { 5 }
 
 @_cdecl("flowguard_host_disable")
 public func disable(_ remove: Int32, _ generation: UInt64, _ callback: @escaping LifecycleCallback, _ token: UInt64) {

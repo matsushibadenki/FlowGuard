@@ -48,8 +48,9 @@ def main():
     if args.output.exists(): p.error('Output must be new; existing feeds are not overwritten')
     args.output.parent.mkdir(parents=True,exist_ok=True);args.output.write_text(json.dumps(merged,ensure_ascii=False,indent=2)+'\n')
     if args.publish_draft or args.promote_beta:
-        for archive in assets:
-            run(['cargo','run','--manifest-path','src-tauri/Cargo.toml','--example','verify_update_artifact','--no-default-features','--offline','--',archive,merged['version'],args.channel])
+        for archive,feed in zip(assets,feeds):
+            arch=next(iter(feed['platforms'])).removeprefix('darwin-')
+            run(['cargo','run','--manifest-path','src-tauri/Cargo.toml','--example','verify_update_artifact','--no-default-features','--offline','--',archive,merged['version'],args.channel,arch])
         for directory in directories:
             app=directory/'FlowGuard.app';run(['codesign','--verify','--deep','--strict',app]);run(['xcrun','stapler','validate',app]);run(['spctl','--assess','--type','execute',app])
     tag='v'+merged['version']

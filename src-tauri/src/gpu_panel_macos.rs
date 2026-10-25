@@ -32,6 +32,7 @@ struct Controller {
     lease: Lease,
     panel: Option<Panel>,
     owner: String,
+    camera: gpu_scene::Camera,
 }
 // Main-thread-only native resources. Field order keeps surface alive no longer than its layer.
 struct Panel {
@@ -58,6 +59,9 @@ pub fn open() -> u64 {
 }
 pub fn open_for(owner: &str) -> u64 {
     CONTROLLER.with_borrow_mut(|c| {
+        if let Some(p) = c.panel.as_ref() {
+            c.camera = p.camera;
+        }
         c.panel = None;
         c.owner = owner.into();
         c.next += 1;
@@ -76,6 +80,9 @@ pub fn close_for(id: u64, owner: &str) {
     CONTROLLER.with_borrow_mut(|c| {
         if c.lease.id == id && c.owner == owner {
             c.lease.closed = true;
+            if let Some(p) = c.panel.as_ref() {
+                c.camera = p.camera;
+            }
             c.panel = None;
         }
     });
@@ -168,7 +175,9 @@ impl Panel {
             let text = NSString::from_str(&label.text.chars().take(160).collect::<String>());
             let field = NSTextField::labelWithString(&text, mtm);
             field.setFont(Some(&NSFont::systemFontOfSize(12.0)));
-            field.setTextColor(Some(&NSColor::labelColor()));
+            field.setTextColor(Some(&NSColor::colorWithSRGBRed_green_blue_alpha(
+                0.12, 0.18, 0.22, 1.0,
+            )));
             field.setUsesSingleLineMode(true);
             field.setToolTip(Some(&NSString::from_str(&label.text)));
             field.setFrame(frame(
@@ -271,7 +280,9 @@ pub fn sync_action(
         };
         let host = native.contentView().ok_or("native_view_unavailable")?;
         if c.panel.is_none() {
-            c.panel = Some(Panel::new(&host, mtm)?);
+            let mut panel = Panel::new(&host, mtm)?;
+            panel.camera = c.camera;
+            c.panel = Some(panel);
         }
         let result = (|| {
             let p = c.panel.as_mut().ok_or("surface_unavailable")?;
@@ -283,6 +294,9 @@ pub fn sync_action(
             let (revision, connections, selected, total) = {
                 let shared = app.state::<SharedState>();
                 let mut session = shared.inner.lock().map_err(|_| "state_lock")?;
+                if session.gpu_owner != window.label() {
+                    return Err("stale_gpu_owner".into());
+                }
                 if window.label() == "main" && session.document.preferences.view != "map" {
                     return Err("map_view_required".into());
                 }
@@ -367,6 +381,9 @@ pub fn sync_action(
             Ok(status)
         })();
         if result.is_err() {
+            if let Some(p) = c.panel.as_ref() {
+                c.camera = p.camera;
+            }
             c.panel = None;
         }
         result
@@ -398,6 +415,9 @@ pub fn window_event(owner: &str, destroyed: bool) {
         if c.owner == owner {
             if destroyed {
                 c.lease.closed = true;
+                if let Some(p) = c.panel.as_ref() {
+                    c.camera = p.camera;
+                }
                 c.panel = None;
             } else if let Some(p) = &c.panel {
                 p.container.setHidden(true);

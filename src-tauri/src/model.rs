@@ -164,6 +164,10 @@ pub fn group_applications(connections: &[Connection]) -> Vec<ApplicationGroup> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub gpu_panel_owner: String,
+    pub gpu_float_operation: u64,
+    pub gpu_dock_operation: u64,
+    pub temporary_protection: crate::temporary_protection::Snapshot,
     pub flow_names: crate::flow_names::Snapshot,
     pub gpu_filter: crate::gpu_filter::Filter,
     pub diagnostics: crate::diagnostics::Snapshot,
@@ -269,6 +273,7 @@ pub fn rule_for<'a>(rules: &'a [Rule], connection: &Connection, source: &str) ->
 }
 pub fn enforceable(rule: &Rule) -> bool {
     rule.source == "live"
+        && rule.transport == "TCP"
         && rule
             .identity
             .as_ref()

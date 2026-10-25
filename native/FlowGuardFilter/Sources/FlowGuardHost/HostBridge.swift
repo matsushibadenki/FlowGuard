@@ -36,8 +36,9 @@ public final class HostBridge {
     }
     public func pendingAsks(completion: @escaping (Result<Data, Error>) -> Void) { transaction(operation: .pending, completion: completion) }
     public func answerAsk(_ data: Data, completion: @escaping (Result<Data, Error>) -> Void) { transaction(operation: .answer(data), completion: completion) }
+    public func temporaryGrants(_ data:Data,completion:@escaping(Result<Data,Error>)->Void){transaction(operation:.grants(data),completion:completion)}
     public func flowNames(_ data:Data,completion:@escaping(Result<Data,Error>)->Void){transaction(operation:.names(data),completion:completion)}
-    private enum Operation { case status, policy(Data), pending, answer(Data),names(Data) }
+    private enum Operation { case status, policy(Data), pending, answer(Data),names(Data),grants(Data) }
     /// Each transaction has a bounded lifetime. Reconnect starts with status, never a cached revision.
     public func transact(update: Data?, completion: @escaping (Result<Data, Error>) -> Void) {
         transaction(operation: update.map { .policy($0) } ?? .status, completion: completion)
@@ -59,6 +60,7 @@ public final class HostBridge {
         }
         let reply: (Data) -> Void = { finish.end(.success($0)) }
         switch operation {
+        case .grants(let data): if remote.temporaryGrants?(data,withReply:reply)==nil{finish.end(.failure(NSError(domain:"FlowGuardBridge.grants_unavailable",code:9)))}
         case .names(let data): if remote.flowNames?(data,withReply:reply)==nil{finish.end(.failure(NSError(domain:"FlowGuardBridge.names_unavailable",code:8)))}
         case .status: remote.status(withReply: reply)
         case .policy(let data): remote.replacePolicy(data, withReply: reply)

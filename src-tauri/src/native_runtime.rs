@@ -40,7 +40,7 @@ impl NativeRuntime {
             if abi.is_null()
                 || unsafe {
                     std::mem::transmute::<*mut c_void, unsafe extern "C" fn() -> i32>(abi)()
-                } != 4
+                } != 5
             {
                 unsafe {
                     dlclose(handle);

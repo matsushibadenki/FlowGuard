@@ -17,7 +17,7 @@ Layout:
 FlowGuard.app/Contents/
   MacOS/flowguard                         # Rust / Tauri host
   MacOS/FlowGuardBridge                   # Swift XPC client
-  Frameworks/libFlowGuardHostRuntime.dylib # Swift activation C ABI v3
+  Frameworks/libFlowGuardHostRuntime.dylib # Swift activation C ABI v5
   Library/SystemExtensions/
     com.flowguard.filter.systemextension/Contents/
       Info.plist
@@ -56,7 +56,7 @@ References: [Apple's traffic-filtering sample](https://developer.apple.com/docum
 
 ## Real unsigned FFI gate check
 
-After staging, run `cargo test --offline --manifest-path src-tauri/Cargo.toml unsigned_runtime_gate_crosses_real_swift_ffi -- --ignored`. The runtime test loads the actual release Swift dylib, checks ABI version 3 and invokes activation, disable, removal and startup policy persistence. It verifies the unsigned callback returns `signature_required`, without installing an extension or starting a production service.
+After staging, run `cargo test --offline --manifest-path src-tauri/Cargo.toml unsigned_runtime_gate_crosses_real_swift_ffi -- --ignored`. The runtime test loads the actual release Swift dylib, checks ABI version 5 and invokes activation, disable, removal and startup policy persistence. It verifies the unsigned callback returns `signature_required`, without installing an extension or starting a production service.
 
 ## Disable / removal and initial synchronization
 
@@ -75,3 +75,11 @@ AskQueue owns bounded paused-flow callbacks, 15-second ContinuousClock deadlines
 SystemProtection protects only verified Apple mDNSResponder outbound TCP/53 and softwareupdated outbound TCP/443. The winning exact rule must carry systemException=true to override default protection. Inbound and UDP/mDNS are excluded. Contract v4 digest includes the exception flag. Real flow and upgrade validation remain Pending.
 
 Emergency disable can preempt an active lifecycle operation. The host serializes preference I/O, waits for an already submitted OS operation's real callback, cancels its continuation and disables before any more normal work. Approval-wait delegate identities are invalidated. C ABI v4 transports operation generations; stale queued submissions are rejected. The Rust host and native runtime must update together (old ABI3 rejected); XPC/policy remains protocol v4. Recovery latches persist until explicit activation within the process. A hung OS operation is never treated as completed at a caller timeout. Actual OS recovery and process-restart continuity remain Pending.
+
+## Current contract boundary (2026-10-25)
+
+Current source requires host runtime ABI5 and policy/ask/initial-policy v5. Wire rules explicitly carry `transport: TCP`; v5 digest includes it. Older runtimes/providers are rejected rather than partially applied. User-document/backup schema remains v4; legacy missing transport is read only as its known TCP meaning, never as UDP. Historical v3/v4 sections above describe earlier migrations.
+
+The Provider registers TCP and UDP, but general rules and asks remain TCP-only. Only verified Apple resolver outbound unicast UDP DNS gets an initial-flow preset; UDP user rules and real mDNS packet/interface protection are unsupported. Names and temporary management grants use independent authenticated v1 read/replace endpoints. Each Provider start creates fresh queues/stores and a new instance UUID. Stopped stores reject late requests. Temporary grants pin the Provider flow UUID and full signed endpoint/interface scope, require a five-second heartbeat and expire within ten minutes using the continuous clock. Exact paused asks may receive one allow decision; revocation does not retroactively terminate OS-approved flows. Peer evidence is explicit user attestation, not a new peer-verification service.
+
+⭕️ [Pending] Signed Provider deployment, real UDP/name/temporary-flow delivery, sleep/VPN/interface behavior and management continuity. Replace the desktop, helper, runtime and extension together in a new signed version. The existing 0.1.1 candidate was not rebuilt or modified.

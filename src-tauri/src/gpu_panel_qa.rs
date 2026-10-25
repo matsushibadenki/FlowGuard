@@ -233,6 +233,7 @@ pub fn run() -> Result<(), String> {
                                     8 => {
                                         let old=lease;let floating=tauri::WebviewWindowBuilder::new(&handle2,"gpu-map",tauri::WebviewUrl::External("about:blank".parse().unwrap())).title("FlowGuard GPU floating QA").inner_size(1000.0,720.0).build().map_err(|e|e.to_string())?;
                                         let webview:&tauri::Webview=floating.as_ref();let floated=webview.window();
+                                        handle2.state::<SharedState>().inner.lock().map_err(|_|"state_lock")?.gpu_owner="gpu-map".into();
                                         lease=platform::open_for("gpu-map");platform::close(old);platform::window_event("main",true);
                                         let status=platform::sync(&handle2,floated.clone(),lease,1,Some(b),crate::gpu_filter::Filter::default())?;
                                         if !status.presented{return Err("qa_float_surface".into());}platform::wait_for_completion()?;

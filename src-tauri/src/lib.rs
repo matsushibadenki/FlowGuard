@@ -33,8 +33,10 @@ mod services;
 mod state;
 mod syslog;
 mod system_protection;
+mod temporary_protection;
 mod tls_details;
 mod unknown_flows;
+mod update_arch;
 mod update_cache;
 mod update_trust;
 mod updates;
@@ -42,6 +44,61 @@ use model::{Command, Rule, Snapshot};
 use state::SharedState;
 use tauri::{Emitter, Manager};
 
+#[tauri::command]
+async fn temporary_protection_action(
+    app: tauri::AppHandle,
+    action: String,
+    connection_id: Option<String>,
+    id: Option<String>,
+    direction: Option<String>,
+    peer_evidence: Option<String>,
+    seconds: Option<u16>,
+    confirmed: bool,
+) -> Result<Snapshot, String> {
+    let fresh = if action == "add" {
+        Some(
+            tauri::async_runtime::spawn_blocking(network::observe)
+                .await
+                .map_err(|_| "network_unavailable")?,
+        )
+    } else {
+        None
+    };
+    let next = app.state::<SharedState>().temporary_action(
+        &action,
+        connection_id.as_deref(),
+        id.as_deref(),
+        direction.as_deref(),
+        peer_evidence.as_deref(),
+        seconds.unwrap_or(60),
+        confirmed,
+        fresh,
+    )?;
+    let _ = app.emit("state-changed", &next);
+    Ok(next)
+}
+async fn poll_temporary(app: tauri::AppHandle) {
+    let Ok(Some(ticket)) = app.state::<SharedState>().begin_temporary_sync() else {
+        return;
+    };
+    let work = ticket.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let executable = std::env::current_exe().map_err(|_| "bundle_path")?;
+        let contents = executable
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or("bundle_path")?;
+        temporary_protection::transact(contents, &work)
+    })
+    .await
+    .unwrap_or_else(|_| Err("temporary_unavailable".into()));
+    if let Ok(next) = app
+        .state::<SharedState>()
+        .finish_temporary_sync(&ticket, result)
+    {
+        let _ = app.emit("state-changed", next);
+    }
+}
 #[tauri::command]
 async fn clear_update_download_cache(app: tauri::AppHandle) -> Result<Snapshot, String> {
     let snapshot = app.state::<SharedState>().snapshot()?;
@@ -370,6 +427,12 @@ fn diagnostic_export(app: tauri::AppHandle, report: u64, format: String) -> Resu
 #[tauri::command]
 fn services_csv(app: tauri::AppHandle, operation: u64) -> Result<String, String> {
     app.state::<SharedState>().services_csv(operation)
+}
+#[tauri::command]
+fn select_port(app: tauri::AppHandle, operation: u64, port: u16) -> Result<Snapshot, String> {
+    let next = app.state::<SharedState>().select_port(operation, port)?;
+    let _ = app.emit("state-changed", &next);
+    Ok(next)
 }
 #[tauri::command]
 fn select_service(app: tauri::AppHandle, operation: u64, port: u16) -> Result<Snapshot, String> {
@@ -1050,6 +1113,13 @@ pub fn run() {
                 }
                 std::thread::sleep(std::time::Duration::from_secs(5));
             });
+            let temporary_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    poll_temporary(temporary_app.clone()).await;
+                }
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1077,6 +1147,18 @@ pub fn run() {
                     if window.hide().is_ok() {
                         api.prevent_close();
                     }
+                }
+            }
+            if window.label() == "gpu-map" && matches!(event, tauri::WindowEvent::Destroyed) {
+                let shared = window.app_handle().state::<SharedState>();
+                if let Ok(mut s) = shared.inner.lock() {
+                    if s.gpu_owner == "gpu-map" {
+                        s.gpu_owner = "main".into();
+                        s.revision += 1;
+                    }
+                }
+                if let Ok(snapshot) = shared.snapshot() {
+                    let _ = window.emit("state-changed", snapshot);
                 }
             }
             if window.label() == "lan-details" && matches!(event, tauri::WindowEvent::Destroyed) {
@@ -1114,6 +1196,7 @@ pub fn run() {
             gpu_panel::gpu_panel_available,
             gpu_panel::open_gpu_panel,
             gpu_panel::float_gpu_panel,
+            gpu_panel::dock_gpu_panel,
             gpu_panel::sync_gpu_panel,
             gpu_panel::close_gpu_panel,
             control_firewall,
@@ -1124,10 +1207,12 @@ pub fn run() {
             stop_services,
             services_csv,
             diagnostic_action,
+            temporary_protection_action,
             set_flow_names,
             collect_flow_names,
             diagnostic_export,
             select_service,
+            select_port,
             start_lan_ports,
             open_lan_ports,
             lan_ports_csv,
@@ -1156,6 +1241,9 @@ pub fn run() {
         .build(app_context())
         .expect("FlowGuard could not start")
         .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                gpu_panel::destroy();
+            }
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::RunEvent::Reopen { .. }) {
                 if let Some(window) = app.get_webview_window("main") {
@@ -1183,4 +1271,13 @@ pub fn verify_update_artifact(
     channel: &str,
 ) -> Result<(), String> {
     updates::verify_artifact(path, version, channel)
+}
+
+pub fn verify_update_artifact_for_arch(
+    path: &std::path::Path,
+    version: &str,
+    channel: &str,
+    arch: &str,
+) -> Result<(), String> {
+    updates::verify_artifact_for_arch(path, version, channel, arch)
 }

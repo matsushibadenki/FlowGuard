@@ -8,6 +8,10 @@ pub struct SharedState {
     _document_lock: fs::File,
 }
 pub struct Session {
+    pub gpu_owner: String,
+    pub gpu_float_operation: u64,
+    pub gpu_dock_operation: u64,
+    pub temporary: crate::temporary_protection::Machine,
     pub flow_names: crate::flow_names::Machine,
     pub gpu_filter: crate::gpu_filter::Filter,
     diagnostics: crate::diagnostics::Snapshot,
@@ -332,6 +336,10 @@ impl SharedState {
             path,
             _document_lock: document_lock,
             inner: Mutex::new(Session {
+                gpu_owner: "main".into(),
+                gpu_float_operation: 0,
+                gpu_dock_operation: 0,
+                temporary: Default::default(),
                 flow_names: Default::default(),
                 gpu_filter: Default::default(),
                 diagnostics: Default::default(),
@@ -680,6 +688,9 @@ impl SharedState {
         retention.prune(&mut s.demo_history, now());
         if previous.preferences.mode != s.document.preferences.mode {
             s.destination_names.invalidate();
+            if s.document.preferences.mode != "live" {
+                s.temporary.clear();
+            }
             {
                 let mode = s.document.preferences.mode.clone();
                 let network = s.network.clone();
@@ -739,6 +750,9 @@ impl SharedState {
             crate::extension::policy_payload(&session.document.rules)?;
         }
         let operation = session.extension.begin(stage)?;
+        if ["disabling", "removing", "activating"].contains(&stage) {
+            session.temporary.clear();
+        }
         session.asks.invalidate();
         if ["activating", "applying"].contains(&stage) {
             let rules = session.document.rules.clone();
@@ -980,6 +994,106 @@ impl SharedState {
         s.revision += 1;
         Ok(s.snapshot())
     }
+    pub fn temporary_action(
+        &self,
+        action: &str,
+        connection: Option<&str>,
+        id: Option<&str>,
+        direction: Option<&str>,
+        peer: Option<&str>,
+        seconds: u16,
+        confirmed: bool,
+        fresh: Option<crate::network::NetworkSnapshot>,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        match action {
+            "add" => {
+                if s.updates.snapshot.stage == "installing"
+                    || s.extension.status.busy
+                    || !s.extension.status.signed
+                    || s.document.preferences.mode != "live"
+                {
+                    return Err("temporary_unavailable".into());
+                }
+                let c = s
+                    .connections
+                    .iter()
+                    .find(|c| Some(c.id.as_str()) == connection)
+                    .cloned()
+                    .ok_or("connection_expired")?;
+                let verified =
+                    crate::identity::for_pid(c.pid).ok_or("application_identity_unavailable")?;
+                if c.identity.as_ref() != Some(&verified) {
+                    return Err("application_identity_changed".into());
+                }
+                let network = fresh.ok_or("network_unavailable")?;
+                if crate::destination_names::network_key(&network)
+                    != crate::destination_names::network_key(&s.network)
+                {
+                    return Err("network_changed".into());
+                }
+                let instance = s
+                    .extension
+                    .status
+                    .instance_id
+                    .clone()
+                    .ok_or("temporary_unavailable")?;
+                s.temporary.add(
+                    c,
+                    &network,
+                    &instance,
+                    direction.ok_or("invalid_direction")?,
+                    peer.ok_or("peer_evidence_required")?,
+                    seconds,
+                    confirmed,
+                )?;
+            }
+            "remove" => s.temporary.remove(id.ok_or("grant_required")?)?,
+            "clear" => s.temporary.clear(),
+            _ => return Err("invalid_temporary_action".into()),
+        };
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn begin_temporary_sync(
+        &self,
+    ) -> Result<Option<crate::temporary_protection::Ticket>, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        let network = s.network.clone();
+        let instance = if s.extension.status.signed {
+            s.extension.status.instance_id.clone()
+        } else {
+            None
+        };
+        let connections = s.connections.clone();
+        let live = s.document.preferences.mode == "live"
+            && ![
+                "disabled",
+                "removed",
+                "disabling",
+                "removing",
+                "activating",
+                "restart_required",
+                "approval_required",
+            ]
+            .contains(&s.extension.status.stage.as_str());
+        s.temporary
+            .observe(&network, instance.as_deref(), &connections, live);
+        if s.updates.snapshot.stage == "installing" {
+            return Ok(None);
+        }
+        Ok(s.temporary.begin())
+    }
+    pub fn finish_temporary_sync(
+        &self,
+        t: &crate::temporary_protection::Ticket,
+        result: Result<crate::temporary_protection::Reply, String>,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        s.temporary.finish(t, result);
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
     pub fn configure_flow_names(
         &self,
         enabled: bool,
@@ -1048,7 +1162,11 @@ impl SharedState {
     }
     pub fn diagnostic_export(&self, report: u64, format: &str) -> Result<String, String> {
         let s = self.inner.lock().map_err(|_| "state_lock")?;
-        crate::diagnostics::export(s.diagnostics.report(report)?, format)
+        crate::diagnostics::export_locale(
+            s.diagnostics.report(report)?,
+            format,
+            &s.document.preferences.locale,
+        )
     }
     pub fn diagnostic_action(
         &self,
@@ -1086,6 +1204,8 @@ impl SharedState {
                 let r = s.diagnostics.report(report)?.clone();
                 if r.generation != s.inventory.snapshot.generation
                     || r.service_operation != s.services.operation
+                    || s.services.port_operation != s.ports.operation
+                    || s.ports.stage != "completed"
                     || s.services.error.is_some()
                 {
                     return Err("stale_diagnostic_target".into());
@@ -1137,6 +1257,8 @@ impl SharedState {
                 let r = s.diagnostics.report(report)?;
                 if r.generation != s.inventory.snapshot.generation
                     || r.service_operation != s.services.operation
+                    || s.services.port_operation != s.ports.operation
+                    || s.ports.stage != "completed"
                     || s.services.error.is_some()
                     || s.document.preferences.mode != "live"
                 {
@@ -1187,6 +1309,15 @@ impl SharedState {
             s.inventory.snapshot.generation,
             s.ports.operation,
         ))
+    }
+    pub fn select_port(&self, operation: u64, port: u16) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.ports.operation != operation || !s.ports.rows.iter().any(|r| r.port == port) {
+            return Err("stale_port".into());
+        }
+        s.ports.selected_port = Some(port);
+        s.revision += 1;
+        Ok(s.snapshot())
     }
     pub fn select_service(&self, op: u64, port: u16) -> Result<Snapshot, String> {
         let mut s = self.inner.lock().map_err(|_| "state_lock")?;
@@ -1297,6 +1428,10 @@ impl SharedState {
         if let Some(plan) = s.ports_plan.clone() {
             s.ports_comparator.update(&plan, &mut result);
         }
+        result.selected_port = s
+            .ports
+            .selected_port
+            .filter(|port| result.rows.iter().any(|r| r.port == *port));
         s.ports = result;
         s.revision += 1;
         Ok(s.snapshot())
@@ -1524,9 +1659,13 @@ impl Session {
         let connections = self.visible();
         let layout = renderer::layout(&connections);
         Snapshot {
+            gpu_panel_owner: self.gpu_owner.clone(),
+            gpu_float_operation: self.gpu_float_operation,
+            gpu_dock_operation: self.gpu_dock_operation,
+            temporary_protection: self.temporary.snapshot(),
             flow_names: self.flow_name_snapshot(),
             gpu_filter: self.gpu_filter.clone(),
-            diagnostics: self.diagnostics.clone(),
+            diagnostics: self.diagnostics.for_ui(),
             destination_names: self.destination_names.snapshot(),
             firewall_control: self.firewall_control.snapshot.clone(),
             syslog: self.syslog.snapshot.clone(),
@@ -1577,6 +1716,51 @@ mod tests {
         SharedState::load(path).unwrap()
     }
     #[test]
+    fn ask_poll_does_not_revoke_an_explicit_temporary_session() {
+        let state = state();
+        {
+            let mut s = state.inner.lock().unwrap();
+            let mut c = s.demo[0].clone();
+            c.local = "192.0.2.2:50000".into();
+            c.destination = "192.0.2.1".into();
+            c.identity = Some(crate::identity::SigningIdentity {
+                authority: "developer".into(),
+                team_id: "TESTTEAM01".into(),
+                identifier: "com.example.test".into(),
+            });
+            let network = crate::network::NetworkSnapshot {
+                addresses: vec![crate::network::InterfaceAddress {
+                    interface: "test0".into(),
+                    address: "192.0.2.2".into(),
+                    family: "IPv4".into(),
+                    netmask: "255.255.255.0".into(),
+                    up: true,
+                }],
+                ..Default::default()
+            };
+            s.temporary
+                .add(
+                    c,
+                    &network,
+                    "boot",
+                    "outbound",
+                    "tls:example.test",
+                    60,
+                    true,
+                )
+                .unwrap();
+            s.extension.status.signed = true;
+            s.extension.status.busy = false;
+            s.extension.status.stage = "ready".into();
+            s.extension.status.instance_id = Some("boot".into());
+        }
+        assert!(state.begin_ask_poll().is_ok());
+        assert_eq!(
+            state.inner.lock().unwrap().temporary.snapshot().rows.len(),
+            1
+        );
+    }
+    #[test]
     fn diagnostic_rule_navigation_requires_one_current_signed_connection_and_never_saves_rules() {
         let state = state();
         let identity = crate::identity::SigningIdentity {
@@ -1595,6 +1779,7 @@ mod tests {
             s.document.preferences.view = "diagnostics".into();
             s.inventory.snapshot.generation = 7;
             s.services.operation = 42;
+            s.ports.stage = "completed".into();
             s.diagnostics.reports.push(crate::diagnostics::Report {
                 id: 1,
                 service_operation: 42,

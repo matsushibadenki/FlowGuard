@@ -152,3 +152,7 @@ export async function setFlowNames(enabled:boolean,search:boolean,operation:numb
 export async function collectFlowNames(operation:number){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('collect_flow_names',{operation}));}
 
 export async function clearUpdateCache(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('clear_update_download_cache'));}
+
+export async function temporaryAction(action:string,connectionId:string|null=null,id:string|null=null,direction:string|null=null,peerEvidence:string|null=null,seconds=60,confirmed=false){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('temporary_protection_action',{action,connectionId,id,direction,peerEvidence,seconds,confirmed}));}
+
+export async function selectPort(operation:number,port:number){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('select_port',{operation,port}));}

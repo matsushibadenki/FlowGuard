@@ -212,7 +212,7 @@ mod digest_tests {
         let rules: Vec<crate::model::Rule> = serde_json::from_str(r#"[{"id": "one", "appKey": "signed:v1:developer:ABCDE12345:com.test.app", "identity":{"authority":"developer","teamId":"ABCDE12345","identifier":"com.test.app"}, "app": "Test", "destination": "1.2.3.4", "port": 443, "direction": "both", "action": "block", "updatedAt": 1, "source": "live"}]"#).unwrap();
         assert_eq!(
             super::policy_digest(&rules),
-            "2b653cd3a514e43bdaa1eec3cee32ac1985c45ebc9bfae94cfc54191c2aa0a0c"
+            "70bf7d9160f506aac6bac2f59c3e5eb4d0945b1958645dfdc6fd271ca299e25e"
         );
         let mut changed = rules.clone();
         changed[0].system_exception = true;

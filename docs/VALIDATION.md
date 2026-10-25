@@ -444,3 +444,34 @@ Rust tests cover startup baseline, two distinct samples, repeated snapshot, erro
 - /tmp/flowguard-gpu-filter-qa.cjs、/tmp/flowguard-gpu-filter-{ja,en,zh-CN}-{1500,375}.png。日本語375pxを視認。ブラウザーはテスト専用IPCであり、白い描画枠のスクリーンショットをMetalの実ピクセルの証拠としない。実Surfaceの確認は上記の独立ハーネスで行う。
 - ⭕️ [Pending] 署名済み実アプリの通常UIから実観測を絞り込んだ際の描画と入力、WebViewとMetalの重なり、Retina／複数ディスプレイ・スリープ・長時間負荷・別OS／Intel。今回の変更を公証待ち0.1.1 ZIPへ同梱していない。詳細は[native-gpu-panel.md](native-gpu-panel.md)。
 - タスク用Viteを停止し、検証用Rustビルド領域約1.8GBを削除。既存target・署名鍵・配布物は保持し、公証待ち0.1.1 ZIPのSHA-256が前回と一致することを確認。再署名／Apple送信／公開は行っていない。
+
+## 対象Laterの最終検証 — 2026-10-25
+
+今回の対象はROADMAPの「以降の計画」より前の7項目。後続の計画本文は変更していない。実装対応は [later-completion.md](later-completion.md) を参照。
+
+| 検証 | 結果 |
+| --- | --- |
+| Rust `--features gpu-qa --lib --offline` | 157成功、23 ignored。ignoredを完了扱いにしない |
+| Rust `--no-default-features --lib --offline` | 153成功、23 ignored |
+| TypeScript/Vitest | 25ファイル・120成功 |
+| TypeScript + Vite production build | 成功。main chunk約498KB |
+| Swift package XCTest | Policy 9 + Host 2 + Firewall 5 + Bridge 27 = 43成功 |
+| Swift全product／SystemExtensionソースのbuild | 成功。署名・インストール・有効化はしていない |
+| ローカルHTTP中断／再開 | 専用ignored試験を明示実行して1成功。部分body切断→cache再open→Range/If-Range/206→全体Minisign検証。外部配信・installerなし |
+| 隔離Tauri／実Metal | 10項目成功。10,000件、clip/resize/close、filter・古いsource/sequence拒否、ネイティブラベル・zoom/reset/共有pick、浮動Surfaceと所有窓分離、解放 |
+| ブラウザChrome・診断とdrag | JA/EN/简体中文 × 1500/375pxの6条件成功。検索、詳細、対象外理由、CSV/HTML download、既存意図画面への移動、キーボードとdrag配置。ルール0件のまま |
+| ブラウザChrome・名前／一時許可／更新 | 同6条件成功。許可だけでは収集しない、複数候補名と別許可の検索、取消、一時許可のpeer確認必須・未受領表示・解除、channelのready中変更拒否、履歴・cache削除 |
+| ブラウザChrome・GPU命令 | 同6条件＋非対応fallback成功。zoom/pan/reset/pick、検索／意図／loopback、遅延成功・失敗の棄却、閉じる／再open。描画IPCはモック |
+| Python release/merge tests | 4成功。`PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'` |
+| Rust artifact verifier example | GPUなしでcheck成功。実公開フラグは未実行 |
+| 差分・既存成果物 | `git diff --check`成功。既存0.1.1 notarization.zipのSHA-256は `f91dc8dd53380c1132bbdf8a97e9198132dcd8bb4bcad53ed6f0bcc6c2d8fdc2` のまま |
+
+追加した境界テストは、旧契約／CPU違い／短すぎるMach-Oの拒否、cache排他・symlink・ETag、ルート署名付き鍵委任と改変拒否、install要求とlaunch履歴の区別、診断の未実施と出力escape、古い世代／曖昧なアプリへのルール移動拒否、停止済み名前／許可store、UUID違いの一時許可拒否、heartbeat失効・古い成功・解除・Provider再起動の非復元、完全一致するpaused askの1回allow、ask pollが一時許可を消さないことを含む。
+
+UI検証はnative IPC／Provider／診断応答をモックした。スクリーンショットとログは `/tmp/flowguard-later-*` に保持。375pxの一時許可フォームと診断詳細も目視確認し、横溢れ・JSエラーなし。Metal試験は実Surfaceを使うが、別ID・一時文書の隔離QAであり配布アプリの起動試験ではない。追加のDNS照会、LAN検査、実通信制御、OS設定保存、Apple送信、GitHub公開、本番鍵変更は実行していない。
+
+⭕️ [Pending] 署名済みv5 Providerの実フロー名・UDP DNS／mDNS・一時許可、VPN/スリープ/経路変更/旧新切替・管理通信継続。元アプリのpeer確認は利用者申告。初回フローの許可や受領を、パケット単位の保護／既存通信の遡及停止／peer本人性の証明へ読み替えない。
+
+⭕️ [Pending] 実Inspector跨ぎdrag、署名済みUIとGPUの通し操作、Retina／複数画面／長時間負荷。Intel実ビルド、両architectureの公証・公開、実HTTPS再開、本番鍵切替、beta配信、実アプリの更新と再起動。既存0.1.1候補に今回のv5/ABI5は含まれず、新しい版の署名済み成果物が必要。
+
+検証後、今回専用の `/private/tmp/flowguard-later-target`・Swift scratch／module cache（計約2GB）を削除し、QA用Viteを停止した。ソース・既存署名候補・鍵・検証ログ／画像は維持した。

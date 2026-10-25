@@ -65,6 +65,7 @@ public final class AskQueue {
     private struct Pending {
         var request: AskRequest
         let deadline: TimeInterval
+        let flow: FlowIdentity
         let completion: (RuleAction) -> Void
     }
     private var pending: [String: Pending] = [:]
@@ -102,7 +103,7 @@ public final class AskQueue {
             ruleId: rule.id, identity: identity, app: rule.app, destination: flow.destination,
             port: flow.port, direction: flow.direction, timeoutAction: rule.timeoutAction ?? .allow,
             remainingSeconds: Self.timeoutSeconds)
-        let item = Pending(request: request, deadline: clock() + Double(Self.timeoutSeconds), completion: completion)
+        let item = Pending(request: request, deadline: clock() + Double(Self.timeoutSeconds), flow: flow, completion: completion)
         guard active, pending.count < Self.capacity else {
             record(item, action: request.timeoutAction, reason: active ? "capacity" : "transport_unavailable")
             return nil
@@ -132,6 +133,20 @@ public final class AskQueue {
         }.sorted { $0.requestId < $1.requestId }
         let snapshot = AskSnapshot(protocolVersion: 5, instanceId: instanceId, policyId: policyId, requests: requests, outcomes: outcomes)
         lock.unlock(); callbacks.forEach { $0() }; return snapshot
+    }
+    /// Applies only to already-paused, exact Provider flows. It never creates a future rule.
+    public func allowTemporary(using grants: TemporaryGrantStore) {
+        lock.lock()
+        var callbacks = expireLocked()
+        if active {
+            let allowed = pending.values.filter { grants.allows($0.flow) }
+            for item in allowed {
+                pending.removeValue(forKey: item.request.requestId)
+                record(item, action: .allow, reason: "temporary_allow")
+                callbacks.append { item.completion(.allow) }
+            }
+        }
+        lock.unlock(); callbacks.forEach { $0() }
     }
     public func answer(_ answer: AskAnswer) -> AskReply {
         lock.lock()

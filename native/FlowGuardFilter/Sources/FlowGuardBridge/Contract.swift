@@ -23,6 +23,7 @@ public struct BridgeReply: Codable {
     public let policyDigest: String?
 }
 @objc public protocol FilterBridgeProtocol {
+    @objc optional func temporaryGrants(_ data:Data,withReply reply:@escaping(Data)->Void)
     @objc optional func flowNames(_ data:Data,withReply reply:@escaping(Data)->Void)
     func status(withReply reply: @escaping (Data) -> Void)
     func pendingAsks(withReply reply: @escaping (Data) -> Void)

@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::{path::Component, sync::Arc, time::Duration};
 use tauri::{Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
+fn configure_crypto() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
 const ENDPOINT: &str =
     "https://github.com/matsushibadenki/FlowGuard/releases/latest/download/latest.json";
 const MAX_DOWNLOAD: usize = 200 * 1024 * 1024;
@@ -276,6 +279,8 @@ pub fn can_install(s: &crate::model::Snapshot) -> bool {
         && !["starting", "listening", "stopping"].contains(&s.syslog.stage.as_str())
         && !s.destination_names.busy
         && !s.flow_names.busy
+        && !s.temporary_protection.busy
+        && s.temporary_protection.rows.is_empty()
         && !s.firewall_control.busy
         && !s.extension.busy
         && ![
@@ -380,8 +385,36 @@ fn trusted_signature(
     Err(error)
 }
 // Validate before invoking the plugin installer, which strips the .app root during extraction.
+fn archive_arch(data: &[u8], arch: &str) -> Result<(), String> {
+    use std::io::Read;
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(data));
+    let mut found = false;
+    for entry in tar.entries().map_err(|_| "invalid_archive")? {
+        let entry = entry.map_err(|_| "invalid_archive")?;
+        if entry.path().map_err(|_| "invalid_archive")?.as_ref()
+            == std::path::Path::new("FlowGuard.app/Contents/MacOS/flowguard")
+        {
+            let size = entry.size();
+            let mut header = vec![];
+            entry
+                .take(520)
+                .read_to_end(&mut header)
+                .map_err(|_| "invalid_archive")?;
+            if !crate::update_arch::contains(&header, size, arch) {
+                return Err("invalid_architecture".into());
+            }
+            found = true;
+        }
+    }
+    if found {
+        Ok(())
+    } else {
+        Err("invalid_archive".into())
+    }
+}
 fn archive(data: &[u8], version: &str) -> Result<(), String> {
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(data));
+    let mut paths = std::collections::HashSet::new();
     let mut count = 0;
     let mut total = 0u64;
     let mut info = false;
@@ -394,6 +427,9 @@ fn archive(data: &[u8], version: &str) -> Result<(), String> {
             return Err("invalid_archive".into());
         }
         let path = entry.path().map_err(|_| "invalid_archive")?.into_owned();
+        if !paths.insert(path.clone()) {
+            return Err("invalid_archive".into());
+        }
         let components = path.components().collect::<Vec<_>>();
         if components.first() != Some(&Component::Normal(std::ffi::OsStr::new("FlowGuard.app")))
             || components
@@ -468,6 +504,7 @@ pub async fn check(
     app: tauri::AppHandle,
     automatic: bool,
 ) -> Result<crate::model::Snapshot, String> {
+    configure_crypto();
     if automatic {
         let s = app.state::<crate::state::SharedState>().snapshot()?;
         if !s.document.preferences.auto_updates
@@ -539,7 +576,100 @@ pub async fn check(
     }
     app.state::<crate::state::SharedState>().snapshot()
 }
+async fn fetch_parts(
+    client: &reqwest::Client,
+    url: reqwest::Url,
+    cache: &mut crate::update_cache::Cache,
+    bytes: &mut Vec<u8>,
+    cancelled: impl Fn() -> bool,
+    progress: impl Fn(u64, Option<u64>) -> Result<(), String>,
+) -> Result<(), String> {
+    let offset = bytes.len();
+    let mut request = client.get(url);
+    if offset > 0 {
+        request = request
+            .header(reqwest::header::RANGE, format!("bytes={offset}-"))
+            .header(
+                reqwest::header::IF_RANGE,
+                cache.etag.clone().ok_or("update_cache_failed")?,
+            );
+    }
+    let mut send = Box::pin(request.send());
+    let mut response = loop {
+        if cancelled() {
+            return Err("cancelled".into());
+        }
+        match tokio::time::timeout(Duration::from_secs(1), send.as_mut()).await {
+            Ok(result) => break result.map_err(|_| "download_failed")?,
+            Err(_) => continue,
+        }
+    };
+    if !response.status().is_success() {
+        if response.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+            cache.reset(None)?;
+        }
+        return Err("download_failed".into());
+    }
+    let etag = response
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    let total = if offset > 0 && response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+        if etag != cache.etag {
+            return Err("download_failed".into());
+        }
+        let total = response
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| crate::update_cache::range_total(v, offset))
+            .ok_or("download_failed")?;
+        Some(total as u64)
+    } else {
+        if response.status() != reqwest::StatusCode::OK {
+            return Err("download_failed".into());
+        }
+        bytes.clear();
+        cache.reset(etag)?;
+        response.content_length()
+    };
+    if total.is_some_and(|n| n > MAX_DOWNLOAD as u64) {
+        return Err("update_too_large".into());
+    }
+    let mut last_progress = std::time::Instant::now();
+    loop {
+        if cancelled() {
+            return Err("cancelled".into());
+        }
+        let chunk = match tokio::time::timeout(Duration::from_secs(1), response.chunk()).await {
+            Ok(result) => result.map_err(|_| "download_failed")?,
+            Err(_) => continue,
+        };
+        let Some(chunk) = chunk else {
+            break;
+        };
+        if cancelled() {
+            return Err("cancelled".into());
+        }
+        if bytes.len() + chunk.len() > MAX_DOWNLOAD {
+            return Err("update_too_large".into());
+        }
+        cache.append(&chunk, bytes.len())?;
+        bytes.extend_from_slice(&chunk);
+        if last_progress.elapsed() >= Duration::from_millis(250) {
+            progress(bytes.len() as u64, total)?;
+            last_progress = std::time::Instant::now();
+        }
+    }
+    progress(bytes.len() as u64, total)?;
+    if total.is_some_and(|n| n != bytes.len() as u64) {
+        return Err("download_failed".into());
+    }
+    Ok(())
+}
 pub async fn download(app: tauri::AppHandle) -> Result<crate::model::Snapshot, String> {
+    configure_crypto();
     let (op, update) = publish(&app, Machine::download)?;
     let channel = app
         .state::<crate::state::SharedState>()
@@ -594,7 +724,9 @@ pub async fn download(app: tauri::AppHandle) -> Result<crate::model::Snapshot, S
         if !bytes.is_empty()
             && trusted_signature(&bytes, &update.signature, &update.version, &channel).is_ok()
         {
-            if let Err(error) = archive(&bytes, &update.version) {
+            if let Err(error) = archive(&bytes, &update.version)
+                .and_then(|_| archive_arch(&bytes, std::env::consts::ARCH))
+            {
                 cache.reset(None)?;
                 return Err(error);
             }
@@ -603,78 +735,18 @@ pub async fn download(app: tauri::AppHandle) -> Result<crate::model::Snapshot, S
             })?;
             return publish(&app, |m| m.ready(op, bytes));
         }
-        let offset = bytes.len();
-        let mut request = client.get(update.download_url.clone());
-        if offset > 0 {
-            request = request
-                .header(reqwest::header::RANGE, format!("bytes={offset}-"))
-                .header(
-                    reqwest::header::IF_RANGE,
-                    cache.etag.clone().ok_or("update_cache_failed")?,
-                );
-        }
-        let mut response = request.send().await.map_err(|_| "download_failed")?;
-        if !response.status().is_success() {
-            if response.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
-                cache.reset(None)?;
-            }
-            return Err("download_failed".into());
-        }
-        let etag = response
-            .headers()
-            .get(reqwest::header::ETAG)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
-        let total = if offset > 0 && response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
-            if etag != cache.etag {
-                return Err("download_failed".into());
-            }
-            let total = response
-                .headers()
-                .get(reqwest::header::CONTENT_RANGE)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| crate::update_cache::range_total(v, offset))
-                .ok_or("download_failed")?;
-            Some(total as u64)
-        } else {
-            if response.status() != reqwest::StatusCode::OK {
-                return Err("download_failed".into());
-            }
-            bytes.clear();
-            cache.reset(etag)?;
-            response.content_length()
-        };
-        if total.is_some_and(|n| n > MAX_DOWNLOAD as u64) {
-            return Err("update_too_large".into());
-        }
-        let mut last_progress = std::time::Instant::now();
-        loop {
-            if cancelled(&app, op) {
-                return Err("cancelled".into());
-            }
-            let chunk = match tokio::time::timeout(Duration::from_secs(1), response.chunk()).await {
-                Ok(result) => result.map_err(|_| "download_failed")?,
-                Err(_) => continue,
-            };
-            let Some(chunk) = chunk else {
-                break;
-            };
-            if bytes.len() + chunk.len() > MAX_DOWNLOAD {
-                return Err("update_too_large".into());
-            }
-            cache.append(&chunk, bytes.len())?;
-            bytes.extend_from_slice(&chunk);
-            if last_progress.elapsed() >= Duration::from_millis(250) {
-                publish(&app, |m| m.progress(op, bytes.len() as u64, total))?;
-                last_progress = std::time::Instant::now();
-            }
-        }
-        publish(&app, |m| m.progress(op, bytes.len() as u64, total))?;
-        if total.is_some_and(|n| n != bytes.len() as u64) {
-            return Err("download_failed".into());
-        }
+        fetch_parts(
+            &client,
+            update.download_url.clone(),
+            &mut cache,
+            &mut bytes,
+            || cancelled(&app, op),
+            |n, total| publish(&app, |m| m.progress(op, n, total)).map(|_| ()),
+        )
+        .await?;
         if let Err(error) = trusted_signature(&bytes, &update.signature, &update.version, &channel)
             .and_then(|_| archive(&bytes, &update.version))
+            .and_then(|_| archive_arch(&bytes, std::env::consts::ARCH))
         {
             cache.reset(None)?;
             return Err(error);
@@ -773,6 +845,94 @@ pub fn schedule(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "local HTTP range server only; no external network or installer"]
+    fn resumable_http_uses_strong_validator_and_rechecks_complete_signature() {
+        configure_crypto();
+        use std::io::{Read, Write};
+        let data = include_bytes!("../tests/fixtures/updater-valid.app.tar.gz").to_vec();
+        let split = data.len() / 2;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/artifact", listener.local_addr().unwrap());
+        let copy = data.clone();
+        let server = std::thread::spawn(move || {
+            for pass in 0..2 {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut request = vec![];
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut b = [0];
+                    socket.read_exact(&mut b).unwrap();
+                    request.push(b[0]);
+                    if request.len() > 8192 {
+                        panic!("request limit");
+                    }
+                }
+                let text = String::from_utf8(request).unwrap().to_ascii_lowercase();
+                if pass == 0 {
+                    assert!(!text.contains("range:"));
+                    write!(socket,"HTTP/1.1 200 OK\r\nContent-Length: {}\r\nETag: \"fixed\"\r\nConnection: close\r\n\r\n",copy.len()).unwrap();
+                    socket.write_all(&copy[..split]).unwrap();
+                    socket.flush().unwrap();
+                    std::thread::sleep(Duration::from_millis(100));
+                } else {
+                    assert!(text.contains(&format!("range: bytes={split}-")));
+                    assert!(text.contains("if-range: \"fixed\""));
+                    write!(socket,"HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nETag: \"fixed\"\r\nConnection: close\r\n\r\n",copy.len()-split,split,copy.len()-1,copy.len()).unwrap();
+                    socket.write_all(&copy[split..]).unwrap();
+                }
+            }
+        });
+        let root = tempfile::tempdir().unwrap();
+        let identity = crate::update_cache::Identity {
+            version: "0.2.0".into(),
+            url: url.clone(),
+            signature: include_str!("../tests/fixtures/updater-valid.app.tar.gz.sig")
+                .trim()
+                .into(),
+            architecture: "test".into(),
+        };
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap();
+        let (mut cache, mut bytes) =
+            crate::update_cache::Cache::open(root.path().join("cache"), identity.clone()).unwrap();
+        let first = tauri::async_runtime::block_on(fetch_parts(
+            &client,
+            url.parse().unwrap(),
+            &mut cache,
+            &mut bytes,
+            || false,
+            |_, _| Ok(()),
+        ));
+        assert!(first.is_err());
+        assert_eq!(bytes.len(), split);
+        drop(cache);
+        let (mut cache, mut bytes) =
+            crate::update_cache::Cache::open(root.path().join("cache"), identity).unwrap();
+        assert_eq!(bytes.len(), split);
+        tauri::async_runtime::block_on(fetch_parts(
+            &client,
+            url.parse().unwrap(),
+            &mut cache,
+            &mut bytes,
+            || false,
+            |_, _| Ok(()),
+        ))
+        .unwrap();
+        assert_eq!(bytes, data);
+        signature(
+            &bytes,
+            include_str!("../tests/fixtures/updater-valid.app.tar.gz.sig").trim(),
+            include_str!("../tests/fixtures/updater-test.pub").trim(),
+            "0.2.0",
+        )
+        .unwrap();
+        server.join().unwrap();
+    }
     #[test]
     fn channel_validation_and_persisted_history_never_claim_install_before_launch() {
         let url="https://github.com/matsushibadenki/FlowGuard/releases/download/v0.2.0/FlowGuard.app.tar.gz";
@@ -1208,6 +1368,14 @@ mod signed_upgrade_tests {
 }
 
 pub fn verify_artifact(path: &std::path::Path, version: &str, channel: &str) -> Result<(), String> {
+    verify_artifact_for_arch(path, version, channel, std::env::consts::ARCH)
+}
+pub fn verify_artifact_for_arch(
+    path: &std::path::Path,
+    version: &str,
+    channel: &str,
+    arch: &str,
+) -> Result<(), String> {
     use std::io::Read;
     let metadata = std::fs::symlink_metadata(path).map_err(|_| "invalid_archive")?;
     if !metadata.is_file()
@@ -1232,5 +1400,6 @@ pub fn verify_artifact(path: &std::path::Path, version: &str, channel: &str) -> 
     }
     let encoded = std::fs::read_to_string(sigpath).map_err(|_| "signature_invalid")?;
     trusted_signature(&data, encoded.trim(), version, channel)?;
-    archive(&data, version)
+    archive(&data, version)?;
+    archive_arch(&data, arch)
 }

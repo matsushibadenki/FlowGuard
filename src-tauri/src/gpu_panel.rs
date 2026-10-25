@@ -1,5 +1,6 @@
-//! Geometry/state-only IPC for a single main-window native map panel.
+//! Geometry/state-only IPC for one Rust-owned docked or floating native map panel.
 use serde::{Deserialize, Serialize};
+use tauri::{Emitter, Manager};
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rect {
@@ -116,11 +117,22 @@ pub async fn open_gpu_panel(window: tauri::Window, app: tauri::AppHandle) -> Res
     #[cfg(all(feature = "gpu", target_os = "macos"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
+        let handle = app.clone();
         app.run_on_main_thread(move || {
-            let _ = tx.send(platform::open_for(window.label()));
+            let allowed = handle
+                .state::<crate::state::SharedState>()
+                .inner
+                .lock()
+                .map(|s| s.gpu_owner == window.label())
+                .unwrap_or(false);
+            let _ = tx.send(if allowed {
+                Ok(platform::open_for(window.label()))
+            } else {
+                Err("stale_gpu_owner".to_owned())
+            });
         })
         .map_err(|_| "main_thread_unavailable")?;
-        rx.await.map_err(|_| "main_thread_unavailable".into())
+        rx.await.map_err(|_| "main_thread_unavailable".to_owned())?
     }
     #[cfg(not(all(feature = "gpu", target_os = "macos")))]
     {
@@ -297,26 +309,27 @@ pub fn float_gpu_panel(
     window: tauri::Window,
     filter: crate::gpu_filter::Filter,
 ) -> Result<(), String> {
-    use tauri::Manager;
     if window.label() != "main" || !filter.valid() {
         return Err("invalid_gpu_filter".into());
     }
     let shared = app.state::<crate::state::SharedState>();
-    {
+    let operation = {
         let mut s = shared.inner.lock().map_err(|_| "state_lock")?;
         if !filter.matches_source(&s.document.preferences.mode) {
             return Err("stale_gpu_source".into());
         }
         s.gpu_filter = filter;
+        s.gpu_owner = "gpu-map".into();
+        s.gpu_float_operation += 1;
         s.revision += 1;
-    }
-    let snapshot = shared.snapshot()?;
-    let _ = tauri::Emitter::emit(&app, "state-changed", snapshot);
+        s.gpu_float_operation
+    };
+    let _ = app.emit("state-changed", shared.snapshot()?);
     if let Some(w) = app.get_webview_window("gpu-map") {
         w.show().map_err(|e| e.to_string())?;
         return w.set_focus().map_err(|e| e.to_string());
     }
-    tauri::WebviewWindowBuilder::new(
+    let result = tauri::WebviewWindowBuilder::new(
         &app,
         "gpu-map",
         tauri::WebviewUrl::App("index.html?panel=gpu".into()),
@@ -324,7 +337,39 @@ pub fn float_gpu_panel(
     .title("FlowGuard · GPU map")
     .inner_size(1000.0, 720.0)
     .min_inner_size(360.0, 400.0)
-    .build()
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    .build();
+    if let Err(error) = result {
+        if app.get_webview_window("gpu-map").is_none() {
+            let mut s = shared.inner.lock().map_err(|_| "state_lock")?;
+            if s.gpu_float_operation == operation && s.gpu_owner == "gpu-map" {
+                s.gpu_owner = "main".into();
+                s.revision += 1;
+            }
+            drop(s);
+            let _ = app.emit("state-changed", shared.snapshot()?);
+            return Err(error.to_string());
+        }
+    }
+    Ok(())
+}
+#[tauri::command]
+pub fn dock_gpu_panel(app: tauri::AppHandle, window: tauri::Window) -> Result<(), String> {
+    if window.label() != "gpu-map" {
+        return Err("gpu_window_required".into());
+    }
+    let shared = app.state::<crate::state::SharedState>();
+    let _ = shared.dispatch(crate::model::Command::SetView { view: "map".into() })?;
+    {
+        let mut s = shared.inner.lock().map_err(|_| "state_lock")?;
+        s.gpu_owner = "main".into();
+        s.gpu_dock_operation += 1;
+        s.revision += 1;
+    }
+    let _ = app.emit("state-changed", shared.snapshot()?);
+    if let Some(main) = app.get_webview_window("main") {
+        main.unminimize().map_err(|e| e.to_string())?;
+        main.show().map_err(|e| e.to_string())?;
+        main.set_focus().map_err(|e| e.to_string())?;
+    }
+    window.close().map_err(|e| e.to_string())
 }

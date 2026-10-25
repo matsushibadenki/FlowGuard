@@ -43,6 +43,29 @@ pub struct Snapshot {
     pub selected_finding: Option<String>,
 }
 impl Snapshot {
+    pub fn for_ui(&self) -> Self {
+        Self {
+            reports: self
+                .reports
+                .iter()
+                .map(|r| Report {
+                    id: r.id,
+                    service_operation: r.service_operation,
+                    generation: r.generation,
+                    target: r.target.clone(),
+                    interface: r.interface.clone(),
+                    created_at: r.created_at,
+                    findings: if Some(r.id) == self.selected_report {
+                        r.findings.clone()
+                    } else {
+                        vec![]
+                    },
+                })
+                .collect(),
+            selected_report: self.selected_report,
+            selected_finding: self.selected_finding.clone(),
+        }
+    }
     pub fn assess(&mut self, s: &crate::services::Snapshot, now: u64) -> Result<(), String> {
         if s.operation == 0
             || s.stage != "completed"
@@ -243,7 +266,11 @@ fn html(s: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
 }
-pub fn export(r: &Report, format: &str) -> Result<String, String> {
+#[cfg(test)]
+fn export(r: &Report, format: &str) -> Result<String, String> {
+    export_locale(r, format, "en")
+}
+pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, String> {
     let headers = [
         "target",
         "interface",
@@ -286,7 +313,32 @@ pub fn export(r: &Report, format: &str) -> Result<String, String> {
             ]
         })
         .collect();
-    match format {"csv"=>Ok(std::iter::once(headers.iter().map(|s|csv_cell(s)).collect::<Vec<_>>().join(",")).chain(rows.iter().map(|row|row.iter().map(|s|csv_cell(s)).collect::<Vec<_>>().join(","))).collect::<Vec<_>>().join("\r\n")),"html"=>Ok(format!("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>FlowGuard observations</title><style>body{{font:14px system-ui}}td,th{{border:1px solid #888;padding:8px;overflow-wrap:anywhere}}table{{border-collapse:collapse}}</style><h1>FlowGuard observations</h1><p>Read-only evidence assessment. Unverified and not-performed checks are not proof of safety. Maximum 20 session reports; no automatic policy changes.</p><table><thead><tr>{}</tr></thead><tbody>{}</tbody></table></html>",headers.iter().map(|h|format!("<th>{}</th>",html(h))).collect::<String>(),rows.iter().map(|row|format!("<tr>{}</tr>",row.iter().map(|s|format!("<td>{}</td>",html(s))).collect::<String>())).collect::<String>())),_=>Err("invalid_report_format".into())}
+    if format == "csv" {
+        return Ok(std::iter::once(
+            headers
+                .iter()
+                .map(|s| csv_cell(s))
+                .collect::<Vec<_>>()
+                .join(","),
+        )
+        .chain(rows.iter().map(|row| {
+            row.iter()
+                .map(|s| csv_cell(s))
+                .collect::<Vec<_>>()
+                .join(",")
+        }))
+        .collect::<Vec<_>>()
+        .join("\r\n"));
+    }
+    if format != "html" {
+        return Err("invalid_report_format".into());
+    }
+    let (lang,title,help,labels) = match locale {
+        "ja" => ("ja","FlowGuard 観測レポート","既存の観測根拠を読み取り専用で評価。未検証・未実施は安全の証明ではありません。セッション内最大20件、ポリシーの自動変更なし。CSVは共通の機械可読コードを使用します。",["対象","インターフェース","レポート","サービス操作","ポート","分類","重要度","確かさ","観測根拠","推奨対応コード","確認時刻（Unix秒）","差分","対応状況","理由"]),
+        "zh-CN" => ("zh-CN","FlowGuard 观测报告","只读评估已有观测依据。未验证或未执行不代表安全。会话最多20条，不自动更改策略。CSV使用通用机器可读代码。",["目标","接口","报告","服务操作","端口","分类","严重程度","确定性","观测依据","建议代码","确认时间（Unix秒）","差异","处理状态","原因"]),
+        _ => ("en","FlowGuard observations","Read-only evidence assessment. Unverified and not-performed checks are not proof of safety. Maximum 20 session reports; no automatic policy changes. CSV uses stable machine-readable codes.",headers),
+    };
+    Ok(format!("<!doctype html><html lang=\"{lang}\"><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>{title}</title><style>body{{font:14px system-ui;padding:16px}}td,th{{border:1px solid #888;padding:8px;overflow-wrap:anywhere}}table{{border-collapse:collapse}}</style><h1>{title}</h1><p>{help}</p><table><thead><tr>{}</tr></thead><tbody>{}</tbody></table></html>",labels.iter().map(|h|format!("<th>{}</th>",html(h))).collect::<String>(),rows.iter().map(|row|format!("<tr>{}</tr>",row.iter().map(|s|format!("<td>{}</td>",html(s))).collect::<String>())).collect::<String>()))
 }
 #[cfg(test)]
 mod tests {
@@ -354,6 +406,15 @@ mod tests {
             .unwrap()
             .contains("&lt;script&gt;"));
         assert!(export(&s.reports[0], "csv").unwrap().contains("'=SUM"));
+        for (locale, title) in [
+            ("ja", "観測レポート"),
+            ("en", "observations"),
+            ("zh-CN", "观测报告"),
+        ] {
+            let report = export_locale(&s.reports[0], "html", locale).unwrap();
+            assert!(report.contains(title));
+            assert!(report.contains("&lt;script&gt;"));
+        }
         assert!(s.select(2, None).is_err());
     }
 }

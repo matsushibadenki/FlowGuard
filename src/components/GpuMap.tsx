@@ -13,6 +13,8 @@ export function GpuMap({snapshot,filter,standalone=false}:{snapshot:Snapshot;fil
  const current=status?.token===token?status.value:null;
  const interaction=useRef<{token:string;value:{type:string;x?:number;y?:number}}|null>(null);
  function interact(value:{type:string;x?:number;y?:number}){interaction.current={token,value};request.current?.();}
+ useEffect(()=>{if(standalone&&snapshot.gpuFloatOperation)setOpen(true);if(!standalone&&snapshot.gpuDockOperation)setOpen(true);},[standalone,snapshot.gpuFloatOperation,snapshot.gpuDockOperation]);
+ useEffect(()=>{if(snapshot.gpuPanelOwner&&snapshot.gpuPanelOwner!==(standalone?'gpu-map':'main')){setOpen(false);setStatus(null);}},[standalone,snapshot.gpuPanelOwner]);
  const slot=useRef<HTMLDivElement>(null),request=useRef<(()=>void)|null>(null);
  useEffect(()=>{let alive=true;if(native)void invoke<boolean>('gpu_panel_available').then(v=>{if(alive)setAvailable(v);}).catch(()=>{});return()=>{alive=false;};},[]);
  useEffect(()=>{if(!open||!available)return;

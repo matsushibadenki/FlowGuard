@@ -29,7 +29,9 @@ IPがOS設定のDNS等へ送られる可能性を、許可のそばに表示す�
 
 Appleの[remoteHostname仕様](https://developer.apple.com/documentation/networkextension/nefiltersocketflow/remotehostname)では、この値はURLSession／Networkなど名前指定APIから始まったフローの場合に限り設定される。常に取得できる値ではなく、今回のOSリゾルバー結果とは異なる取得元である。[remoteEndpoint](https://developer.apple.com/documentation/networkextension/nefiltersocketflow/remoteendpoint)も初回callbackで未設定の場合がある。
 
-今回Providerのポリシー／v4契約・署名識別は変更しない。フロー名を読み取りの観測契約へ追加する実装と、署名済みProviderでの取得条件・フローとの相関は後続とする。OSリゾルバーの名前をフロー由来と表示しない。
+2026-10-25: ポリシーとは独立したv1観測契約を実装。既定オフ、明示操作で今後15秒のTCPフロー名を最大128件記録し、2秒以上あけた手動更新で取得する。追加のDNS照会はしない。Provider起動UUIDとrequest UUIDを照合し、署名主体・TCP・方向・送受信IP／port・初回観測時刻±3秒の対応を候補として照合する。最大64接続・各4名、15秒の鮮度制限。名前だけで接続を本人確認しない。
+
+名前表示は取得元・時刻・未検証の候補を併記する。検索は収集許可とは別の明示設定で、通常マップとRust GPU投影へ接続。名前はルール・署名・TLS確認名の根拠にしない。オフ、観測失敗、デモ、検出したnetwork変更、Provider起動世代の変化で消去し、古い応答を拒否する。送信済み要求は処理後15秒までProviderに残り得る。Provider停止後のstoreは再有効化を拒否する。OSリゾルバーの名前とフロー由来の名前は別の取得元のまま扱う。
 
 ## 検証とPending
 
@@ -37,6 +39,6 @@ Appleの[remoteHostname仕様](https://developer.apple.com/documentation/network
 
 🟢 [Done] ブラウザではDNSとnative IPCをモックし、許可だけでは照会しない、IPボタンから1回だけ取得、取り消し・消去後の表示、取得元／時刻／未検証／古さ／失敗、文字列の安全な描画、3言語・1500／1200／375pxを確認。実DNS照会は実行していない。
 
-⭕️ [Pending] 実macOSのdscacheutil、正引き／逆引き情報の違い、OSキャッシュ／hosts／DNS等の応答、IPv4／IPv6・実ネットワーク・DNS拒否／遅延／不正応答、VPN・同一IPの経路変更、スリープ／時計変更、ローカルネットワーク権限、実Tauri画面と複数ウインドウ。取得成功自体を名前や接続先本人の検証と扱わない。Network Extensionのフロー名収集は未実装。
+⭕️ [Pending] 実macOSのdscacheutil、正引き／逆引き情報の違い、OSキャッシュ／hosts／DNS等の応答、IPv4／IPv6・実ネットワーク・DNS拒否／遅延／不正応答、VPN・同一IPの経路変更、スリープ／時計変更、ローカルネットワーク権限、実Tauri画面と複数ウインドウ。取得成功自体を名前や接続先本人の検証と扱わない。Network Extensionのフロー名収集コードは実装済みだが、署名済み実フローの取得・相関は未確認。
 
 既に公証承認待ちの0.1.1 ZIPは変更しておらず、今回の機能はその候補に未同梱。最新ソースを配布する場合は新しい署名済み成果物を生成し、その内容・SHA-256を改めて確認する。

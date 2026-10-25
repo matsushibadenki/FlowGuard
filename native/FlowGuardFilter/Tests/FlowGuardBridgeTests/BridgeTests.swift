@@ -87,7 +87,7 @@ final class BridgeTests: XCTestCase {
 
     func testDigestTracksExactPolicyAndLostAcknowledgement() throws {
         XCTAssertEqual(BridgeContract.digest([]), "179851694d92493625d6aea51ce56532985145b32fc81f68e48fc9303e50e8fa")
-        XCTAssertEqual(BridgeContract.digest(try rules()), "2b653cd3a514e43bdaa1eec3cee32ac1985c45ebc9bfae94cfc54191c2aa0a0c")
+        XCTAssertEqual(BridgeContract.digest(try rules()), "70bf7d9160f506aac6bac2f59c3e5eb4d0945b1958645dfdc6fd271ca299e25e")
         let receiver = PolicyReceiver(); receiver.seed(try rules()); receiver.setReady(true)
         XCTAssertEqual(receiver.status().policyDigest, BridgeContract.digest(try rules()))
         let before = receiver.status().policyDigest

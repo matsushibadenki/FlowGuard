@@ -29,7 +29,7 @@ final class SystemProtectionTests: XCTestCase {
         for transport in [FlowTransport.udp, .unknown] {
             for port: UInt16 in [53,5353,22,443,5900] {
                 let value = FlowIdentity(transport:transport,executable:"",destination:"1.1.1.1",port:port,direction:.outbound,identity:subject)
-                XCTAssertNil(SystemProtection.preset(for:value))
+                if transport == .udp && port==53 {XCTAssertEqual(SystemProtection.preset(for:value),"systemUDPDNS")}else{XCTAssertNil(SystemProtection.preset(for:value))}
                 for action in ["allow","block","ask"] {
                     XCTAssertNil(Policy(rules:[try rule(action:action,exception:true,port:Int(port))]).matchingRule(for:value))
                 }
