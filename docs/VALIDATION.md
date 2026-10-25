@@ -564,3 +564,15 @@ ROADMAPの「機器情報とサービス・診断結果の関連付け」を優�
 - CUAで最新debugバンドルをフルパス起動。実測codexのTCP443を中間ラベルから選択。選択経路halo、接続数19／11の強弱、実アイコン、接続先の分類バッジ、詳細上段カードと上端追従を1440×960で目視確認。OS保護設定・ルール保存・名前照会は操作していない。
 - 選択haloはUI選択、構成バーはIP分類別の接続件数。転送量・フロー通過・遮断実績には対応しない。常時流れる粒子アニメーションは追加していない。
 - 署名／公証済み配布版、Retina／複数画面、他言語／画面幅の実TauriはPending。
+
+
+## 2026-10-26 LAN機器シートのLater拡張
+
+- `npm test`: 30ファイル・147件成功。分類・数値ソート／未取得・末尾までの仮想範囲・履歴表示の分離を追加。
+- `cargo test --manifest-path src-tauri/Cargo.toml --offline --no-default-features --lib`: 165件成功・23件ignored。部分範囲／同時数上限、RTT、列幅の競合、表示名、8回の履歴上限・再読込／原子的保存失敗、NBSTATのtransaction／応答種別／欠損、SRV／DNS名のlabel境界、OUI除外、公開情報の許可／取消／30秒間隔、CSV列整合・0msを検証。実ネットワーク向けignoredテストは実行していない。
+- `cargo check --manifest-path src-tauri/Cargo.toml --offline`: GPU既定feature有効で成功。TypeScript／Viteビルドとdebug macOS bundle生成成功。LAN画面を遅延読込にし、初期JSを500kB未満に維持。
+- ブラウザーskillが利用可能一覧にないためbundled Playwright／Chromeを使用。`http://127.0.0.1:1420`、合成200行、JA／EN／简体中文 × 1500／768／375／320px。page identity、非空、Vite overlayなし、pageerrorなし、ページ横溢れなし。仮想行は20行未満で201番目のaria行へ到達。縦横スクロール後のheader／address固定、別名検索／保存、幅220px、IP範囲フィルター、IP降順、保存回の読み取り専用表示を確認。外部HTTPS要求0件。
+- 一時スクリプト `/tmp/flowguard-lan-sheet-qa.cjs`、画像 `/tmp/flowguard-lan-sheet-{ja,en,zh-CN}-{1500,768,375,320}.png`。desktopと320pxを目視確認し、狭幅のアドレス優先・列幅縮小、headerの不自然な日本語折返しを修正。
+- `com.flowguard.lanqa`／`FlowGuard LAN QA.app`を別identifierでビルド。CUAから実Tauri（tauri://localhost、日本語1440×960）で近隣キャッシュ収集→2行→表示名保存→正常完了結果の明示保存→保存回表示を確認。終了／最新bundleで再起動後、現在結果0行・保存回1件を確認し、旧回2行と`LAN QA — local record`が読み取り専用で再表示されることを確認。テストデータは独立QAアプリ領域だけへ保存。既存FlowGuard文書・OS保護・配布候補は変更していない。
+- 実機確認はキャッシュだけ。能動Ping、mDNS／NBSTAT実LAN応答、IPinfoの実要求、SSID開示・切替、複数ウインドウ・権限・署名済み配布版はPending。IEEE公式の公開OUIデータのみ取得し、機器情報を外部送信していない。
+- 実装詳細と範囲は[lan-sheet-expansion.md](lan-sheet-expansion.md)。IPv6能動探索・仮想／ブリッジIFへの探索拡張は別途検討のLaterを維持。

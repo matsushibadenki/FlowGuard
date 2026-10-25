@@ -741,8 +741,32 @@ impl Inventory {
                     a.rows.len() > 2048
                         || a.labels.len() > 2048
                         || a.comments.len() > 2048
+                        || a.metadata.len() > 1024
+                        || a.vendors.len() > 2048
+                        || a.first_seen.len() > 2048
+                        || a.response_ms.len() > 1024
+                        || a.labels
+                            .values()
+                            .any(|v| v.chars().count() > 80 || v.chars().any(char::is_control))
+                        || a.comments.values().any(|v| {
+                            v.chars().count() > 500
+                                || v.len() > 2000
+                                || v.chars().any(|c| c.is_control() && c != '\n')
+                        })
+                        || a.metadata.values().any(|m| {
+                            m.services.len() > 8 || m.smb_names.len() > 8 || m.smb_domains.len() > 8
+                        })
+                        || a.response_ms
+                            .values()
+                            .any(|v| !v.is_finite() || !(0.0..=60000.0).contains(v))
                         || a.rows.iter().any(|r| {
                             r.device.id.len() > 512
+                                || r.device.name.values.len() > 8
+                                || r.device
+                                    .name
+                                    .values
+                                    .iter()
+                                    .any(|v| v.len() > 253 || v.chars().any(char::is_control))
                                 || r.device.address.len() > 128
                                 || r.device.name.value.as_ref().is_some_and(|v| v.len() > 1024)
                         })

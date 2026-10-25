@@ -152,6 +152,30 @@ pub(crate) fn parse_ptr(bytes: &[u8]) -> Option<String> {
     }
     None
 }
+// Preserve label boundaries when a DNS-SD instance contains dots or backslashes.
+pub(crate) fn ptr_query_name(bytes: &[u8]) -> Option<String> {
+    parse_ptr(bytes)?;
+    let mut offset = 0;
+    let mut labels = vec![];
+    while offset < bytes.len() {
+        let size = bytes[offset] as usize;
+        offset += 1;
+        if size == 0 {
+            break;
+        }
+        let label = std::str::from_utf8(&bytes[offset..offset + size]).ok()?;
+        let mut escaped = String::new();
+        for ch in label.chars() {
+            if ch == '.' || ch == '\\' {
+                escaped.push('\\');
+            }
+            escaped.push(ch);
+        }
+        labels.push(escaped);
+        offset += size;
+    }
+    Some(labels.join("."))
+}
 #[cfg(target_os = "macos")]
 mod mdns {
     use super::*;
@@ -487,6 +511,12 @@ pub fn lookup(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dns_sd_query_preserves_embedded_label_separators() {
+        let data = [3, b'a', b'.', b'b', 5, b'l', b'o', b'c', b'a', b'l', 0];
+        assert_eq!(ptr_query_name(&data), Some("a\\.b.local".into()));
+        assert!(ptr_query_name(&[0xc0, 0]).is_none());
+    }
     #[test]
     fn ptr_parser_rejects_bad_labels_and_keeps_reported_name() {
         assert_eq!(

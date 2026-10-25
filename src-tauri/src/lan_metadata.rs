@@ -69,6 +69,7 @@ pub fn enrich(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let mut services_limited = false;
     if plan.options.services {
         let query = |name: &str, kind| {
             crate::names::mdns_records(name, kind, &plan.local.interface, cancelled)
@@ -80,6 +81,10 @@ pub fn enrich(
             "_http._tcp.local",
             "_https._tcp.local",
         ] {
+            if remaining == 0 {
+                services_limited = true;
+                break;
+            }
             if cancelled() {
                 return output;
             }
@@ -106,7 +111,10 @@ pub fn enrich(
                     continue;
                 }
                 remaining -= 1;
-                let Ok(records) = query(&instance, 33) else {
+                let Some(instance_query) = crate::names::ptr_query_name(&data) else {
+                    continue;
+                };
+                let Ok(records) = query(&instance_query, 33) else {
                     continue;
                 };
                 for data in records.into_iter().take(1) {
@@ -121,7 +129,10 @@ pub fn enrich(
                         if cancelled() {
                             return output;
                         }
-                        if let Ok(records) = query(&target, kind) {
+                        let Some(target_query) = crate::names::ptr_query_name(&data[6..]) else {
+                            continue;
+                        };
+                        if let Ok(records) = query(&target_query, kind) {
                             addresses.extend(records.into_iter().filter_map(|b| {
                                 match (kind, b.len()) {
                                     (1, 4) => {
@@ -155,11 +166,10 @@ pub fn enrich(
             }
         }
     }
-    if plan.options.services && output.values().any(|m| m.services.len() >= 8) {
+    if services_limited || (plan.options.services && output.values().any(|m| m.services.len() >= 8))
+    {
         for m in output.values_mut() {
-            if m.service_status == "unobserved" {
-                m.service_status = "limited".into();
-            }
+            m.service_status = "limited".into();
         }
     }
     if plan.options.smb {
