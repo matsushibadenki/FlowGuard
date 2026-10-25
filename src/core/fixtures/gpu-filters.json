@@ -1,0 +1,411 @@
+{
+  "connections": [
+    {
+      "id": "0",
+      "app": "App0",
+      "appKey": "/Applications/Test0.app",
+      "pid": 0,
+      "local": "127.0.0.1",
+      "destination": "127.0.0.1",
+      "port": 443,
+      "protocol": "TCP",
+      "direction": "outbound",
+      "observedAt": 0,
+      "identity": null
+    },
+    {
+      "id": "1",
+      "app": "App1",
+      "appKey": "/Applications/Test1.app",
+      "pid": 1,
+      "local": "127.0.0.1",
+      "destination": "[::1%lo0]",
+      "port": 443,
+      "protocol": "TCP",
+      "direction": "outbound",
+      "observedAt": 0,
+      "identity": null
+    },
+    {
+      "id": "2",
+      "app": "App2",
+      "appKey": "/Applications/Test2.app",
+      "pid": 2,
+      "local": "127.0.0.1",
+      "destination": "::ffff:127.0.0.1",
+      "port": 443,
+      "protocol": "TCP",
+      "direction": "outbound",
+      "observedAt": 0,
+      "identity": null
+    },
+    {
+      "id": "3",
+      "app": "App3",
+      "appKey": "/Applications/Test3.app",
+      "pid": 3,
+      "local": "127.0.0.1",
+      "destination": "192.0.2.13",
+      "port": 443,
+      "protocol": "TCP",
+      "direction": "outbound",
+      "observedAt": 0,
+      "identity": null
+    },
+    {
+      "id": "4",
+      "app": "App4",
+      "appKey": "/Applications/Test4.app",
+      "pid": 4,
+      "local": "127.0.0.1",
+      "destination": "192.168.1.4",
+      "port": 443,
+      "protocol": "TCP",
+      "direction": "outbound",
+      "observedAt": 0,
+      "identity": null
+    },
+    {
+      "id": "5",
+      "app": "名前 Σ App",
+      "appKey": "/Applications/Test5.app",
+      "pid": 5,
+      "local": "127.0.0.1",
+      "destination": "2001:db8::1",
+      "port": 443,
+      "protocol": "TCP",
+      "direction": "outbound",
+      "observedAt": 0,
+      "identity": null
+    },
+    {
+      "id": "6",
+      "app": "App6",
+      "appKey": "/Applications/Test6.app",
+      "pid": 6,
+      "local": "127.0.0.1",
+      "destination": "192.0.2.6",
+      "port": 443,
+      "protocol": "UDP",
+      "direction": "outbound",
+      "observedAt": 0,
+      "identity": null
+    },
+    {
+      "id": "7",
+      "app": "App7",
+      "appKey": "/Applications/Test7.app",
+      "pid": 7,
+      "local": "127.0.0.1",
+      "destination": "192.0.2.7",
+      "port": 443,
+      "protocol": "TCP",
+      "direction": "outbound",
+      "observedAt": 0,
+      "identity": {
+        "authority": "developer",
+        "teamId": "TESTTEAM01",
+        "identifier": "com.example.gpu"
+      }
+    },
+    {
+      "id": "8",
+      "app": "App8",
+      "appKey": "/Applications/Test8.app",
+      "pid": 8,
+      "local": "127.0.0.1",
+      "destination": "192.0.2.8",
+      "port": 443,
+      "protocol": "TCP",
+      "direction": "outbound",
+      "observedAt": 0,
+      "identity": null
+    }
+  ],
+  "rules": [
+    {
+      "id": "0",
+      "appKey": "/Applications/Test3.app",
+      "app": "App3",
+      "destination": "192.0.2.13",
+      "port": 443,
+      "direction": "both",
+      "action": "block",
+      "updatedAt": 100,
+      "source": "demo",
+      "identity": null
+    },
+    {
+      "id": "1",
+      "appKey": "/Applications/Test3.app",
+      "app": "App3",
+      "destination": "192.0.2.13",
+      "port": 443,
+      "direction": "outbound",
+      "action": "ask",
+      "updatedAt": 1,
+      "source": "demo",
+      "identity": null
+    },
+    {
+      "id": "2",
+      "appKey": "/Applications/Test3.app",
+      "app": "App3",
+      "destination": "192.0.2.13",
+      "port": 443,
+      "direction": "outbound",
+      "action": "allow",
+      "updatedAt": 2,
+      "source": "demo",
+      "identity": null
+    },
+    {
+      "id": "3",
+      "appKey": "/Applications/Test3.app",
+      "app": "App3",
+      "destination": "192.0.2.13",
+      "port": 443,
+      "direction": "outbound",
+      "action": "block",
+      "updatedAt": 2,
+      "source": "demo",
+      "identity": null
+    },
+    {
+      "id": "4",
+      "appKey": "/Applications/Test4.app",
+      "app": "App4",
+      "destination": "192.168.1.4",
+      "port": 443,
+      "direction": "both",
+      "action": "block",
+      "updatedAt": 1,
+      "source": "demo",
+      "identity": null
+    },
+    {
+      "id": "5",
+      "appKey": "/Applications/Test5.app",
+      "app": "名前 Σ App",
+      "destination": "2001:db8::1",
+      "port": 443,
+      "direction": "both",
+      "action": "ask",
+      "updatedAt": 1,
+      "source": "demo",
+      "identity": null
+    },
+    {
+      "id": "6",
+      "appKey": "/Applications/Test6.app",
+      "app": "App6",
+      "destination": "192.0.2.6",
+      "port": 443,
+      "direction": "both",
+      "action": "block",
+      "updatedAt": 1,
+      "source": "demo",
+      "identity": null
+    },
+    {
+      "id": "7",
+      "appKey": "signed:v1:developer:TESTTEAM01:com.example.gpu",
+      "app": "App7",
+      "destination": "192.0.2.7",
+      "port": 443,
+      "direction": "both",
+      "action": "block",
+      "updatedAt": 1,
+      "source": "live",
+      "identity": {
+        "authority": "developer",
+        "teamId": "TESTTEAM01",
+        "identifier": "com.example.gpu"
+      }
+    },
+    {
+      "id": "8",
+      "appKey": "/Applications/Test8.app",
+      "app": "App8",
+      "destination": "192.0.2.8",
+      "port": 443,
+      "direction": "both",
+      "action": "block",
+      "updatedAt": 1,
+      "source": "live",
+      "identity": null
+    }
+  ],
+  "cases": [
+    {
+      "filter": {
+        "search": "",
+        "intent": "all",
+        "hideLoopback": true,
+        "source": "demo"
+      },
+      "expected": [
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8"
+      ]
+    },
+    {
+      "filter": {
+        "search": "",
+        "intent": "all",
+        "hideLoopback": false,
+        "source": "demo"
+      },
+      "expected": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8"
+      ]
+    },
+    {
+      "filter": {
+        "search": "",
+        "intent": "allow",
+        "hideLoopback": true,
+        "source": "demo"
+      },
+      "expected": [
+        "3"
+      ]
+    },
+    {
+      "filter": {
+        "search": "",
+        "intent": "block",
+        "hideLoopback": true,
+        "source": "demo"
+      },
+      "expected": [
+        "4"
+      ]
+    },
+    {
+      "filter": {
+        "search": "",
+        "intent": "ask",
+        "hideLoopback": true,
+        "source": "demo"
+      },
+      "expected": [
+        "5"
+      ]
+    },
+    {
+      "filter": {
+        "search": "",
+        "intent": "none",
+        "hideLoopback": true,
+        "source": "demo"
+      },
+      "expected": [
+        "6",
+        "7",
+        "8"
+      ]
+    },
+    {
+      "filter": {
+        "search": "名前 σ",
+        "intent": "all",
+        "hideLoopback": true,
+        "source": "demo"
+      },
+      "expected": [
+        "5"
+      ]
+    },
+    {
+      "filter": {
+        "search": "test3.APP",
+        "intent": "all",
+        "hideLoopback": true,
+        "source": "demo"
+      },
+      "expected": [
+        "3"
+      ]
+    },
+    {
+      "filter": {
+        "search": "192.168",
+        "intent": "block",
+        "hideLoopback": true,
+        "source": "demo"
+      },
+      "expected": [
+        "4"
+      ]
+    },
+    {
+      "filter": {
+        "search": "missing",
+        "intent": "all",
+        "hideLoopback": true,
+        "source": "demo"
+      },
+      "expected": []
+    },
+    {
+      "filter": {
+        "search": "",
+        "intent": "block",
+        "hideLoopback": true,
+        "source": "live"
+      },
+      "expected": [
+        "7"
+      ]
+    },
+    {
+      "filter": {
+        "search": "",
+        "intent": "none",
+        "hideLoopback": true,
+        "source": "live"
+      },
+      "expected": [
+        "3",
+        "4",
+        "5",
+        "6",
+        "8"
+      ]
+    },
+    {
+      "filter": {
+        "search": "127.",
+        "intent": "all",
+        "hideLoopback": true,
+        "source": "demo"
+      },
+      "expected": []
+    },
+    {
+      "filter": {
+        "search": "127.",
+        "intent": "all",
+        "hideLoopback": false,
+        "source": "demo"
+      },
+      "expected": [
+        "0",
+        "2"
+      ]
+    }
+  ]
+}

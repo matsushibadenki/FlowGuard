@@ -23,7 +23,7 @@ export function AppList({rows, activeId, select, t, hiddenApps, showHidden}: {
         tabIndex={row.id === tabId ? 0 : -1} ref={node => {if (node) buttons.current.set(row.id, node); else buttons.current.delete(row.id);}}
         onFocus={() => setFocusId(row.id)} onClick={() => select(row)}
         onKeyDown={event => {if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {event.preventDefault(); move(index, event.key);}}}>
-        <AppIcon app={row.app} small/><span className="map-app-copy"><strong title={row.app}>{row.app}</strong>
+        <AppIcon app={row.app} appKey={row.appKey} small/><span className="map-app-copy"><strong title={row.app}>{row.app}</strong>
           <span className="map-app-intents">{count > 0 ? <><IntentBar counts={row.intentCounts} t={t}/>
             {t('intentCount').replace('{n}', String(count)).replace('{m}', String(row.connectionCount))}</> : t('noRule')}</span>
         </span><span className="map-app-count" aria-label={`${row.connectionCount} ${t('connections')}`}>{row.connectionCount}</span>

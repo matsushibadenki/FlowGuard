@@ -45,7 +45,7 @@ pub fn run() -> Result<(), String> {
             std::thread::spawn(move || {
                 let (tx, rx) = std::sync::mpsc::channel();
                 let mut lease = 0;
-                for step in 0..8 {
+                for step in 0..9 {
                     std::thread::sleep(std::time::Duration::from_millis(700));
                     let handle2 = handle.clone();
                     let tx = tx.clone();
@@ -75,8 +75,17 @@ pub fn run() -> Result<(), String> {
                                             "INFO backing_scale={}",
                                             window.scale_factor().map_err(|_| "scale")?
                                         );
-                                        let s =
-                                            platform::sync(&handle2, window, lease, 1, Some(b))?;
+                                        let s = platform::sync(
+                                            &handle2,
+                                            window,
+                                            lease,
+                                            1,
+                                            Some(b),
+                                            crate::gpu_filter::Filter {
+                                                hide_loopback: false,
+                                                ..Default::default()
+                                            },
+                                        )?;
                                         if !s.presented || s.routes != 10000 || !s.truncated {
                                             return Err("qa_present_failed".into());
                                         }
@@ -91,7 +100,17 @@ pub fn run() -> Result<(), String> {
                                             width: 900.0,
                                             height: 400.0,
                                         };
-                                        platform::sync(&handle2, window, lease, 2, Some(b))?;
+                                        platform::sync(
+                                            &handle2,
+                                            window,
+                                            lease,
+                                            2,
+                                            Some(b),
+                                            crate::gpu_filter::Filter {
+                                                hide_loopback: false,
+                                                ..Default::default()
+                                            },
+                                        )?;
                                         platform::verify_clipped_geometry()?;
                                         "clipped_without_squeezing"
                                     }
@@ -109,8 +128,17 @@ pub fn run() -> Result<(), String> {
                                         b.viewport_height = 600.0;
                                         b.rect.height = 440.0;
                                         b.clip.height = 440.0;
-                                        let s =
-                                            platform::sync(&handle2, window, lease, 3, Some(b))?;
+                                        let s = platform::sync(
+                                            &handle2,
+                                            window,
+                                            lease,
+                                            3,
+                                            Some(b),
+                                            crate::gpu_filter::Filter {
+                                                hide_loopback: false,
+                                                ..Default::default()
+                                            },
+                                        )?;
                                         if !s.presented {
                                             return Err("qa_resize_failed".into());
                                         }
@@ -118,7 +146,17 @@ pub fn run() -> Result<(), String> {
                                         "resized_and_presented"
                                     }
                                     4 => {
-                                        let s = platform::sync(&handle2, window, lease, 4, None)?;
+                                        let s = platform::sync(
+                                            &handle2,
+                                            window,
+                                            lease,
+                                            4,
+                                            None,
+                                            crate::gpu_filter::Filter {
+                                                hide_loopback: false,
+                                                ..Default::default()
+                                            },
+                                        )?;
                                         if s.presented {
                                             return Err("qa_hidden_presented".into());
                                         }
@@ -126,8 +164,18 @@ pub fn run() -> Result<(), String> {
                                     }
                                     5 => {
                                         platform::close(lease);
-                                        if platform::sync(&handle2, window, lease, 5, Some(b))
-                                            .is_ok()
+                                        if platform::sync(
+                                            &handle2,
+                                            window,
+                                            lease,
+                                            5,
+                                            Some(b),
+                                            crate::gpu_filter::Filter {
+                                                hide_loopback: false,
+                                                ..Default::default()
+                                            },
+                                        )
+                                        .is_ok()
                                         {
                                             return Err("qa_late_restored".into());
                                         }
@@ -137,18 +185,63 @@ pub fn run() -> Result<(), String> {
                                         let old = lease;
                                         lease = platform::open();
                                         platform::close(old);
-                                        let s =
-                                            platform::sync(&handle2, window, lease, 1, Some(b))?;
+                                        let s = platform::sync(
+                                            &handle2,
+                                            window,
+                                            lease,
+                                            1,
+                                            Some(b),
+                                            crate::gpu_filter::Filter {
+                                                hide_loopback: false,
+                                                ..Default::default()
+                                            },
+                                        )?;
                                         if !s.presented {
                                             return Err("qa_reopen_failed".into());
                                         }
                                         platform::wait_for_completion()?;
                                         "reopened_with_new_lease"
                                     }
+                                    7 => {
+                                        use crate::gpu_filter::{Filter,Intent,Source};
+                                        let s=platform::sync(&handle2,window.clone(),lease,2,Some(b),Filter{search:"no matching app".into(),hide_loopback:false,..Default::default()})?;
+                                        if !s.presented||s.routes!=0||s.matched!=0||s.total!=10001 {return Err("qa_empty_filter".into());}
+                                        platform::wait_for_completion()?;
+                                        let s=platform::sync(&handle2,window.clone(),lease,3,Some(b),Filter{hide_loopback:false,..Default::default()})?;
+                                        if s.routes!=10000||s.matched!=10001 {return Err("qa_filter_cache".into());}
+                                        {
+                                            let shared=handle2.state::<SharedState>();let mut session=shared.inner.lock().map_err(|_|"state_lock")?;
+                                            session.demo[0].destination="127.0.0.1".into();session.demo[1].destination="198.51.100.1".into();let row=session.demo[1].clone();
+                                            session.document.rules=vec![crate::model::Rule{id:"qa-rule".into(),app:row.app,app_key:row.app_key,destination:row.destination,port:row.port,direction:"both".into(),action:"block".into(),source:"demo".into(),updated_at:1,identity:None,system_exception:false,timeout_action:"allow".into()}];
+                                            session.revision+=1;
+                                        }
+                                        let s=platform::sync(&handle2,window.clone(),lease,4,Some(b),Filter::default())?;
+                                        if s.routes!=10000||s.matched!=10000||s.truncated {return Err("qa_loopback_filter".into());}
+                                        let s=platform::sync(&handle2,window.clone(),lease,5,Some(b),Filter{intent:Intent::Block,..Default::default()})?;
+                                        if s.routes!=1||s.matched!=1||s.total!=10001 {return Err("qa_intent_filter".into());}
+                                        let s=platform::sync(&handle2,window.clone(),lease,6,Some(b),Filter{intent:Intent::None,..Default::default()})?;
+                                        if s.matched!=9999 {return Err("qa_none_filter".into());}
+                                        if platform::sync(&handle2,window.clone(),lease,7,Some(b),Filter{source:Source::Live,..Default::default()}).is_ok(){return Err("qa_source_fence".into());}
+                                        let s=platform::sync(&handle2,window.clone(),lease,8,Some(b),Filter::default())?;
+                                        if s.matched!=10000 {return Err("qa_filter_recovery".into());}
+                                        if platform::sync(&handle2,window,lease,7,Some(b),Filter::default()).is_ok(){return Err("qa_old_filter_restored".into());}
+                                        platform::wait_for_completion()?;
+                                        "filters_search_loopback_intent_empty_cap_source_and_sequence"
+                                    }
                                     _ => {
                                         platform::destroy();
-                                        if platform::sync(&handle2, window, lease, 2, Some(b))
-                                            .is_ok()
+                                        if platform::sync(
+                                            &handle2,
+                                            window,
+                                            lease,
+                                            2,
+                                            Some(b),
+                                            crate::gpu_filter::Filter {
+                                                hide_loopback: false,
+                                                ..Default::default()
+                                            },
+                                        )
+                                        .is_ok()
                                         {
                                             return Err("qa_destroyed_restored".into());
                                         }
@@ -178,7 +271,11 @@ pub fn run() -> Result<(), String> {
         })
         .build(context)
         .map_err(|e| e.to_string())?;
-    let code = app.run_return(|_, _| {});
+    let code = app.run_return(|_, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            platform::destroy();
+        }
+    });
     let _ = std::fs::remove_dir_all(path);
     if code == 0 {
         Ok(())

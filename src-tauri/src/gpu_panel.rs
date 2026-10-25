@@ -52,6 +52,7 @@ pub struct Status {
     pub presented: bool,
     pub routes: usize,
     pub total: usize,
+    pub matched: usize,
     pub truncated: bool,
 }
 pub struct Lease {
@@ -112,9 +113,13 @@ pub async fn sync_gpu_panel(
     lease: u64,
     sequence: u64,
     bounds: Option<Bounds>,
+    filter: crate::gpu_filter::Filter,
 ) -> Result<Status, String> {
     if window.label() != "main" {
         return Err("main_window_required".into());
+    }
+    if !filter.valid() {
+        return Err("invalid_gpu_filter".into());
     }
     if bounds.is_some_and(|b| !b.valid()) {
         return Err("invalid_gpu_bounds".into());
@@ -124,14 +129,16 @@ pub async fn sync_gpu_panel(
         let (tx, rx) = tokio::sync::oneshot::channel();
         let handle = app.clone();
         app.run_on_main_thread(move || {
-            let _ = tx.send(platform::sync(&handle, window, lease, sequence, bounds));
+            let _ = tx.send(platform::sync(
+                &handle, window, lease, sequence, bounds, filter,
+            ));
         })
         .map_err(|_| "main_thread_unavailable")?;
         rx.await.map_err(|_| "main_thread_unavailable")?
     }
     #[cfg(not(all(feature = "gpu", target_os = "macos")))]
     {
-        let _ = (app, lease, sequence);
+        let _ = (app, lease, sequence, filter);
         Err("gpu_unavailable".into())
     }
 }

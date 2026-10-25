@@ -8,6 +8,7 @@ pub struct SharedState {
     _document_lock: fs::File,
 }
 pub struct Session {
+    destination_names: crate::destination_names::Machine,
     firewall_control: crate::firewall_control::Machine,
     syslog: crate::syslog::Machine,
     routers: crate::routers::Store,
@@ -32,6 +33,7 @@ pub struct Session {
     pub extension: Enforcement,
     pub document: Document,
     pub demo: Vec<Connection>,
+    demo_history: Vec<Connection>,
     pub connections: Vec<Connection>,
     pub history: Vec<Connection>,
     pub selected_id: Option<String>,
@@ -40,6 +42,107 @@ pub struct Session {
     pub revision: u64,
 }
 impl SharedState {
+    pub fn icon_subject(&self, subject: &str) -> Option<std::path::PathBuf> {
+        let s = self.inner.lock().ok()?;
+        if s.document.preferences.mode != "live" {
+            return None;
+        }
+        s.connections
+            .iter()
+            .chain(s.history.iter())
+            .find(|c| {
+                !c.app_key.is_empty()
+                    && (c.app_key == subject
+                        || c.identity
+                            .as_ref()
+                            .is_some_and(|id| id.valid() && id.key() == subject))
+            })
+            .map(|c| std::path::PathBuf::from(&c.app_key))
+    }
+
+    pub fn configure_destination_names(
+        &self,
+        enabled: bool,
+        expected: u64,
+        fresh: Option<crate::network::NetworkSnapshot>,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if enabled {
+            if s.updates.snapshot.stage == "installing"
+                || s.document.preferences.mode != "live"
+                || s.firewall.error.is_some()
+            {
+                return Err("name_lookup_unavailable".into());
+            }
+            if expected != s.destination_names.snapshot().operation {
+                return Err("name_lookup_stale".into());
+            }
+            if fresh
+                .as_ref()
+                .and_then(crate::destination_names::network_key)
+                != crate::destination_names::network_key(&s.network)
+            {
+                return Err("network_changed".into());
+            }
+        }
+        let network = s.network.clone();
+        s.destination_names.configure(enabled, &network)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn clear_destination_names(&self, expected: u64) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        s.destination_names.clear(expected)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn begin_destination_name(
+        &self,
+        id: &str,
+        expected: &str,
+        operation: u64,
+        fresh: &crate::network::NetworkSnapshot,
+    ) -> Result<(crate::destination_names::Ticket, Snapshot), String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.updates.snapshot.stage == "installing"
+            || s.document.preferences.mode != "live"
+            || s.firewall.error.is_some()
+        {
+            return Err("name_lookup_unavailable".into());
+        }
+        if operation != s.destination_names.snapshot().operation {
+            return Err("name_lookup_stale".into());
+        }
+        if crate::destination_names::network_key(fresh)
+            != crate::destination_names::network_key(&s.network)
+        {
+            return Err("network_changed".into());
+        }
+        if !s
+            .connections
+            .iter()
+            .any(|c| c.id == id && c.destination == expected)
+        {
+            return Err("connection_expired".into());
+        }
+        let network = s.network.clone();
+        let ticket = s.destination_names.begin(expected, &network)?;
+        s.revision += 1;
+        Ok((ticket, s.snapshot()))
+    }
+    pub fn finish_destination_name(
+        &self,
+        ticket: &crate::destination_names::Ticket,
+        value: Option<String>,
+        status: &str,
+        fresh: &crate::network::NetworkSnapshot,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        s.destination_names.finish(ticket, value, status, fresh)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+
     pub fn begin_firewall_control(
         &self,
         action: crate::firewall_control::Action,
@@ -221,6 +324,7 @@ impl SharedState {
             path,
             _document_lock: document_lock,
             inner: Mutex::new(Session {
+                destination_names: Default::default(),
                 firewall_control: Default::default(),
                 syslog: Default::default(),
                 routers: Default::default(),
@@ -245,6 +349,7 @@ impl SharedState {
                 extension: Enforcement::default(),
                 document,
                 demo: demo_connections(),
+                demo_history: demo_connections(),
                 connections: vec![],
                 history: vec![],
                 selected_id: None,
@@ -314,6 +419,12 @@ impl SharedState {
             return Err("update_installing".into());
         }
         match command {
+            Command::SetHistoryRetention { retention } => {
+                s.document.preferences.history_retention = retention
+            }
+            Command::AcknowledgeProtectionGuide => {
+                s.document.preferences.protection_guide_seen = true
+            }
             Command::SetUnknownNotifications { enabled } => {
                 s.document.preferences.unknown_notifications = enabled
             }
@@ -535,6 +646,13 @@ impl SharedState {
             s.document = previous;
             s.selected_id = previous_selected;
             return Err(e);
+        }
+        // Drop history only after the preference was saved successfully.
+        let retention = s.document.preferences.history_retention;
+        retention.prune(&mut s.history, now());
+        retention.prune(&mut s.demo_history, now());
+        if previous.preferences.mode != s.document.preferences.mode {
+            s.destination_names.invalidate();
         }
         let rules = s.document.rules.clone();
         s.extension.reconcile(&rules);
@@ -1054,7 +1172,14 @@ impl SharedState {
         } else {
             s.connections.clear();
         }
+        let retention = s.document.preferences.history_retention;
+        retention.prune(&mut s.history, now());
+        retention.prune(&mut s.demo_history, now());
         s.firewall = firewall;
+        s.destination_names.observe(&network);
+        if s.firewall.error.is_some() {
+            s.destination_names.invalidate();
+        }
         s.network = network;
         if s.services_plan
             .as_ref()
@@ -1128,6 +1253,7 @@ impl Session {
         let connections = self.visible();
         let layout = renderer::layout(&connections);
         Snapshot {
+            destination_names: self.destination_names.snapshot(),
             firewall_control: self.firewall_control.snapshot.clone(),
             syslog: self.syslog.snapshot.clone(),
             asks: self.asks.snapshot.clone(),
@@ -1145,9 +1271,15 @@ impl Session {
             applications: group_applications(&connections),
             connections,
             history: if self.document.preferences.mode == "demo" {
-                self.demo.clone()
+                self.document
+                    .preferences
+                    .history_retention
+                    .visible(&self.demo_history, now())
             } else {
-                self.history.clone()
+                self.document
+                    .preferences
+                    .history_retention
+                    .visible(&self.history, now())
             },
             selected_id: self.selected_id.clone(),
             firewall: self.firewall.clone(),
@@ -1169,6 +1301,437 @@ mod tests {
         ));
         let _ = fs::remove_file(&path);
         SharedState::load(path).unwrap()
+    }
+    #[test]
+    fn history_retention_migrates_persists_and_never_persists_rows() {
+        use crate::history::Retention;
+        let legacy: Preferences =
+            serde_json::from_str(r#"{"locale":"ja","view":"map","panel":"right","mode":"live"}"#)
+                .unwrap();
+        assert_eq!(legacy.history_retention, Retention::Session);
+        let state = state();
+        {
+            let mut s = state.inner.lock().unwrap();
+            s.history = s.demo.clone();
+        }
+        state
+            .dispatch(Command::SetHistoryRetention {
+                retention: Retention::Hour1,
+            })
+            .unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&state.path).unwrap()).unwrap();
+        assert_eq!(saved["preferences"]["historyRetention"], "1h");
+        assert!(saved.get("history").is_none());
+        let path = state.path.clone();
+        drop(state);
+        let restarted = SharedState::load(path).unwrap().snapshot().unwrap();
+        assert_eq!(
+            restarted.document.preferences.history_retention,
+            Retention::Hour1
+        );
+        assert!(restarted.history.is_empty());
+    }
+    #[test]
+    fn history_pruning_is_atomic_and_does_not_change_active_connections_or_policy() {
+        use crate::history::Retention;
+        let mut state = state();
+        {
+            let mut s = state.inner.lock().unwrap();
+            s.connections = s.demo.clone();
+            s.history = s.demo.clone();
+            s.history[0].observed_at = now() - 901;
+            s.selected_id = Some(s.connections[0].id.clone());
+        }
+        let before = state.snapshot().unwrap();
+        let next = state
+            .dispatch(Command::SetHistoryRetention {
+                retention: Retention::Minutes15,
+            })
+            .unwrap();
+        assert_eq!(next.history.len(), before.history.len() - 1);
+        assert_eq!(
+            serde_json::to_value(&next.connections).unwrap(),
+            serde_json::to_value(&before.connections).unwrap()
+        );
+        assert_eq!(next.selected_id, before.selected_id);
+        assert_eq!(
+            serde_json::to_value(&next.extension).unwrap(),
+            serde_json::to_value(&before.extension).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&next.document.rules).unwrap(),
+            serde_json::to_value(&before.document.rules).unwrap()
+        );
+        state
+            .dispatch(Command::SetHistoryRetention {
+                retention: Retention::Session,
+            })
+            .unwrap();
+        assert_eq!(state.snapshot().unwrap().history.len(), next.history.len());
+        state.path = PathBuf::from("/dev/null/document.json");
+        assert!(state
+            .dispatch(Command::SetHistoryRetention {
+                retention: Retention::Off
+            })
+            .is_err());
+        let failed = state.snapshot().unwrap();
+        assert_eq!(
+            failed.document.preferences.history_retention,
+            Retention::Session
+        );
+        assert_eq!(failed.history.len(), next.history.len());
+        state.inner.lock().unwrap().updates.snapshot.stage = "installing".into();
+        assert_eq!(
+            state
+                .dispatch(Command::SetHistoryRetention {
+                    retention: Retention::Off
+                })
+                .err()
+                .unwrap(),
+            "update_installing"
+        );
+        assert_eq!(state.snapshot().unwrap().history.len(), next.history.len());
+    }
+    #[test]
+    fn observer_expires_history_even_on_failure_and_keeps_first_observation_time() {
+        use crate::history::Retention;
+        let state = state();
+        let (mut current, mut firewall) = {
+            let mut s = state.inner.lock().unwrap();
+            s.document.preferences.history_retention = Retention::Minutes15;
+            let mut row = s.demo[0].clone();
+            row.observed_at = now() - 901;
+            s.history = vec![row.clone()];
+            s.connections = vec![row.clone()];
+            (vec![row], s.firewall.clone())
+        };
+        current[0].observed_at = now();
+        let next = state
+            .observed(current.clone(), firewall.clone(), Default::default())
+            .unwrap();
+        assert!(next.history.is_empty());
+        assert!(next.connections[0].observed_at < now() - 900);
+        {
+            let mut s = state.inner.lock().unwrap();
+            s.history = vec![s.connections[0].clone()];
+        }
+        firewall.error = Some("observer_failed".into());
+        assert!(state
+            .observed(vec![], firewall, Default::default())
+            .unwrap()
+            .history
+            .is_empty());
+        assert!(state.inner.lock().unwrap().history.is_empty());
+    }
+    #[test]
+    fn disabled_history_continues_observation_and_reenabling_records_only_new_connections() {
+        use crate::history::Retention;
+        let state = state();
+        let base = state.snapshot().unwrap();
+        let current = state.inner.lock().unwrap().demo.clone();
+        state
+            .dispatch(Command::SetHistoryRetention {
+                retention: Retention::Off,
+            })
+            .unwrap();
+        let off = state
+            .observed(current.clone(), base.firewall.clone(), Default::default())
+            .unwrap();
+        assert_eq!(off.connections.len(), 4);
+        assert!(off.history.is_empty());
+        state
+            .dispatch(Command::SetHistoryRetention {
+                retention: Retention::Session,
+            })
+            .unwrap();
+        assert!(state
+            .observed(current.clone(), base.firewall.clone(), Default::default())
+            .unwrap()
+            .history
+            .is_empty());
+        let mut updated = current;
+        updated[0].id = "new-connection".into();
+        updated[0].observed_at = now();
+        let next = state
+            .observed(updated, base.firewall, Default::default())
+            .unwrap();
+        assert_eq!(next.history.len(), 1);
+        assert_eq!(next.history[0].id, "new-connection");
+        state
+            .dispatch(Command::SetMode {
+                mode: "demo".into(),
+            })
+            .unwrap();
+        assert!(state.snapshot().unwrap().history.is_empty()); // sample history also stays cleared
+        assert_eq!(state.snapshot().unwrap().connections.len(), 4);
+        state
+            .dispatch(Command::SetMode {
+                mode: "live".into(),
+            })
+            .unwrap();
+        assert_eq!(state.snapshot().unwrap().history.len(), 1);
+    }
+    #[test]
+    fn app_icons_accept_only_observed_paths_or_verified_subject_keys() {
+        let state = state();
+        let key = crate::identity::SigningIdentity {
+            authority: "developer".into(),
+            team_id: "TESTTEAM01".into(),
+            identifier: "com.example.icons".into(),
+        };
+        {
+            let mut s = state.inner.lock().unwrap();
+            let mut c = s.demo[0].clone();
+            c.app = "Misleading Safari Name".into();
+            c.app_key = "/Applications/Actual.app/Contents/MacOS/Actual".into();
+            c.identity = Some(key.clone());
+            s.connections = vec![c];
+            s.document.preferences.mode = "live".into();
+        }
+        let path = std::path::PathBuf::from("/Applications/Actual.app/Contents/MacOS/Actual");
+        assert_eq!(state.icon_subject(&key.key()), Some(path.clone()));
+        assert_eq!(
+            state.icon_subject(path.to_str().unwrap()),
+            Some(path.clone())
+        );
+        assert!(state.icon_subject("Misleading Safari Name").is_none());
+        assert!(state.icon_subject("/etc/passwd").is_none());
+        {
+            let mut s = state.inner.lock().unwrap();
+            s.history = s.connections.clone();
+            s.connections.clear();
+        }
+        assert_eq!(state.icon_subject(&key.key()), Some(path));
+        state.inner.lock().unwrap().document.preferences.mode = "demo".into();
+        assert!(state.icon_subject(&key.key()).is_none());
+    }
+    #[test]
+    fn icon_queries_do_not_mutate_documents_rules_or_protection() {
+        let state = state();
+        let before = state.snapshot().unwrap();
+        assert!(state
+            .icon_subject("/Applications/Unobserved.app/Contents/MacOS/test")
+            .is_none());
+        let after = state.snapshot().unwrap();
+        assert_eq!(before.revision, after.revision);
+        assert_eq!(
+            serde_json::to_value(before.document).unwrap(),
+            serde_json::to_value(after.document).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(before.extension).unwrap(),
+            serde_json::to_value(after.extension).unwrap()
+        );
+        assert!(!state.path.exists());
+    }
+    #[test]
+    fn destination_lookup_requires_current_live_connection_and_session_consent() {
+        let state = state();
+        let network = crate::destination_names::tests::network();
+        {
+            let mut s = state.inner.lock().unwrap();
+            s.document.preferences.mode = "live".into();
+            let mut c = s.demo[0].clone();
+            c.destination = "192.0.2.1".into();
+            s.connections = vec![c];
+            s.network = network.clone();
+            s.firewall.error = None;
+            s.updates.snapshot.stage = "ready".into();
+            s.updates.snapshot.development = false;
+        }
+        let before = state.snapshot().unwrap();
+        let id = before.connections[0].id.clone();
+        assert!(crate::updates::can_install(&before));
+        assert!(state
+            .begin_destination_name(&id, "192.0.2.1", 0, &network)
+            .is_err());
+        let configured = state
+            .configure_destination_names(true, 0, Some(network.clone()))
+            .unwrap();
+        assert!(!configured.destination_names.busy);
+        assert!(configured.destination_names.rows.is_empty());
+        let op = configured.destination_names.operation;
+        assert!(state
+            .begin_destination_name(&id, "192.0.2.2", op, &network)
+            .is_err());
+        let (ticket, started) = state
+            .begin_destination_name(&id, "192.0.2.1", op, &network)
+            .unwrap();
+        assert!(!crate::updates::can_install(&started));
+        let revoked = state.configure_destination_names(false, 0, None).unwrap();
+        assert!(!revoked.destination_names.enabled);
+        assert!(revoked.destination_names.cancelling);
+        assert!(ticket.cancel.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(state
+            .configure_destination_names(true, op, Some(network.clone()))
+            .is_err());
+        state
+            .configure_destination_names(
+                true,
+                revoked.destination_names.operation,
+                Some(network.clone()),
+            )
+            .unwrap();
+        let finished = state
+            .finish_destination_name(&ticket, Some("late.example".into()), "resolved", &network)
+            .unwrap();
+        assert!(finished.destination_names.rows.is_empty());
+        assert!(!finished.destination_names.busy);
+        assert_eq!(finished.document.rules, before.document.rules);
+        assert!(!state.path.exists());
+        let old = finished.destination_names.operation;
+        state.inner.lock().unwrap().updates.snapshot.stage = "installing".into();
+        assert!(state
+            .configure_destination_names(true, old, Some(network))
+            .is_err());
+        assert!(state.configure_destination_names(false, old, None).is_ok());
+    }
+    #[test]
+    fn destination_lookup_results_are_cleared_by_mode_changes_and_observer_failure() {
+        let state = state();
+        let network = crate::destination_names::tests::network();
+        {
+            let mut s = state.inner.lock().unwrap();
+            s.document.preferences.mode = "live".into();
+            let mut c = s.demo[0].clone();
+            c.destination = "192.0.2.1".into();
+            s.connections = vec![c];
+            s.network = network.clone();
+            s.firewall.error = None;
+        }
+        let configured = state
+            .configure_destination_names(true, 0, Some(network.clone()))
+            .unwrap();
+        let id = configured.connections[0].id.clone();
+        let (ticket, _) = state
+            .begin_destination_name(
+                &id,
+                "192.0.2.1",
+                configured.destination_names.operation,
+                &network,
+            )
+            .unwrap();
+        let named = state
+            .finish_destination_name(&ticket, Some("host.example".into()), "resolved", &network)
+            .unwrap();
+        assert_eq!(named.destination_names.rows.len(), 1);
+        let demo = state
+            .dispatch(Command::SetMode {
+                mode: "demo".into(),
+            })
+            .unwrap();
+        assert!(!demo.destination_names.enabled);
+        assert!(demo.destination_names.rows.is_empty());
+        state
+            .dispatch(Command::SetMode {
+                mode: "live".into(),
+            })
+            .unwrap();
+        let op = state.snapshot().unwrap().destination_names.operation;
+        state
+            .configure_destination_names(true, op, Some(network.clone()))
+            .unwrap();
+        let mut firewall = state.snapshot().unwrap().firewall;
+        firewall.error = Some("controlled observer failure".into());
+        let failed = state.observed(vec![], firewall, network).unwrap();
+        assert!(!failed.destination_names.enabled);
+    }
+    #[test]
+    fn protection_guide_acknowledgement_persists_without_changing_protection() {
+        let state = state();
+        let path = state.path.clone();
+        {
+            let mut session = state.inner.lock().unwrap();
+            let identity = crate::identity::SigningIdentity {
+                authority: "developer".into(),
+                team_id: "TESTTEAM01".into(),
+                identifier: "com.example.guide".into(),
+            };
+            session.document.rules.push(Rule {
+                system_exception: false,
+                timeout_action: "allow".into(),
+                app_key: identity.key(),
+                identity: Some(identity),
+                id: "guide-kept-rule".into(),
+                app: "Guide test".into(),
+                destination: "192.0.2.1".into(),
+                port: 443,
+                direction: "outbound".into(),
+                action: "block".into(),
+                updated_at: 1,
+                source: "live".into(),
+            });
+            let rules = session.document.rules.clone();
+            session.extension.configure(true, true, true);
+            let op = session.extension.begin("syncing").unwrap();
+            session
+                .extension
+                .accepted(op, "guide-test-provider".into(), 1, rules.clone(), &rules);
+        }
+        let before = state.snapshot().unwrap();
+        assert_eq!(before.extension.stage, "applied");
+        assert!(!before.document.preferences.protection_guide_seen);
+        let after = state.dispatch(Command::AcknowledgeProtectionGuide).unwrap();
+        assert!(after.document.preferences.protection_guide_seen);
+        assert_eq!(before.document.rules, after.document.rules);
+        assert_eq!(
+            serde_json::to_value(before.extension).unwrap(),
+            serde_json::to_value(after.extension).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(before.firewall).unwrap(),
+            serde_json::to_value(after.firewall).unwrap()
+        );
+        drop(state);
+        let reopened = SharedState::load(path).unwrap();
+        assert!(
+            reopened
+                .snapshot()
+                .unwrap()
+                .document
+                .preferences
+                .protection_guide_seen
+        );
+    }
+    #[test]
+    fn protection_guide_legacy_preference_is_unseen_and_type_checked() {
+        let mut document = serde_json::to_value(Document::default()).unwrap();
+        document["preferences"]
+            .as_object_mut()
+            .unwrap()
+            .remove("protectionGuideSeen");
+        let legacy: Document = serde_json::from_value(document.clone()).unwrap();
+        assert!(!legacy.preferences.protection_guide_seen);
+        document["preferences"]["protectionGuideSeen"] = serde_json::json!("true");
+        assert!(serde_json::from_value::<Document>(document).is_err());
+    }
+    #[test]
+    fn protection_guide_failed_save_and_installation_do_not_acknowledge() {
+        let state = state();
+        let before = state.snapshot().unwrap().revision;
+        fs::create_dir(&state.path).unwrap();
+        assert!(state.dispatch(Command::AcknowledgeProtectionGuide).is_err());
+        assert!(
+            !state
+                .snapshot()
+                .unwrap()
+                .document
+                .preferences
+                .protection_guide_seen
+        );
+        assert_eq!(state.snapshot().unwrap().revision, before);
+        fs::remove_dir(&state.path).unwrap();
+        state.inner.lock().unwrap().updates.snapshot.stage = "installing".into();
+        assert!(state.dispatch(Command::AcknowledgeProtectionGuide).is_err());
+        assert!(
+            !state
+                .snapshot()
+                .unwrap()
+                .document
+                .preferences
+                .protection_guide_seen
+        );
     }
     #[test]
     fn firewall_control_is_shared_ephemeral_and_excludes_installation() {

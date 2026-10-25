@@ -399,3 +399,48 @@ Rust tests cover startup baseline, two distinct samples, repeated snapshot, erro
 - Browser plugin not availableのためbundled Playwright＋Chrome。localhost:1421でJA／EN／简体中文の動的0.1.1版表示、375pxで横はみ出し／Vite overlay／runtime errorなし。`/tmp/flowguard-011-version-375.png`を視認。
 - `cargo fmt --check`、`git diff --check`、Python構文検証が成功。Apple公証ZIPは7,584,489 bytes、SHA-256 `f91dc8dd53380c1132bbdf8a97e9198132dcd8bb4bcad53ed6f0bcc6c2d8fdc2`。
 - ⭕️ [Pending] 自動承認レビューがアプリZIPのApple送信への明示承認不足で公証を拒否。ZIPとハッシュを準備して承認待ち。公証後の正常適用・再起動／実文書保持・公開HTTPSフィードと稼働中拡張機能の継続確認は未完了。詳細は`releases/0.1.1-validation.md`。ローカル検証専用非公証成果物を公開用と混同しない。
+
+## 2026-10-25 初回の保護状態ガイド
+
+- `CARGO_TARGET_DIR=/private/tmp/flowguard-guide-target CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib --offline`: 111 passed／21 ignored。追加3件で旧設定の未確認既定・型検証、確認保存／再ロード・既存ルールと合成の適用受領状態の維持、保存失敗の巻き戻しと更新適用中の拒否を確認。GPUは未変更で、今回はGPUなし構成を検証。
+- `npm test`: 97 passed／20 files。`npm run build`と`cargo fmt --check`、`git diff --check`が成功。
+- Browser plugin not availableのためbundled Playwright＋Chromeを使用。localhost:1421、JA／EN／简体中文、1550／1200／375pxの9組で4段階・文の区切り・横はみ出しを確認。通常画面を塞ぐダイアログを作らず、フローティング詳細を除外。保存失敗で案内が残ること、再試行・別タブ同期・再読み込み後の保持・設定からの再表示／閉じる・旧設定の初期表示を確認。更新適用中はテスト用Snapshotで保存不可と読み取り専用の再表示を検証した。案内を確認してもルール・他の設定を変更しないことをブラウザでも比較。
+- `/tmp/flowguard-guide-qa.cjs`、スクリーンショット`/tmp/flowguard-guide-{ja,en,zh-CN}-{1550,1200,375}.png`。日本語375pxを視認し、意味の途中での改行を減らすため、文単位の表示と列数を調整して再検証。page title／runtime error／console／Vite overlay／横はみ出しに問題なし。
+- 検証のためだけに作成した一時Rustビルド領域を削除。既存の署名鍵、0.1.0／0.1.1成果物、従来のアプリバンドルを保持し、公証待ちZIPのSHA-256を再照合した。案内追加を含む署名済み配布物の再生成・Apple送信・GitHub公開は行っていない。
+- ⭕️ [Pending] 署名済みTauri画面での初回・旧文書・保存エラー・複数ウインドウ・更新中の通し確認。今回の合成Provider状態の保持テストは、実Providerの適用や遮断を証明しない。
+
+## 2026-10-25 接続先名の明示取得
+
+- 一時領域で`CARGO_TARGET_DIR=/private/tmp/flowguard-destination-target CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib --offline`: 121 passed／21 ignored。追加10件はIP／ASCII名／正確な応答IP照合、同意・取消／再許可・遅延／消去、10秒間隔・64件・5分経過、ネットワーク変更、実測接続照合・デモ／観測失敗・更新排他・文書非変更を検証。固定ローカルprintfで出力上限、sleepで子プロセス取消と回収、取消済み照会のリゾルバー起動前拒否も確認。実DNSは呼び出さない。
+- `npm test`: 101 passed／21 files。取得済み情報を正確なIP・実測・同意のある時だけ表示すること、対象外IP、3言語キー、取消済みワーカー完了までの更新インストール拒否を検証。`npm run build`成功。GPU／Swiftのコードとブリッジ契約は変更していない。
+- Browser plugin not availableのためbundled Playwright＋Chromeを使用。localhost:1421、JA／EN／简体中文・1500／1200／375px。native IPCとDNSはテスト専用モック。オプトインだけでは照会なし、明示ボタンで一度、処理中の二重受付防止、元IPの維持、未検証・取得元・時刻・古さ、取得不能／不正名／失敗／時間切れ、HTMLを文字列として表示、取消・消去後の非表示を確認。初期プレビューでは取得不可。page title、runtime/console、Vite overlay、root overflowに問題なし。
+- `/tmp/flowguard-destination-qa.cjs`、`/tmp/flowguard-destination-{ja,en,zh-CN}-{1500,1200,375}.png`。日本語375pxで実画像を確認。最終QAではViteのHMRクエリ付きURLにもモックを適用し、表示を再確認した。これはテスト配線の修正で、製品の通信方針を変更していない。
+- `cargo fmt --check`、`git diff --check`成功。SSD使用量を抑えるため一時Rustビルド領域を削除し、既存0.1.1公証待ちZIPのSHA-256を再照合。署名候補を再生成／送信していない。
+- ⭕️ [Pending] 実dscacheutil／OS設定のリゾルバーとDNS等への通信、実IPv4／IPv6・VPN・権限・スリープ・同じIPを保つ経路変更、実Tauri画面での操作と複数ウインドウ。NEFilterSocketFlow.remoteHostnameはAppleの名前指定API由来に限定される仕様を確認したが、Providerの観測実装と実フロー相関は後続。未検証名を実ホストや安全性の証明として扱わない。
+
+## 2026-10-25 実アプリアイコン
+
+- GPUなしRustライブラリテスト126 passed／22 ignored、TypeScript106 passed／22 files、npm run buildが成功。実測対象・署名キー／パス・デモ拒否・文書非変更、PNGサイズ／形式、キャッシュ上限／期限／fingerprint変化、UI同時上限／重複排除・失敗・3言語を検証。GPU有効のcargo check --offlineも成功（既存の未使用routerメソッド・blockの将来互換性警告あり）。cargo fmt --checkとgit diff --checkを実施。
+- 明示的なignoredテストactual_workspace_icon_is_a_bounded_pngをこのMacで実行し、1 passed。実TextEdit.appからNSWorkspaceで取得し、/tmp/flowguard-native-app-icon.png（96px）を目視確認。
+- Browser plugin not availableのためbundled Playwright＋Chromeを使用。/tmp/flowguard-icons-qa.cjs、localhost:1421、JA／EN／简体中文・1500／375px。実取得PNGをテスト専用IPCに注入し、実画像のnaturalWidth/Height=96、既存枠26〜48px、汎用代替、subject単位の重複排除、表示範囲に近づくまで取得しないこと、デモの画像なし、pageerror／Vite overlay／root overflowなしを確認。/tmp/flowguard-icons-{1500,375}.pngの375pxを視認。実Tauri IPC・実接続ではない。
+- ⭕️ [Pending] 署名済み実Tauriでの全表示箇所・実観測／IPC・フローティング、Retina・複数ディスプレイ・別OS・権限・実アプリ変更とOS API遅延。詳細は[app-icons.md](app-icons.md)。既存の署名候補は再生成／送信しない。
+- 検証専用Rustビルド領域約1.3GBを削除し、タスク用Viteを停止。署名鍵・既存target・配布物を保持し、公証待ち0.1.1 ZIPのSHA-256が`f91dc8dd53380c1132bbdf8a97e9198132dcd8bb4bcad53ed6f0bcc6c2d8fdc2`のまま一致することを確認。
+
+## 2026-10-25 通信履歴の保持期間
+
+- 一時Rust領域・debug情報なし・incrementalなしでcargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib --offline: 132 passed／22 ignored。追加6件は設定の閉じた値と旧文書移行、500件・時刻境界・未来時刻、設定保存／再起動・履歴非永続化、保存失敗／更新排他、初回時刻維持・off／再有効化・継続接続と新規接続、観測失敗時の消去、実測／デモ分離と削除後非復活、現在接続／選択／ルール／適用確認の維持を確認。
+- npm test: 111 passed／23 files。npm run build成功。GPU有効cargo check --offline成功（既存のrouter未使用・block将来互換性警告）。cargo fmt --checkとgit diff --checkを実施。
+- Browser plugin not availableのためbundled Playwright＋Chromeでlocalhost:1421を確認。3言語・1500／375px、履歴→15分→session→off→1h→設定24h→履歴、保存エラーを操作。合成デモ履歴4→2→0件・現在通信4件維持、延長しても復活なし、保存エラーで選択値を巻き戻し。2タブ間の設定と削除の同期・非復活も成功。page title／URL／h1、Vite overlay、pageerror／console、root overflowのチェックが成功。
+- /tmp/flowguard-history-qa.cjs、/tmp/flowguard-history-populated-{ja,en,zh-CN}-{1500,375}.pngと保存エラー状態の/tmp/flowguard-history-{ja,en,zh-CN}-{1500,375}.png。日本語375pxを視認。これは合成デモ／ブラウザー検証であり実Tauri IPCではない。
+- ⭕️ [Pending] 署名済みTauriでの実観測・複数ウインドウ・トレイ常駐／明示終了、実スリープ／時刻変更を跨ぐ期限処理と長時間運用。詳細は[history-retention.md](history-retention.md)。今回の追加は公証待ち0.1.1 ZIPに含めていない。
+- タスク用Viteを停止し、一時Rust領域約1.3GBを削除。既存target・署名鍵・0.1.0／0.1.1配布物を保持し、0.1.1公証待ちZIPのSHA-256が前回と一致することを確認。再署名／Apple送信／公開は行っていない。
+
+## 2026-10-25 GPU概要の表示条件追従
+
+- Rust（GPUなし）137 passed／22 ignored、GPU＋gpu-qa有効140 passed／22 ignored。新しい純粋テスト5件と既存テストを実施。閉じたFilter／UTF-16上限／NUL、IPループバック表記、条件の交差、方向・更新時刻・同率の優先、UDP／旧パスルール除外、Rust／TypeScript共有fixture14ケースを確認。UI112 passed／23 files、npm run build成功。cargo fmt --check・git diff --checkを実施。
+- 明示的な`cargo run --manifest-path src-tauri/Cargo.toml --example native_panel_check --features gpu-qa --offline`で、一時文書と専用Tauri WebViewの実Metal Surfaceを検証。backing_scale=1。9段階が成功し、10,001件のうち10,000件、クリップ／リサイズ／非表示／終了／再作成に加え、同じrevisionでの検索変更・0件→復帰、条件一致件数への上限、ループバック非表示、意図1件／ルールなし9,999件、source不一致と逆順sequence拒否、GPU完了待ちを確認。実観測・ネットワーク送信・OS設定変更は行わない。
+- 初回の追加ハーネスでは合成データの同じアプリ／接続先が周期的に重複し、意図1件の想定と一致せず失敗。検証対象を一意な接続先に修正して再実行し、全段階成功。失敗終了時に残ったGPU資源がTLS終了時にpanicする検証ハーネスの経路も、RunEvent::Exitで明示解放するよう修正した。最終ログは/tmp/flowguard-gpu-filter-metal-final.log。
+- Browser plugin not availableのためbundled Playwright＋Chromeでlocalhost:1421を検証。JA／EN／简体中文・1500／375px。通常マップと同じ合成fixtureで検索・all／allow／block／ask／none・Mac内非表示を操作し、件数・0件を照合。IPCには条件と矩形／lease／sequenceだけがあり、ID一覧・ルール・描画データを送らない。遅延成功を999件に改変しても採用せず、遅延失敗で新しいパネルを閉じず、閉じた後の応答でも再表示しない。source不一致時は件数を保留して再同期する。通常ブラウザーはGPU非対応で通常一覧を維持。ページ名／h1／URL、runtime／console、Vite overlay、root overflowに問題なし。
+- /tmp/flowguard-gpu-filter-qa.cjs、/tmp/flowguard-gpu-filter-{ja,en,zh-CN}-{1500,375}.png。日本語375pxを視認。ブラウザーはテスト専用IPCであり、白い描画枠のスクリーンショットをMetalの実ピクセルの証拠としない。実Surfaceの確認は上記の独立ハーネスで行う。
+- ⭕️ [Pending] 署名済み実アプリの通常UIから実観測を絞り込んだ際の描画と入力、WebViewとMetalの重なり、Retina／複数ディスプレイ・スリープ・長時間負荷・別OS／Intel。今回の変更を公証待ち0.1.1 ZIPへ同梱していない。詳細は[native-gpu-panel.md](native-gpu-panel.md)。
+- タスク用Viteを停止し、検証用Rustビルド領域約1.8GBを削除。既存target・署名鍵・配布物は保持し、公証待ち0.1.1 ZIPのSHA-256が前回と一致することを確認。再署名／Apple送信／公開は行っていない。

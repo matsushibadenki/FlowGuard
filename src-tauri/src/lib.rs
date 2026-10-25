@@ -1,13 +1,17 @@
+mod app_icons;
 mod asks;
+mod destination_names;
 mod discovery;
 mod enforcement;
 mod extension;
 mod firewall_control;
 #[cfg(feature = "gpu")]
 pub mod gpu;
+mod gpu_filter;
 mod gpu_panel;
 #[cfg(feature = "gpu")]
 mod gpu_scene;
+mod history;
 mod identity;
 #[cfg(target_os = "macos")]
 mod instance;
@@ -34,6 +38,72 @@ use model::{Command, Rule, Snapshot};
 use state::SharedState;
 use tauri::{Emitter, Manager};
 
+#[tauri::command]
+async fn set_destination_names(
+    app: tauri::AppHandle,
+    enabled: bool,
+    operation: u64,
+) -> Result<Snapshot, String> {
+    let fresh = if enabled {
+        Some(
+            tauri::async_runtime::spawn_blocking(network::observe)
+                .await
+                .map_err(|_| "network_unavailable")?,
+        )
+    } else {
+        None
+    };
+    let snapshot = app
+        .state::<SharedState>()
+        .configure_destination_names(enabled, operation, fresh)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
+#[tauri::command]
+fn clear_destination_names(app: tauri::AppHandle, operation: u64) -> Result<Snapshot, String> {
+    let snapshot = app
+        .state::<SharedState>()
+        .clear_destination_names(operation)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
+#[tauri::command]
+async fn lookup_destination_name(
+    app: tauri::AppHandle,
+    connection_id: String,
+    address: String,
+    operation: u64,
+) -> Result<Snapshot, String> {
+    let fresh = tauri::async_runtime::spawn_blocking(network::observe)
+        .await
+        .map_err(|_| "network_unavailable")?;
+    let (ticket, snapshot) = app.state::<SharedState>().begin_destination_name(
+        &connection_id,
+        &address,
+        operation,
+        &fresh,
+    )?;
+    let _ = app.emit("state-changed", &snapshot);
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = std::panic::catch_unwind(|| {
+            if ticket.matches_network(&network::observe()) {
+                destination_names::resolve(&ticket)
+            } else {
+                (None, "failed".into())
+            }
+        })
+        .unwrap_or((None, "failed".into()));
+        let fresh = network::observe();
+        if let Ok(snapshot) = handle
+            .state::<SharedState>()
+            .finish_destination_name(&ticket, result.0, &result.1, &fresh)
+        {
+            let _ = handle.emit("state-changed", snapshot);
+        }
+    });
+    Ok(snapshot)
+}
 #[tauri::command]
 async fn answer_ask(
     app: tauri::AppHandle,
@@ -976,6 +1046,10 @@ pub fn run() {
             open_lan_ports,
             lan_ports_csv,
             stop_lan_ports,
+            set_destination_names,
+            clear_destination_names,
+            lookup_destination_name,
+            app_icons::application_icon,
             get_snapshot,
             select_lan_device,
             lan_csv,

@@ -158,6 +158,7 @@ pub fn can_install(s: &crate::model::Snapshot) -> bool {
             .iter()
             .any(|source| source.stage == "collecting")
         && !["starting", "listening", "stopping"].contains(&s.syslog.stage.as_str())
+        && !s.destination_names.busy
         && !s.firewall_control.busy
         && !s.extension.busy
         && ![

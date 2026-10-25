@@ -14,7 +14,7 @@ tauri-build = { version = "2", features = [] }
 
 [features]
 default = ["gpu"]
-gpu = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:objc2-quartz-core"]
+gpu = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:objc2-quartz-core"]
 
 gpu-qa = ["gpu"]
 
@@ -47,7 +47,7 @@ tempfile = "3"
 tauri = { version = "2", features = ["test"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = { version = "0.6.5", optional = true }
-objc2-app-kit = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSView", "NSWindow", "objc2-quartz-core"] }
-objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSGeometry"] }
+objc2 = { version = "0.6.5" }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSView", "NSWindow", "NSWorkspace", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphicsContext", "NSGraphics", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSGeometry", "NSString", "NSData", "NSDictionary"] }
 objc2-quartz-core = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CALayer", "CAMetalLayer"] }

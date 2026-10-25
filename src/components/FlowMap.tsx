@@ -1,4 +1,5 @@
 // パス: src/components/FlowMap.tsx
+import type {GpuFilter} from '../core/gpu-panel';
 import {GpuMap} from './GpuMap';
 import {useMemo, useState} from 'react';
 import type {Connection, Snapshot} from '../core/types';
@@ -7,8 +8,8 @@ import {classifyAddress} from '../core/destinations';
 import {AppList} from './AppList';
 import {DestinationPane} from './DestinationPane';
 import {Empty, type T} from './ui';
-export function FlowMap({snapshot, connections, t, select, clearFilters, hideLoopback, setHideLoopback, sort}: {
-  snapshot: Snapshot; connections: Connection[]; t: T; select: (c: Connection) => void; clearFilters?: () => void; hideLoopback: boolean; setHideLoopback: (value: boolean) => void; sort: SortKey;
+export function FlowMap({snapshot, connections, t, select, clearFilters, hideLoopback, setHideLoopback, sort, gpuFilter}: {
+  gpuFilter:GpuFilter; snapshot: Snapshot; connections: Connection[]; t: T; select: (c: Connection) => void; clearFilters?: () => void; hideLoopback: boolean; setHideLoopback: (value: boolean) => void; sort: SortKey;
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [limits, setLimits] = useState<Record<string, number>>({});
@@ -30,13 +31,13 @@ export function FlowMap({snapshot, connections, t, select, clearFilters, hideLoo
     if (c) select(c);
   }
   return <section className="flowmap-redesign" aria-label={t('map')}>
-    <GpuMap snapshot={snapshot}/>
+    <GpuMap snapshot={snapshot} filter={gpuFilter}/>
     {snapshot.connections.length === 0 ? <div className="surface"><Empty t={t}/></div> : <>
       {model.rows.length === 0 && <div className="map-no-matches surface"><p>{t('noMatches')}</p>
         {clearFilters && <button className="secondary-button" onClick={clearFilters}>{t('clearFilters')}</button>}</div>}
       <div className="map-panes"><AppList rows={model.rows} activeId={active?.id} select={selectApp} t={t}
         hiddenApps={model.hiddenLoopbackOnlyApps} showHidden={() => setHideLoopback(false)}/>
-        <DestinationPane row={active} selectedId={snapshot.selectedId} t={t} expanded={expanded} limits={limits}
+        <DestinationPane snapshot={snapshot} row={active} selectedId={snapshot.selectedId} t={t} expanded={expanded} limits={limits}
           select={row => {const c = byId.get(row.representativeId); if (c) select(c);}}
           toggle={(key, current) => setExpanded(value => ({...value, [key]: !current}))}
           showMore={(key, current) => setLimits(value => ({...value, [key]: current + 50}))}

@@ -41,6 +41,7 @@ struct Panel {
     container: Retained<NSView>,
     size: (u32, u32),
     revision: Option<u64>,
+    filter: Option<crate::gpu_filter::Filter>,
     status: Status,
 }
 impl Drop for Panel {
@@ -124,6 +125,7 @@ impl Panel {
             container,
             size: (1, 1),
             revision: None,
+            filter: None,
             status: Status::default(),
         })
     }
@@ -177,6 +179,7 @@ pub fn sync(
     id: u64,
     sequence: u64,
     bounds: Option<Bounds>,
+    filter: crate::gpu_filter::Filter,
 ) -> Result<Status, String> {
     let mtm = MainThreadMarker::new().ok_or("main_thread_required")?;
     CONTROLLER.with_borrow_mut(|c| {
@@ -211,21 +214,30 @@ pub fn sync(
                 bounds.unwrap(),
                 window.scale_factor().map_err(|_| "scale_unavailable")?,
             )?;
-            let (revision, connections, selected) = {
+            let (revision, connections, selected, total) = {
                 let shared = app.state::<SharedState>();
                 let session = shared.inner.lock().map_err(|_| "state_lock")?;
                 if session.document.preferences.view != "map" {
                     return Err("map_view_required".into());
                 }
-                if p.revision == Some(session.revision) && p.status.presented {
+                if !filter.matches_source(&session.document.preferences.mode) {
+                    return Err("stale_gpu_source".into());
+                }
+                if p.revision == Some(session.revision)
+                    && p.filter.as_ref() == Some(&filter)
+                    && p.status.presented
+                {
                     p.container.setHidden(false);
                     return Ok(p.status.clone());
                 }
                 // Copy only the renderer's inputs, never history, diagnostics or log bodies.
+                let visible = session.visible();
+                let total = visible.len();
                 (
                     session.revision,
-                    session.visible(),
+                    filter.project(visible, &session.document.rules),
                     session.selected_id.clone(),
+                    total,
                 )
             };
             let scene = gpu_scene::build(&connections, selected.as_deref());
@@ -235,10 +247,12 @@ pub fn sync(
                 lease: id,
                 presented,
                 routes: scene.routes.len(),
-                total: scene.total,
+                total,
+                matched: scene.total,
                 truncated: scene.total > scene.routes.len(),
             };
             p.revision = presented.then_some(revision);
+            p.filter = Some(filter);
             p.status = status.clone();
             Ok(status)
         })();

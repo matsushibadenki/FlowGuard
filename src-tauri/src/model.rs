@@ -46,6 +46,10 @@ pub struct Rule {
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
     #[serde(default)]
+    pub history_retention: crate::history::Retention,
+    #[serde(default)]
+    pub protection_guide_seen: bool,
+    #[serde(default)]
     pub unknown_notifications: bool,
     #[serde(default)]
     pub ask_notifications: bool,
@@ -67,6 +71,8 @@ fn default_auto_updates() -> bool {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            history_retention: Default::default(),
+            protection_guide_seen: false,
             ask_timeout_action: default_ask_action(),
             ask_notifications: false,
             unknown_notifications: false,
@@ -147,6 +153,7 @@ pub fn group_applications(connections: &[Connection]) -> Vec<ApplicationGroup> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub destination_names: crate::destination_names::Snapshot,
     pub firewall_control: crate::firewall_control::Snapshot,
     pub syslog: crate::syslog::Snapshot,
     pub asks: crate::asks::Snapshot,
@@ -172,6 +179,10 @@ pub struct Snapshot {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Command {
+    SetHistoryRetention {
+        retention: crate::history::Retention,
+    },
+    AcknowledgeProtectionGuide,
     SetUnknownNotifications {
         enabled: bool,
     },

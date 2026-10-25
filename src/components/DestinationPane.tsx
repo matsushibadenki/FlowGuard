@@ -1,19 +1,22 @@
 // パス: src/components/DestinationPane.tsx
+import {DestinationNameEvidence} from './DestinationNames';
+import {destinationName} from '../core/destination-names';
+import type {Snapshot} from '../core/types';
 import {Check, ChevronDown, ChevronRight, Info} from 'lucide-react';
 import type {AppRow, DestinationRow} from '../core/mapModel';
 import type {DestinationClass} from '../core/destinations';
 import {ActionIcon, AppIcon, DirectionIcon, type T} from './ui';
 const classes: DestinationClass[] = ['public', 'local', 'other', 'loopback'];
 const labels = {public: 'classPublic', local: 'classLocal', other: 'classOther', loopback: 'classLoopback'} as const;
-export function DestinationPane({row, selectedId, select, t, expanded, limits, toggle, showMore, hiddenConnections, showHidden}: {
-  row: AppRow | undefined; selectedId: string | null; select: (row: DestinationRow) => void; t: T;
+export function DestinationPane({snapshot,row, selectedId, select, t, expanded, limits, toggle, showMore, hiddenConnections, showHidden}: {
+  snapshot:Snapshot;row: AppRow | undefined; selectedId: string | null; select: (row: DestinationRow) => void; t: T;
   expanded: Record<string, boolean>; limits: Record<string, number>;
   toggle: (key: string, current: boolean) => void; showMore: (key: string, current: number) => void;
   hiddenConnections: number; showHidden: () => void;
 }) {
   return <section className="map-destination-pane surface" aria-label={t('destinations')}>
     {!row ? <div className="empty"><p>{t('pickApp')}</p></div> : <>
-      <header className="map-selected-app"><AppIcon app={row.app}/><div><h2 title={row.app}>{row.app}</h2>
+      <header className="map-selected-app"><AppIcon app={row.app} appKey={row.appKey}/><div><h2 title={row.app}>{row.app}</h2>
         <small className="map-app-path" title={row.appKey}>{row.appKey || t('noIdentity')}</small>
         <p>{t('mapConnectionSummary').replace('{n}', String(row.connectionCount)).replace('{m}', String(row.processCount))}</p>
       </div></header>
@@ -35,7 +38,7 @@ export function DestinationPane({row, selectedId, select, t, expanded, limits, t
             const selected = destination.connectionIds.includes(selectedId ?? '');
             return <li key={destination.key}><button className={`map-destination-row intent-${destination.intent}`}
               aria-pressed={selected} onClick={() => select(destination)}>
-              <span className="map-endpoint"><strong>{destination.destination.includes(':') ? `[${destination.destination}]` : destination.destination}:{destination.port}</strong>
+              <span className="map-endpoint"><strong>{destination.destination.includes(':') ? `[${destination.destination}]` : destination.destination}:{destination.port}</strong><DestinationNameEvidence row={destinationName(snapshot,destination.destination)} locale={snapshot.document.preferences.locale}/>
                 <span><span>{destination.protocol}</span><DirectionIcon direction={destination.direction}/>
                   {t(destination.direction === 'unknown' ? 'unknownDirection' : destination.direction === 'inbound' ? 'inbound' : 'outbound')}</span>
               </span><span className="map-intent-chip">

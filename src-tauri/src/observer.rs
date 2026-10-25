@@ -5,7 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-// Fixed tools selected by native callers; observer operations are read-only. No shell, sudo, arbitrary arguments, DNS lookups or packet payloads.
+// Fixed tools selected by native callers. Observation does not resolve names; the separate
+// opt-in lookup caller may use the OS resolver. No shell or arbitrary UI-supplied arguments.
 pub(crate) fn run_bounded(binary: &str, args: &[&str]) -> Result<(bool, String), String> {
     run_bounded_input(binary, args, None)
 }
@@ -13,18 +14,40 @@ pub(crate) fn run_bounded_diagnostic(
     binary: &str,
     args: &[&str],
 ) -> Result<(bool, String), String> {
-    run_bounded_impl(binary, args, None, true, None)
+    run_bounded_impl(binary, args, None, true, None, 4 * 1024 * 1024, None)
 }
 pub(crate) fn run_bounded_input(
     binary: &str,
     args: &[&str],
     input: Option<Vec<u8>>,
 ) -> Result<(bool, String), String> {
-    run_bounded_impl(binary, args, input, false, None)
+    run_bounded_impl(binary, args, input, false, None, 4 * 1024 * 1024, None)
 }
 // Only the fixed signed firewall helper needs time for the explicit OS authentication dialog.
 pub(crate) fn run_firewall_helper(binary: &str, args: &[&str]) -> Result<(bool, String), String> {
-    run_bounded_impl(binary, args, None, false, Some(Duration::from_secs(120)))
+    run_bounded_impl(
+        binary,
+        args,
+        None,
+        false,
+        Some(Duration::from_secs(120)),
+        4 * 1024 * 1024,
+        None,
+    )
+}
+pub(crate) fn run_destination_lookup(
+    address: std::net::IpAddr,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(bool, String), String> {
+    run_bounded_impl(
+        "/usr/bin/dscacheutil",
+        &["-q", "host", "-a", "ip_address", &address.to_string()],
+        None,
+        false,
+        None,
+        8192,
+        Some(cancel),
+    )
 }
 fn run_bounded_impl(
     binary: &str,
@@ -32,12 +55,20 @@ fn run_bounded_impl(
     input: Option<Vec<u8>>,
     capture_errors: bool,
     timeout: Option<Duration>,
+    max_output: usize,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<(bool, String), String> {
     let deadline = timeout.unwrap_or(if input.is_some() {
         Duration::from_secs(12)
     } else {
         Duration::from_secs(6)
     });
+    if cancel
+        .as_ref()
+        .is_some_and(|c| c.load(std::sync::atomic::Ordering::SeqCst))
+    {
+        return Err("name_lookup_cancelled".into());
+    }
     let mut child = Command::new(binary)
         .args(args)
         .stdin(if input.is_some() {
@@ -66,7 +97,7 @@ fn run_bounded_impl(
     let reader = std::thread::spawn(move || {
         use std::io::Read;
         let mut text = String::new();
-        pipe.take(4 * 1024 * 1024)
+        pipe.take((max_output + 1) as u64)
             .read_to_string(&mut text)
             .map(|_| text)
     });
@@ -83,14 +114,22 @@ fn run_bounded_impl(
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
             break status;
         }
-        if start.elapsed() > deadline {
+        let cancelled = cancel
+            .as_ref()
+            .is_some_and(|c| c.load(std::sync::atomic::Ordering::SeqCst));
+        if start.elapsed() > deadline || cancelled {
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
             if let Some(reader) = error_reader {
                 let _ = reader.join();
             }
-            return Err("observer_timeout".into());
+            return Err(if cancelled {
+                "name_lookup_cancelled"
+            } else {
+                "observer_timeout"
+            }
+            .into());
         }
         std::thread::sleep(Duration::from_millis(25));
     };
@@ -98,6 +137,9 @@ fn run_bounded_impl(
         .join()
         .map_err(|_| "observer_reader_failed")?
         .map_err(|e| e.to_string())?;
+    if text.len() > max_output {
+        return Err("output_limit".into());
+    }
     if let Some(reader) = error_reader {
         text.push_str(&reader.join().unwrap_or_default());
     }
@@ -255,5 +297,52 @@ mod tests {
             0
         )
         .is_empty());
+    }
+}
+
+#[cfg(test)]
+mod lookup_runner_tests {
+    use super::*;
+    #[test]
+    fn running_local_process_is_cancelled_and_reaped_without_dns() {
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = cancelled.clone();
+        let setter = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        let start = Instant::now();
+        assert_eq!(
+            run_bounded_impl("/bin/sleep", &["3"], None, false, None, 4, Some(cancelled))
+                .unwrap_err(),
+            "name_lookup_cancelled"
+        );
+        setter.join().unwrap();
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+    #[test]
+    fn cancelled_lookup_never_launches_a_resolver() {
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        assert_eq!(
+            run_destination_lookup("192.0.2.1".parse().unwrap(), cancelled).unwrap_err(),
+            "name_lookup_cancelled"
+        );
+    }
+    #[test]
+    fn fixed_local_output_limit_is_enforced_without_dns() {
+        assert!(run_bounded_impl(
+            "/usr/bin/printf",
+            &["controlled"],
+            None,
+            false,
+            None,
+            4,
+            None
+        )
+        .is_err());
+        assert_eq!(
+            run_bounded_impl("/usr/bin/printf", &["ok"], None, false, None, 4, None).unwrap(),
+            (true, "ok".into())
+        );
     }
 }
