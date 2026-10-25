@@ -18,5 +18,5 @@ export function addressCompare(a:string,b:string) {
 }
 
 export function matchesDevice(device:Pick<import('./types').LanDevice,'address'|'mac'|'interface'|'name'>,search:string) {
- return matchesEvidence(`${device.address} ${device.mac??''} ${device.interface} ${device.name.value??''}`,search);
+ return matchesEvidence(`${device.address} ${device.mac??''} ${device.interface} ${device.name.value??''} ${(device.name.values??[]).join(' ')}`,search);
 }

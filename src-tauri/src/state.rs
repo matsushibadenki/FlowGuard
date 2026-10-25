@@ -341,6 +341,7 @@ impl SharedState {
             &path.with_extension("updates.json"),
             &document.preferences.update_channel,
         );
+        let inventory=crate::inventory::Inventory::load_archives(&path);
         Ok(Self {
             path,
             _document_lock: document_lock,
@@ -371,7 +372,7 @@ impl SharedState {
                 ports_plan: None,
                 network: Default::default(),
                 discovery: Default::default(),
-                inventory: Default::default(),
+                inventory,
                 discovery_operation: 0,
                 discovery_cancel: false,
                 discovery_plan: None,
@@ -871,7 +872,10 @@ impl SharedState {
         if s.updates.snapshot.stage == "installing" {
             return Err("update_installing".into());
         }
-        s.inventory.edit(generation, command)?;
+        if matches!(&command,crate::inventory::Edit::Archive{}){
+            if generation!=s.inventory.snapshot.generation||s.inventory.snapshot.status=="running"{return Err("lan_stale".into());}
+            let job=s.discovery.clone();s.inventory.archive(&job,&self.path)?;
+        }else{s.inventory.edit(generation, command)?;}
         s.revision += 1;
         Ok(s.snapshot())
     }
@@ -1450,6 +1454,10 @@ impl SharedState {
         s.revision += 1;
         Ok(s.snapshot())
     }
+    pub fn get_lan_archive(&self,generation:u64,observed_at:u64)->Result<crate::inventory::Archive,String>{self.inner.lock().map_err(|_|"state_lock")?.inventory.get_archive(generation,observed_at)}
+    pub fn configure_lan_public(&self,enabled:bool,expected:u64)->Result<Snapshot,String>{let mut s=self.inner.lock().map_err(|_|"state_lock")?;if s.updates.snapshot.stage=="installing"{return Err("update_installing".into());}s.inventory.public.configure(enabled,expected)?;s.inventory.snapshot.public_info=s.inventory.public.snapshot.clone();s.revision+=1;Ok(s.snapshot())}
+    pub fn begin_lan_public(&self,expected:u64)->Result<(u64,Snapshot),String>{let mut s=self.inner.lock().map_err(|_|"state_lock")?;if s.updates.snapshot.stage=="installing"{return Err("update_installing".into());}let op=s.inventory.public.begin(expected)?;s.inventory.snapshot.public_info=s.inventory.public.snapshot.clone();s.revision+=1;Ok((op,s.snapshot()))}
+    pub fn finish_lan_public(&self,op:u64,result:Result<crate::public_network::Snapshot,String>)->Result<Snapshot,String>{let mut s=self.inner.lock().map_err(|_|"state_lock")?;s.inventory.public.finish(op,result);s.inventory.snapshot.public_info=s.inventory.public.snapshot.clone();s.revision+=1;Ok(s.snapshot())}
     pub fn begin_discovery(
         &self,
         plan: &crate::discovery::Plan,
@@ -1479,6 +1487,8 @@ impl SharedState {
         s.inventory.begin(plan, generation);
         s.discovery_plan = Some(plan.clone());
         s.discovery = crate::discovery::DiscoverySnapshot {
+            context:plan.context.clone(),
+            options: plan.options.clone(),
             name_mode: plan.name_mode.clone(),
             stage: "running".into(),
             interface: plan.local.interface.clone(),
@@ -3015,6 +3025,7 @@ mod tests {
             response: "unverified".into(),
             observed_at: now(),
             name: crate::names::NameObservation {
+                values: vec![],
                 status: "pending".into(),
                 ..Default::default()
             },

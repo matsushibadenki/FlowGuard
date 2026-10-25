@@ -18,6 +18,9 @@ mod identity;
 #[cfg(target_os = "macos")]
 mod instance;
 mod inventory;
+mod lan_vendor;
+mod lan_metadata;
+mod public_network;
 mod menubar;
 mod model;
 mod names;
@@ -615,12 +618,17 @@ async fn start_lan_discovery(
     address: String,
     active: bool,
     name_mode: Option<String>,
+    options: Option<discovery::ScanOptions>,
 ) -> Result<Snapshot, String> {
     let network = tauri::async_runtime::spawn_blocking(network::observe)
         .await
         .map_err(|_| "interfaces_unavailable")?;
+    let context_interface=interface.clone();
+    let context=tauri::async_runtime::spawn_blocking(move||network::lan_context(&context_interface)).await.map_err(|_|"context_unavailable")?;
     let plan = discovery::Plan::new(&network, &interface, &address, active)?
-        .with_names(name_mode.as_deref().unwrap_or("none"))?;
+        .with_names(name_mode.as_deref().unwrap_or("none"))?
+        .with_options(options.unwrap_or_default())?
+        .with_context(context);
     let (operation, snapshot) = app.state::<SharedState>().begin_discovery(&plan)?;
     let _ = app.emit("state-changed", &snapshot);
     let handle = app.clone();
@@ -639,6 +647,15 @@ async fn start_lan_discovery(
         );
     });
     Ok(snapshot)
+}
+#[tauri::command]
+fn get_lan_archive(app:tauri::AppHandle,generation:u64,observed_at:u64)->Result<inventory::Archive,String>{app.state::<SharedState>().get_lan_archive(generation,observed_at)}
+#[tauri::command]
+fn configure_lan_public(app:tauri::AppHandle,enabled:bool,expected:u64)->Result<Snapshot,String>{let snapshot=app.state::<SharedState>().configure_lan_public(enabled,expected)?;let _=app.emit("state-changed",&snapshot);Ok(snapshot)}
+#[tauri::command]
+async fn query_lan_public(app:tauri::AppHandle,expected:u64)->Result<Snapshot,String>{
+    let (op,snapshot)=app.state::<SharedState>().begin_lan_public(expected)?;let _=app.emit("state-changed",&snapshot);
+    let result=public_network::fetch().await;let snapshot=app.state::<SharedState>().finish_lan_public(op,result)?;let _=app.emit("state-changed",&snapshot);Ok(snapshot)
 }
 #[tauri::command]
 fn stop_lan_discovery(app: tauri::AppHandle) -> Result<Snapshot, String> {
@@ -1228,6 +1245,9 @@ pub fn run() {
             float_lan_details,
             dock_lan_details,
             start_lan_discovery,
+            configure_lan_public,
+            get_lan_archive,
+            query_lan_public,
             stop_lan_discovery,
             extension_package_status,
             extension_bridge_status,

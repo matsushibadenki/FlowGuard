@@ -432,3 +432,7 @@
  .workspace-map .map-workspace>.inspector{grid-column:1;grid-row:1;top:8px;max-height:42dvh}
  .workspace-map .map-workspace>.map-main{grid-column:1;grid-row:2}
 }
+.workspace-map .map-editor .connection-details{background:var(--color-paper);border:1px solid var(--color-rule);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px;gap:9px}
+.workspace-map .map-editor .connection-details>div{grid-template-columns:1fr;gap:2px}
+.workspace-map .map-editor .connection-details dd{font-weight:550;text-wrap:pretty}
+.workspace-map .map-editor .connection-details dt{font-size:var(--text-xs)}

@@ -135,3 +135,55 @@ mod tests {
         assert!(!rows[2].up);
     }
 }
+
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LanContext {
+    pub gateway: Option<String>,
+    pub ssid: Option<String>,
+}
+pub fn lan_context(interface: &str) -> LanContext {
+    if !interface.starts_with("en")
+        || interface.len() < 3
+        || !interface[2..].chars().all(|c| c.is_ascii_digit())
+    {
+        return LanContext::default();
+    }
+    let gateway = crate::observer::run_bounded(
+        "/sbin/route",
+        &["-n", "get", "-ifscope", interface, "default"],
+    )
+    .ok()
+    .filter(|(ok, _)| *ok)
+    .and_then(|(_, text)| parse_gateway(&text, interface));
+    let ssid =
+        crate::observer::run_bounded("/usr/sbin/networksetup", &["-getairportnetwork", interface])
+            .ok()
+            .filter(|(ok, _)| *ok)
+            .and_then(|(_, text)| {
+                text.lines().find_map(|line| {
+                    line.strip_prefix("Current Wi-Fi Network: ")
+                        .filter(|s| {
+                            !s.is_empty() && s.len() <= 128 && !s.chars().any(char::is_control)
+                        })
+                        .map(str::to_owned)
+                })
+            });
+    LanContext { gateway, ssid }
+}
+fn parse_gateway(text: &str, interface: &str) -> Option<String> {
+    if !text.lines().any(|line| {
+        line.trim()
+            .strip_prefix("interface:")
+            .is_some_and(|v| v.trim() == interface)
+    }) {
+        return None;
+    }
+    text.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("gateway:")
+            .and_then(|v| v.trim().parse::<std::net::Ipv4Addr>().ok())
+            .filter(|ip| !ip.is_unspecified() && !ip.is_multicast())
+            .map(|ip| ip.to_string())
+    })
+}

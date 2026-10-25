@@ -1,10 +1,12 @@
 use crate::model::now;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NameObservation {
+    #[serde(default)]
+    pub values: Vec<String>,
     pub value: Option<String>,
     pub source: Option<String>,
     pub status: String,
@@ -13,6 +15,7 @@ pub struct NameObservation {
 impl Default for NameObservation {
     fn default() -> Self {
         Self {
+            values: vec![],
             value: None,
             source: None,
             status: "not_requested".into(),
@@ -39,6 +42,7 @@ pub fn eligible(address: &str, mode: &str) -> bool {
 }
 fn observation(value: Option<String>, source: &str, status: &str) -> NameObservation {
     NameObservation {
+        values: value.iter().cloned().collect(),
         value,
         source: Some(source.into()),
         status: status.into(),
@@ -74,7 +78,28 @@ pub fn system(address: IpAddr) -> NameObservation {
             } else {
                 "unobserved"
             };
-            observation(name, "system", status)
+            let mut result = observation(name, "system", status);
+            for block in text.split("\n\n") {
+                let matches = block.lines().any(|line| {
+                    line.split_once(':').is_some_and(|(k, v)| {
+                        ["ip_address", "ipv6_address"].contains(&k.trim())
+                            && v.trim().parse::<IpAddr>().ok() == Some(address)
+                    })
+                });
+                if matches {
+                    for name in block
+                        .lines()
+                        .filter_map(|l| l.strip_prefix("name:").and_then(valid_name))
+                    {
+                        if result.values.len() < 8
+                            && !result.values.iter().any(|v| v.eq_ignore_ascii_case(&name))
+                        {
+                            result.values.push(name);
+                        }
+                    }
+                }
+            }
+            result
         }
         _ => observation(None, "system", "failed"),
     }
@@ -99,7 +124,7 @@ fn reverse_name(address: IpAddr) -> String {
     }
 }
 // DNS-SD PTR rdata uses uncompressed DNS labels. Reject pointers, truncation and control characters.
-fn parse_ptr(bytes: &[u8]) -> Option<String> {
+pub(crate) fn parse_ptr(bytes: &[u8]) -> Option<String> {
     if bytes.len() > 255 {
         return None;
     }
@@ -225,8 +250,21 @@ mod mdns {
             data.cast::<u8>(),
             usize::from(size),
         )) {
-            context.result = observation(Some(name), "mdns", "resolved");
-            context.finished = true;
+            if context.result.values.len() < 8
+                && !context
+                    .result
+                    .values
+                    .iter()
+                    .any(|v| v.eq_ignore_ascii_case(&name))
+            {
+                if context.result.value.is_none() {
+                    context.result.value = Some(name.clone());
+                }
+                context.result.values.push(name);
+                context.result.status = "resolved".into();
+                context.result.observed_at = Some(now());
+            }
+            context.finished = flags & 1 == 0 || context.result.values.len() >= 8;
         }
     }
     pub fn lookup(
@@ -294,6 +332,132 @@ mod mdns {
         drop(service);
         context.result.observed_at = Some(now());
         context.result
+    }
+    struct Records {
+        interface: u32,
+        kind: u16,
+        values: Vec<Vec<u8>>,
+        failed: bool,
+    }
+    unsafe extern "C" fn record_callback(
+        _service: Ref,
+        flags: u32,
+        interface: u32,
+        error: i32,
+        _name: *const c_char,
+        rrtype: u16,
+        rrclass: u16,
+        size: u16,
+        data: *const c_void,
+        ttl: u32,
+        context: *mut c_void,
+    ) {
+        if context.is_null() {
+            return;
+        }
+        let c = &mut *context.cast::<Records>();
+        if error != 0 {
+            c.failed = true;
+            return;
+        }
+        if flags & 2 == 0
+            || interface != c.interface
+            || rrtype != c.kind
+            || rrclass != 1
+            || ttl == 0
+            || data.is_null()
+            || size > 2048
+            || c.values.len() >= 16
+        {
+            return;
+        }
+        let value = std::slice::from_raw_parts(data.cast::<u8>(), size as usize).to_vec();
+        if !c.values.contains(&value) {
+            c.values.push(value);
+        }
+    }
+    pub fn records(
+        name: &str,
+        kind: u16,
+        interface: &str,
+        cancelled: &(impl Fn() -> bool + Sync),
+    ) -> Result<Vec<Vec<u8>>, String> {
+        let query = CString::new(name).map_err(|_| "invalid_query")?;
+        let iface = CString::new(interface).map_err(|_| "invalid_interface")?;
+        let index = unsafe { if_nametoindex(iface.as_ptr()) };
+        if index == 0 {
+            return Err("invalid_interface".into());
+        }
+        let mut context = Records {
+            interface: index,
+            kind,
+            values: vec![],
+            failed: false,
+        };
+        let mut raw = std::ptr::null_mut();
+        let error = unsafe {
+            DNSServiceQueryRecord(
+                &mut raw,
+                0x400,
+                index,
+                query.as_ptr(),
+                kind,
+                1,
+                record_callback,
+                (&mut context as *mut Records).cast(),
+            )
+        };
+        if error != 0 || raw.is_null() {
+            return Err("mdns_unavailable".into());
+        }
+        let service = Service(raw);
+        let fd = unsafe { DNSServiceRefSockFD(service.0) };
+        if fd < 0 {
+            return Err("mdns_unavailable".into());
+        }
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_millis(600)
+            && !context.failed
+            && context.values.len() < 16
+        {
+            if cancelled() {
+                return Err("cancelled".into());
+            }
+            let mut pollfd = PollFd {
+                fd,
+                events: 1,
+                revents: 0,
+            };
+            let ready = unsafe { poll(&mut pollfd, 1, 50) };
+            if ready < 0 || pollfd.revents & !1 != 0 {
+                return Err("mdns_unavailable".into());
+            }
+            if ready > 0 && unsafe { DNSServiceProcessResult(service.0) } != 0 {
+                return Err("mdns_unavailable".into());
+            }
+        }
+        drop(service);
+        if context.failed {
+            Err("mdns_unavailable".into())
+        } else {
+            Ok(context.values)
+        }
+    }
+}
+pub(crate) fn mdns_records(
+    name: &str,
+    kind: u16,
+    interface: &str,
+    cancelled: &(impl Fn() -> bool + Sync),
+) -> Result<Vec<Vec<u8>>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        mdns::records(name, kind, interface, cancelled)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (name, kind, interface, cancelled);
+        Err("macos_required".into())
     }
 }
 pub fn lookup(

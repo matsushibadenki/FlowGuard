@@ -1,6 +1,6 @@
 import {validHistoryRetention,retainedHistory} from './history';
 import {version as packageVersion} from '../../package.json';
-import {lanColumns,validLanColumns,type LanEdit} from './lan-workbench';
+import {lanColumns,validLanColumns,defaultLanWidth,type LanEdit} from './lan-workbench';
 // パス: src/core/store.ts
 import {useSyncExternalStore} from 'react';
 import {invoke,isTauri} from '@tauri-apps/api/core';
@@ -75,9 +75,9 @@ export async function refreshExtension(){if(!native)return;emit(await invoke<Sna
 
 export async function disableExtension(remove=false){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('disable_extension',{remove}));}
 
-export async function startLanDiscovery(interfaceName:string,address:string,active:boolean,nameMode:import('./types').NameMode='none') {
+export async function startLanDiscovery(interfaceName:string,address:string,active:boolean,nameMode:import('./types').NameMode='none',options?:import('./lan-sheet').ScanOptions) {
  if(!native)throw Error('desktop_required');
- emit(await invoke<Snapshot>('start_lan_discovery',{interface:interfaceName,address,active,nameMode}));
+ emit(await invoke<Snapshot>('start_lan_discovery',{interface:interfaceName,address,active,nameMode,options}));
 }
 export async function stopLanDiscovery() {
  if(!native)throw Error('desktop_required');
@@ -116,7 +116,7 @@ export async function notificationPermission(request=false):Promise<string>{if(!
 export async function editLanInventory(generation:number,command:LanEdit):Promise<Snapshot>{
  if(native){const next=await invoke<Snapshot>('edit_lan_inventory',{generation,command});emit(next);return next;}
  if(!snapshot||snapshot.inventory.generation!==generation||snapshot.inventory.status==='running')throw Error('lan_stale');
- const inventory={...snapshot.inventory,checkedIds:[...(snapshot.inventory.checkedIds??[])],comments:{...snapshot.inventory.comments},columns:[...(snapshot.inventory.columns??lanColumns)]};
+ const inventory={...snapshot.inventory,checkedIds:[...(snapshot.inventory.checkedIds??[])],comments:{...snapshot.inventory.comments},labels:{...snapshot.inventory.labels},widths:{...snapshot.inventory.widths},columns:[...(snapshot.inventory.columns??lanColumns)]};
  if(command.type==='selection'){
   if(JSON.stringify(command.expected)!==JSON.stringify(inventory.checkedIds))throw Error('lan_conflict');
   if(command.ids.length>2048||command.ids.some(id=>!inventory.rows.some(r=>r.device.id===id)))throw Error('lan_stale');
@@ -126,6 +126,13 @@ export async function editLanInventory(generation:number,command:LanEdit):Promis
   if((inventory.comments[command.id]??'')!==command.expected)throw Error('lan_conflict');
   if([...command.value].length>500||new TextEncoder().encode(command.value).length>2000||/[\x00-\x09\x0b-\x1f\x7f]/.test(command.value))throw Error('lan_comment_invalid');
   if(command.value)inventory.comments[command.id]=command.value;else delete inventory.comments[command.id];
+ }else if(command.type==='width'){
+  if(!lanColumns.includes(command.column as typeof lanColumns[number])||!Number.isInteger(command.value)||command.value<80||command.value>480)throw Error('lan_width_invalid');
+  if((inventory.widths[command.column]??defaultLanWidth(command.column))!==command.expected)throw Error('lan_conflict');inventory.widths[command.column]=command.value;
+ }else if(command.type==='label'){
+  if(!inventory.rows.some(r=>r.device.id===command.id)||[...command.value].length>80||/[\x00-\x1f\x7f]/.test(command.value))throw Error('lan_label_invalid');
+  if((inventory.labels[command.id]??'')!==command.expected)throw Error('lan_conflict');if(command.value)inventory.labels[command.id]=command.value;else delete inventory.labels[command.id];
+ }else if(command.type==='archive'){throw Error('desktop_required');
  }else{
   if(JSON.stringify(command.expected)!==JSON.stringify(inventory.columns))throw Error('lan_conflict');
   if(!validLanColumns(command.values))throw Error('lan_columns_invalid');inventory.columns=command.values;
@@ -156,3 +163,8 @@ export async function clearUpdateCache(){if(!native)throw Error('desktop_require
 export async function temporaryAction(action:string,connectionId:string|null=null,id:string|null=null,direction:string|null=null,peerEvidence:string|null=null,seconds=60,confirmed=false){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('temporary_protection_action',{action,connectionId,id,direction,peerEvidence,seconds,confirmed}));}
 
 export async function selectPort(operation:number,port:number){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('select_port',{operation,port}));}
+
+/** Native auxiliary query results share the same Rust snapshot as every window. */
+export function acceptSnapshot(value:Snapshot){emit(value);}
+
+export async function getLanArchive(generation:number,observedAt:number):Promise<import('./lan-sheet').LanArchive>{if(!native)throw Error('desktop_required');return invoke('get_lan_archive',{generation,observedAt});}

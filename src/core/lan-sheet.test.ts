@@ -1,0 +1,11 @@
+import {describe,it,expect} from 'vitest';
+import {sortSheet,virtualWindow,scopeOf,archiveInventory} from './lan-sheet';
+import type {DeviceChange,Snapshot} from './types';
+const row=(address:string):DeviceChange=>({device:{id:address,address,name:{value:null,source:null,status:'not_requested',observedAt:null},mac:null,interface:'en0',family:'IPv4',source:'arp',response:'unverified',observedAt:1},previous:null,kind:'added',fields:[]});
+const snapshot={document:{preferences:{locale:'en'}},inventory:{labels:{},comments:{}},discovery:{responseMs:{'192.168.1.2':0,'192.168.1.10':12}}} as unknown as Snapshot;
+describe('LAN sheet view',()=>{
+ it('sorts IPs numerically, measurements numerically and unknowns last',()=>{const rows=[row('192.168.1.10'),row('192.168.1.3'),row('192.168.1.2')];expect(sortSheet(rows,'address',false,snapshot).map(r=>r.device.id)).toEqual(['192.168.1.2','192.168.1.3','192.168.1.10']);expect(sortSheet(rows,'latency',true,snapshot).map(r=>r.device.id)).toEqual(['192.168.1.10','192.168.1.2','192.168.1.3']);expect(rows[0].device.id).toBe('192.168.1.10');});
+ it('classifies IPv6 scopes without a network request',()=>{expect(scopeOf('fe80::1%en0')).toBe('local');expect(scopeOf('fd00::1')).toBe('local');expect(scopeOf('2001:4860::1')).toBe('public');expect(scopeOf('::1')).toBe('loopback');expect(scopeOf('bad')).toBe('other');});
+ it('renders a bounded window while retaining access to the final row',()=>{const a=virtualWindow(1024,0);expect(a.end-a.start).toBeLessThan(20);const last=virtualWindow(1024,1024*88-480);expect(last.end).toBe(1024);expect(last.top+last.bottom+(last.end-last.start)*88).toBe(1024*88);expect(virtualWindow(0,200).start).toBe(0);});
+ it('isolates archived selection and annotations from live data',()=>{const archive={generation:1,observedAt:1,interface:'en0',localAddress:'192.168.1.1',netmask:'255.255.255.0',range:'',rows:[row('192.168.1.2')],labels:{},comments:{},responseMs:{}};const view=archiveInventory(archive,{...snapshot.inventory,selectedId:'live',checkedIds:['live'],generation:2} as Snapshot['inventory']);expect(view.selectedId).toBe(null);expect(view.checkedIds).toEqual([]);expect(view.status).toBe('archived');expect(view.generation).toBe(1);});
+});

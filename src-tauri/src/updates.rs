@@ -277,6 +277,7 @@ pub fn can_install(s: &crate::model::Snapshot) -> bool {
             .iter()
             .any(|source| source.stage == "collecting")
         && !["starting", "listening", "stopping"].contains(&s.syslog.stage.as_str())
+        && !s.inventory.public_info.busy
         && !s.destination_names.busy
         && !s.flow_names.busy
         && !s.temporary_protection.busy

@@ -3,10 +3,10 @@ use crate::{
     network::{InterfaceAddress, NetworkSnapshot},
     observer::run_bounded,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, net::Ipv4Addr};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Device {
     pub name: crate::names::NameObservation,
@@ -19,9 +19,13 @@ pub struct Device {
     pub response: String,
     pub observed_at: u64,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoverySnapshot {
+    pub metadata: BTreeMap<String, crate::lan_metadata::Metadata>,
+    pub context: crate::network::LanContext,
+    pub options: ScanOptions,
+    pub response_ms: BTreeMap<String, f64>,
     pub name_mode: String,
     pub names_completed: usize,
     pub names_total: usize,
@@ -38,6 +42,10 @@ pub struct DiscoverySnapshot {
 impl Default for DiscoverySnapshot {
     fn default() -> Self {
         Self {
+            metadata: BTreeMap::new(),
+            context: Default::default(),
+            options: Default::default(),
+            response_ms: BTreeMap::new(),
             name_mode: "none".into(),
             names_completed: 0,
             names_total: 0,
@@ -53,8 +61,34 @@ impl Default for DiscoverySnapshot {
         }
     }
 }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct ScanOptions {
+    pub services: bool,
+    pub smb: bool,
+    pub start: String,
+    pub end: String,
+    pub concurrency: usize,
+    pub timeout_ms: u32,
+    pub interval_ms: u32,
+}
+impl Default for ScanOptions {
+    fn default() -> Self {
+        Self {
+            services: false,
+            smb: false,
+            start: String::new(),
+            end: String::new(),
+            concurrency: 4,
+            timeout_ms: 500,
+            interval_ms: 0,
+        }
+    }
+}
 #[derive(Clone)]
 pub struct Plan {
+    pub context: crate::network::LanContext,
+    pub options: ScanOptions,
     pub name_mode: String,
     pub local: InterfaceAddress,
     pub targets: Vec<Ipv4Addr>,
@@ -90,12 +124,50 @@ impl Plan {
             (vec![], interface.to_string())
         };
         Ok(Self {
+            context: Default::default(),
+            options: Default::default(),
             name_mode: "none".into(),
             local,
             targets,
             range,
             active,
         })
+    }
+    pub fn with_context(mut self, context: crate::network::LanContext) -> Self {
+        self.context = context;
+        self
+    }
+    pub fn same_context(&self) -> bool {
+        if self.context.gateway.is_none() && self.context.ssid.is_none() {
+            return true;
+        }
+        let current = crate::network::lan_context(&self.local.interface);
+        (self.context.gateway.is_none() || self.context.gateway == current.gateway)
+            && (self.context.ssid.is_none() || self.context.ssid == current.ssid)
+    }
+    pub fn with_options(mut self, options: ScanOptions) -> Result<Self, String> {
+        if !(1..=4).contains(&options.concurrency)
+            || !(100..=1000).contains(&options.timeout_ms)
+            || options.interval_ms > 1000
+        {
+            return Err("invalid_scan_options".into());
+        }
+        if !options.start.is_empty() || !options.end.is_empty() {
+            if !self.active {
+                return Err("range_requires_probe".into());
+            }
+            let start: Ipv4Addr = options.start.parse().map_err(|_| "invalid_scan_range")?;
+            let end: Ipv4Addr = options.end.parse().map_err(|_| "invalid_scan_range")?;
+            let (all, _) = ipv4_range(&self.local)?;
+            // Both endpoints must be usable peers in the selected subnet; no expansion.
+            if start > end || !all.contains(&start) || !all.contains(&end) {
+                return Err("invalid_scan_range".into());
+            }
+            self.targets.retain(|ip| *ip >= start && *ip <= end);
+            self.range = format!("{start}–{end}");
+        }
+        self.options = options;
+        Ok(self)
     }
     pub fn with_names(mut self, mode: &str) -> Result<Self, String> {
         if !["none", "mdns", "system"].contains(&mode) {
@@ -249,6 +321,15 @@ fn collect(plan: &Plan, network: &NetworkSnapshot, snapshot: &mut DiscoverySnaps
         &plan.local.interface,
     );
     for device in neighbors {
+        if plan.active
+            && (!plan.options.start.is_empty())
+            && !plan
+                .targets
+                .iter()
+                .any(|ip| ip.to_string() == device.address)
+        {
+            continue;
+        }
         if let Some(existing) = snapshot.devices.iter_mut().find(|d| d.id == device.id) {
             existing.mac = device.mac;
             if existing.response == "unverified" {
@@ -329,7 +410,7 @@ fn enrich_names(
         if cancelled() {
             return;
         }
-        if !plan.matches(&crate::network::observe()) {
+        if !plan.matches(&crate::network::observe()) || !plan.same_context() {
             s.errors.push("network_changed".into());
             return;
         }
@@ -374,6 +455,17 @@ fn enrich_names(
         update(s.clone());
     }
 }
+pub fn ping_latency(output: &str) -> Option<f64> {
+    output.lines().find_map(|line| {
+        let (_, tail) = line.split_once("time=")?;
+        let value = tail.split_whitespace().next()?.parse::<f64>().ok()?;
+        if value.is_finite() && (0.0..=60000.0).contains(&value) {
+            Some(value)
+        } else {
+            None
+        }
+    })
+}
 fn no_response(output: &str) -> bool {
     !output.contains("ping:")
         && (output.contains("100.0% packet loss") || output.contains("100% packet loss"))
@@ -384,6 +476,8 @@ pub fn run(
     cancelled: impl Fn() -> bool + Sync,
 ) {
     let mut s = DiscoverySnapshot {
+        context: plan.context.clone(),
+        options: plan.options.clone(),
         name_mode: plan.name_mode.clone(),
         stage: "running".into(),
         interface: plan.local.interface.clone(),
@@ -393,7 +487,7 @@ pub fn run(
         ..Default::default()
     };
     let initial = crate::network::observe();
-    if !plan.matches(&initial) {
+    if !plan.matches(&initial) || !plan.same_context() {
         s.stage = "failed".into();
         s.observed_at = Some(now());
         s.errors.push("network_changed".into());
@@ -402,14 +496,14 @@ pub fn run(
     }
     collect(&plan, &initial, &mut s);
     update(s.clone());
-    for batch in plan.targets.chunks(4) {
+    for batch in plan.targets.chunks(plan.options.concurrency) {
         if cancelled() {
             s.stage = "cancelled".into();
             s.observed_at = Some(now());
             update(s);
             return;
         }
-        if !plan.matches(&crate::network::observe()) {
+        if !plan.matches(&crate::network::observe()) || !plan.same_context() {
             s.stage = "failed".into();
             s.observed_at = Some(now());
             s.errors.push("network_changed".into());
@@ -421,12 +515,13 @@ pub fn run(
                 .iter()
                 .map(|ip| {
                     let interface = &plan.local.interface;
+                    let timeout = plan.options.timeout_ms.to_string();
                     scope.spawn(move || {
                         let ip = ip.to_string();
                         let reply = crate::observer::run_bounded_diagnostic(
                             "/sbin/ping",
                             &[
-                                "-n", "-c", "1", "-W", "500", "-t", "1", "-b", interface, &ip,
+                                "-n", "-c", "1", "-W", &timeout, "-t", "1", "-b", interface, &ip,
                             ],
                         );
                         (ip, reply)
@@ -444,7 +539,11 @@ pub fn run(
         for result in results {
             s.completed += 1;
             match result {
-                Ok((ip, Ok((true, _)))) => {
+                Ok((ip, Ok((true, output)))) => {
+                    if let Some(ms) = ping_latency(&output) {
+                        s.response_ms
+                            .insert(format!("{}|{}", plan.local.interface, ip), ms);
+                    }
                     let id = format!("{}|{}", plan.local.interface, ip);
                     if let Some(device) = s.devices.iter_mut().find(|d| d.id == id) {
                         device.response = "responded".into();
@@ -468,12 +567,19 @@ pub fn run(
         s.errors.sort();
         s.errors.dedup();
         update(s.clone());
+        // Small slices keep a user stop responsive between bounded batches.
+        for _ in 0..plan.options.interval_ms.div_ceil(25) {
+            if cancelled() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
     }
     if cancelled() {
         s.stage = "cancelled".into();
     } else {
         let current = crate::network::observe();
-        if !plan.matches(&current) {
+        if !plan.matches(&current) || !plan.same_context() {
             s.stage = "failed".into();
             s.observed_at = Some(now());
             s.errors.push("network_changed".into());
@@ -496,6 +602,23 @@ pub fn run(
                     update(s);
                     return;
                 }
+            }
+            if plan.options.services || plan.options.smb {
+                let metadata = crate::lan_metadata::enrich(&plan, &s.devices, &cancelled);
+                if cancelled() {
+                    s.stage = "cancelled".into();
+                    s.observed_at = Some(now());
+                    update(s);
+                    return;
+                }
+                if !plan.matches(&crate::network::observe()) || !plan.same_context() {
+                    s.stage = "failed".into();
+                    s.errors.push("network_changed".into());
+                    s.observed_at = Some(now());
+                    update(s);
+                    return;
+                }
+                s.metadata = metadata;
             }
             s.stage = if s.errors.is_empty() {
                 "completed"
@@ -522,6 +645,53 @@ mod tests {
             }],
             ..Default::default()
         }
+    }
+    #[test]
+    fn scan_options_are_bounded_and_never_expand_scope() {
+        let network = NetworkSnapshot {
+            addresses: vec![InterfaceAddress {
+                interface: "en0".into(),
+                address: "192.168.1.20".into(),
+                netmask: "255.255.255.0".into(),
+                family: "IPv4".into(),
+                up: true,
+            }],
+            ..Default::default()
+        };
+        let plan = || Plan::new(&network, "en0", "192.168.1.20", true).unwrap();
+        let options = ScanOptions {
+            start: "192.168.1.18".into(),
+            end: "192.168.1.22".into(),
+            concurrency: 1,
+            timeout_ms: 100,
+            interval_ms: 1000,
+            ..Default::default()
+        };
+        assert_eq!(
+            plan().with_options(options.clone()).unwrap().targets.len(),
+            4
+        );
+        for (start, end) in [
+            ("192.168.0.1", "192.168.1.22"),
+            ("192.168.1.0", "192.168.1.22"),
+            ("192.168.1.20", "192.168.1.22"),
+            ("192.168.1.18", "192.168.1.255"),
+            ("192.168.1.22", "192.168.1.18"),
+        ] {
+            let mut o = options.clone();
+            o.start = start.into();
+            o.end = end.into();
+            assert!(plan().with_options(o).is_err());
+        }
+        for concurrency in [0, 5, usize::MAX] {
+            let mut o = ScanOptions::default();
+            o.concurrency = concurrency;
+            assert!(plan().with_options(o).is_err());
+        }
+        assert_eq!(ping_latency("64 bytes from x: time=0.023 ms"), Some(0.023));
+        assert_eq!(ping_latency("time=NaN ms"), None);
+        assert_eq!(ping_latency("time=-1 ms"), None);
+        assert_eq!(ping_latency("100% packet loss"), None);
     }
     #[test]
     fn range_rejects_large_public_invalid_and_changed_networks() {

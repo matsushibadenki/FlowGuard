@@ -1,6 +1,6 @@
 // パス: src/components/TrafficGraph.tsx
 import {useId, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import {Check, ChevronLeft, ChevronRight, CircleHelp, Globe2, Info, Laptop, Network, Minus, ShieldCheck} from 'lucide-react';
+import {Activity, AppWindow, Check, ChevronLeft, ChevronRight, CircleHelp, Globe2, Info, Laptop, Network, Minus, ShieldCheck} from 'lucide-react';
 import type {AppRow, DestinationRow} from '../core/mapModel';
 import type {Snapshot} from '../core/types';
 import {destinationReceipt, pageWindow, trafficGraphWords} from '../core/traffic-graph';
@@ -22,9 +22,9 @@ export function TrafficGraph({snapshot, rows, t, selectApp, selectDestination}: 
   const totals = useMemo(() => rows.reduce((sum,row) => ({connections:sum.connections+row.connectionCount,destinations:sum.destinations+row.destinations.length}),{connections:0,destinations:0}),[rows]);
   return <section className="traffic-graph surface" aria-label={w.graph}>
     <header className="tg-summary">
-      <div className="tg-total"><strong>{totals.connections.toLocaleString(snapshot.document.preferences.locale)}</strong><span>{w.connections}</span></div>
-      <div className="tg-total secondary"><strong>{rows.length}</strong><span>{w.apps}</span></div>
-      <div className="tg-total secondary"><strong>{totals.destinations}</strong><span>{w.destinations}</span></div>
+      <div className="tg-total"><Activity size={22} aria-hidden="true"/><strong>{totals.connections.toLocaleString(snapshot.document.preferences.locale)}</strong><span>{w.connections}</span></div>
+      <div className="tg-total secondary"><AppWindow size={19} aria-hidden="true"/><strong>{rows.length}</strong><span>{w.apps}</span></div>
+      <div className="tg-total secondary"><Globe2 size={19} aria-hidden="true"/><strong>{totals.destinations}</strong><span>{w.destinations}</span></div>
       <span className="info-tip" tabIndex={0} title={w.help} aria-label={w.help}><Info size={19}/></span>
     </header>
     <div className="tg-caption">{w.summary}{snapshot.document.preferences.mode==='demo'&&<span>{w.preview}</span>}</div>
@@ -50,6 +50,7 @@ function AppBranch({row,snapshot,t,selectApp,selectDestination}:{row:AppRow}&Omi
   const [paths,setPaths]=useState<string[]>([]);
   const w=trafficGraphWords[snapshot.document.preferences.locale];
   const window=pageWindow(row.destinations,page,destinationPageSize);
+  const scopeLabel=(['public','local','loopback','other'] as const).map(klass=>`${t(classLabels[klass])}: ${row.destinations.filter(d=>d.klass===klass).reduce((sum,d)=>sum+d.connectionIds.length,0)}`).join(' · ');
   const signature=JSON.stringify(window.rows.map(d=>d.key));
   const selectedIndex=row.destinations.findIndex(d=>d.connectionIds.includes(snapshot.selectedId??''));
   useLayoutEffect(()=>{
@@ -71,22 +72,23 @@ function AppBranch({row,snapshot,t,selectApp,selectDestination}:{row:AppRow}&Omi
     <div className="tg-branch" ref={root}>
       <svg className="tg-edges" aria-hidden="true"><defs>{(['allow','block','ask','none'] as const).map(intent=><marker key={intent} id={`${id}-${intent}`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 1 1 L 7 4 L 1 7" fill="none" className={`tg-marker tg-intent-${intent}`} strokeWidth="1.5"/></marker>)}</defs>{window.rows.map((d,index)=>{
         const receipt=destinationReceipt(d,snapshot),selected=d.connectionIds.includes(snapshot.selectedId??'');
-        return <path key={d.key} d={paths[index]??''} className={`tg-edge tg-intent-${d.intent} ${receipt==='confirmed'?'confirmed':'pending'} ${selected?'selected':''}`} markerStart={d.direction==='inbound'?`url(#${id}-${d.intent})`:undefined} markerEnd={d.direction==='outbound'?`url(#${id}-${d.intent})`:undefined}/>;
+        return <g key={d.key}>{selected&&<path d={paths[index]??''} className="tg-focus-halo"/>}<path d={paths[index]??''} className={`tg-edge tg-intent-${d.intent} ${receipt==='confirmed'?'confirmed':'pending'} ${selected?'selected':''}`} markerStart={d.direction==='inbound'?`url(#${id}-${d.intent})`:undefined} markerEnd={d.direction==='outbound'?`url(#${id}-${d.intent})`:undefined}/></g>;
       })}</svg>
       <button className="tg-source" aria-pressed={selectedIndex>=0} onClick={()=>selectApp(row)} title={row.appKey||t('noIdentity')}>
         <AppIcon app={row.app} appKey={row.appKey}/><strong className="tg-app-name" title={row.app}>{row.app}</strong>
         <span className="tg-app-count"><b>{row.connectionCount}</b><span>{w.sockets}</span></span>
+        <span className="tg-scope-strip" role="img" aria-label={scopeLabel} title={scopeLabel}>{(['public','local','loopback','other'] as const).map(klass=>{const count=row.destinations.filter(d=>d.klass===klass).reduce((sum,d)=>sum+d.connectionIds.length,0);return count>0?<i key={klass} data-scope={klass} style={{flex:count}}/>:null;})}</span>
         <span className="tg-app-meta">{row.processCount} {w.processes} · {row.destinations.length} {w.destinations}</span>
         <span className="tg-source-port" aria-hidden="true"/>
       </button>
       <div className="tg-destinations">{window.rows.map(d=>{
         const Icon=classIcons[d.klass],receipt=destinationReceipt(d,snapshot),selected=d.connectionIds.includes(snapshot.selectedId??'');
         return <div key={d.key} className="tg-route-row"><button className={`tg-route-summary ${selected?'selected':''}`} onClick={()=>selectDestination(d)} aria-pressed={selected} aria-label={`${t(d.direction==='inbound'?'inbound':d.direction==='outbound'?'outbound':'unknownDirection')} · ${d.protocol} · ${d.port} · ${d.connectionIds.length} ${w.connections}`} title={`${t(d.direction==='inbound'?'inbound':d.direction==='outbound'?'outbound':'unknownDirection')} · ${d.connectionIds.length} ${w.connections}`}>
-          <span><DirectionIcon direction={d.direction}/><strong>{d.protocol}</strong><span>:{d.port}</span></span><small>{d.connectionIds.length} {w.connections}</small>
+          <span><DirectionIcon direction={d.direction}/><strong>{d.protocol}</strong><span>:{d.port}</span></span><span className="tg-route-count"><b>{d.connectionIds.length}</b><small>{w.connections}</small></span>
           </button><button className={`tg-endpoint ${selected?'selected':''}`} data-intent={d.intent} data-receipt={receipt} aria-pressed={selected} onClick={()=>selectDestination(d)}>
           <span className="tg-target-port" aria-hidden="true"/>
-          <span className="tg-target-top"><Icon size={22} aria-hidden="true"/><span className="tg-address" title={d.destination}>{d.destination}</span><strong className="tg-port">{d.port}</strong></span>
-          <span className="tg-protocol"><span>{d.protocol}</span><DirectionIcon direction={d.direction}/><span>{t(d.direction==='inbound'?'inbound':d.direction==='outbound'?'outbound':'unknownDirection')}</span><span title={w.scope}>{t(classLabels[d.klass])}</span><span className="tg-socket-count">×{d.connectionIds.length}</span></span>
+          <span className="tg-target-top"><span className="tg-scope-icon" data-scope={d.klass} title={t(classLabels[d.klass])}><Icon size={22} aria-hidden="true"/></span><span className="tg-address" title={d.destination}>{d.destination}</span><strong className="tg-port">{d.port}</strong></span>
+          <span className="tg-protocol"><span>{d.protocol}</span><DirectionIcon direction={d.direction}/><span>{t(d.direction==='inbound'?'inbound':d.direction==='outbound'?'outbound':'unknownDirection')}</span><span className="tg-scope-label" data-scope={d.klass} title={w.scope}>{t(classLabels[d.klass])}</span><span className="tg-socket-count">×{d.connectionIds.length}</span></span>
           <DestinationNameEvidence row={destinationName(snapshot,d.destination)} locale={snapshot.document.preferences.locale}/><FlowNameEvidence snapshot={snapshot} ids={d.connectionIds}/>
           <span className="tg-status-row"><span className="tg-intent-status"><small>{w.intent}</small><strong className={`tg-intent-${d.intent}`}>{d.intent==='none'?<Minus size={20}/>:<ActionIcon action={d.intent} size={20}/>} {d.intent==='none'?w.noRule:t(d.intent)}</strong></span><span className="tg-receipt-status"><small>{w.receipt}</small><span>{receipt==='confirmed'?<Check size={15}/>:receipt==='protected'?<ShieldCheck size={15}/>:<CircleHelp size={15}/>} {w[receipt]}</span></span></span>
         </button></div>;
