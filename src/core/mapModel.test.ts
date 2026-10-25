@@ -66,7 +66,7 @@ describe('map sorting and acknowledgement', () => {
     const rule: Rule = {identity: signing, id: 'r', app: 'App', appKey: subject, destination: connection.destination,
       port: 443, direction: 'both', action: 'ask', source: 'live', updatedAt: 1};
     const args = {groups: groupApplications([connection]), connections: [connection], rules: [rule],
-      mode: 'live' as const, extension: {...defaultExtension, stage: 'applied', appliedRuleIds: ['r']},
+      mode: 'live' as const, extension: {...defaultExtension, stage: 'applied', signed:true, instanceId:'provider', providerRevision:1, appliedRuleIds: ['r']},
       hideLoopback: true, sort: 'connections' as const, locale: 'en'};
     expect(buildAppRows(args).rows[0].destinations[0].acknowledged).toBe(true);
     expect(buildAppRows({...args, extension: {...args.extension, busy: true}}).rows[0].destinations[0].acknowledged).toBe(false);

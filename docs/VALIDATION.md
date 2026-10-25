@@ -475,3 +475,83 @@ UI検証はnative IPC／Provider／診断応答をモックした。スクリー
 ⭕️ [Pending] 実Inspector跨ぎdrag、署名済みUIとGPUの通し操作、Retina／複数画面／長時間負荷。Intel実ビルド、両architectureの公証・公開、実HTTPS再開、本番鍵切替、beta配信、実アプリの更新と再起動。既存0.1.1候補に今回のv5/ABI5は含まれず、新しい版の署名済み成果物が必要。
 
 検証後、今回専用の `/private/tmp/flowguard-later-target`・Swift scratch／module cache（計約2GB）を削除し、QA用Viteを停止した。ソース・既存署名候補・鍵・検証ログ／画像は維持した。
+
+## 通常ビルドの未使用警告整理 — 2026-10-25
+
+通常ビルドで発生していた自前コードの8件のdead_code警告を解消。名前なし投影と安定版URL検証のテスト用ラッパー、未公開router境界のテスト用facadeは`cfg(test)`、GPUのmain用open/close・sync・suspendラッパーは`gpu-qa`に限定した。呼出しのない上位suspendラッパーは削除。実運用は既存のowner付きopen/close・sync_action経路を維持する。
+
+`cargo check --manifest-path src-tauri/Cargo.toml --offline`が成功し、自前コードの警告は0件。`cargo test --manifest-path src-tauri/Cargo.toml --features gpu-qa --lib --offline`は157成功・23 ignored。`git diff --check`も成功。
+
+依存`block 0.1.6`の将来互換性警告は残る。`cargo tree -i block@0.1.6`でwgpu27→wgpu-hal27／metal0.32の依存と確認し、Cargo future-incompat reportで`static _NSConcreteStackBlock: Class`の空enum型（uninhabited static）を原因と特定した。現コンパイラーではビルド成功だが、将来のRustへの適合を保証しない。警告の全体抑制・Cargoキャッシュの直接編集・未検証のGPU依存更新は行っていない。
+
+## サービス再確認の前回差分 — 2026-10-25
+
+ROADMAPのサービスシートから、前回の完了結果との比較を実装。仕様・範囲は[service-comparison.md](service-comparison.md)。比較基準と判定はRust共有状態が所有し、WebViewは結果・選択・表示フィルターを扱う。
+
+- Rust `cargo test --manifest-path src-tauri/Cargo.toml --features gpu-qa --lib --offline`: 161成功、23 ignored。追加した4テストは比較条件全体、時刻の除外、不確定の扱い、停止／失敗／不正な結果からの基準保持、無効化後の遅延応答、前回情報のCSVを検証。既存SharedState試験も差分の通し操作まで拡張した。
+- Vitest: 25ファイル・124成功。差分フィルター、比較不可時の結果保持、不確定表示、3言語キーを検証。
+- `npm run build`: 成功。既存ガイドPNGのimportに必要なVite標準型宣言を`src/vite-env.d.ts`へ追加。画像・ガイド本文は変更していない。
+- Browser plugin not availableのためbundled Playwright＋Chromeでlocalhost:1421を検証。JA／EN／简体中文 × 1500／375pxの6条件で、比較件数、検索・状態・差分絞り込み、前回詳細／証明書情報、全結果CSV、条件変更／基準なし／確認中／停止／無効化と再確認が成功。表示とフィルターでは開始命令を送らず、明示開始だけが1回呼ばれる。CSVのブラウザー試験はダウンロード導線と全行取得、Rust試験は実際の出力内容・エスケープを検証する。
+- `http://127.0.0.1:1421`のFlowGuard／サーバー確認画面を確認。JS／consoleエラー・Vite overlay・root横溢れなし。1500／375pxの日本語スクリーンショットを視認。表は内部横スクロール、詳細は狭幅で1列になる。合成応答の`<script>`を文字として表示し、ルール0件を維持した。
+- ログ: `/tmp/flowguard-service-comparison-{rust-full,ui,build,browser}.log`。ブラウザー手順: `/tmp/flowguard-service-comparison-qa.cjs`。画像: `/tmp/flowguard-service-comparison-{ja,en,zh-CN}-{1500,375}.png`。
+
+⭕️ [Pending] 実LANのサービス／証明書更新、タイムアウトからの回復、VPN／経路変更、署名済みアプリの複数ウインドウ共有・CSV保存の通し操作。ブラウザーは合成スナップショットとテスト用IPC。今回、追加の実LAN検査・OS設定変更・再署名・Apple送信・リリース公開を行っていない。
+
+通常の`cargo check --manifest-path src-tauri/Cargo.toml --offline`も成功し、自前コードの警告は0件。既知の依存`block 0.1.6`の将来互換性警告のみ残る。`git diff --check`成功。既存0.1.1公証候補ZIPのSHA-256は`f91dc8dd53380c1132bbdf8a97e9198132dcd8bb4bcad53ed6f0bcc6c2d8fdc2`のまま。今回の検証には既存Rust targetを使用し、専用の重複ビルド領域は作成していない。
+
+## 通信マップ本体のノードグラフ — 2026-10-25
+
+`FlowMap.tsx`に既定のノードグラフ／既存一覧の切り替えを追加。新しい`TrafficGraph.tsx`／専用CSSでアプリ→接続先を表示し、線の色は保存した意図、実線／破線はルール受領確認の有無を示す。接続先ノードには意図と適用状態を別欄で表示する。1ページ4アプリ・各4接続先を上限に、ページ移動で全件へ到達できる。Rustが所有する選択とInspector、既存のGPU概要、検索／分類／名前情報を維持する。
+
+受領表示の共通ヘルパー`ruleApplied`は署名・Provider instance・revision・エラーなしを追加条件にした。`mapModel`は同一パス・同一接続先でもルール照合結果が異なる観測を混在させない。`ruleFor`の照合規則・Rust／Swift・OS設定は変更していない。
+
+- `npm test`: 27ファイル・132成功。署名等の確認根拠不足、状態変更、不確定、デモ、システム保護、UDP、異なる署名の集約、172件のページ移動とフィルター後の範囲補正を含む。
+- `npm run build`と`git diff --check`: 成功。グラフは遅延ロードし、main JSは約499.72KB。新しいライブラリ・画像・外部フォントは追加していない。
+- Browser plugin not availableのためbundled Playwright＋Chromeで`http://127.0.0.1:1421`を検証。日本語／英語／简体中文 × 1500／768／414／375／320px。ページ名・h1、初期表示、接続先選択→共有selectedId／Inspector、キーボード選択、アプリ／接続先のページ移動、検索・ルール絞り込み・Mac内通信非表示、一覧往復を確認。ノード内テキストのはみ出し・root横溢れ・Vite overlay・JSエラーなし。既存のfavicon未設定による404は分離した。
+- applied→disconnected／busy／未署名／instanceなし／revisionなし／観測エラーで、保存した意図を保持したまま受領表示が消えることを確認。デモではルールが存在しても適用済みとしない。未知方向には矢印を付けない。フロー名の取得元・時刻・未検証表示と検索、空結果も確認した。
+- 広幅と375pxを視認。アプリ名・合計／接続数・接続先・意図を大きく、補助メタデータを小さくし、実アプリアイコンの既存取得経路を維持。狭幅の接続線は個別の経路へ分離。ブラウザーでは実アイコン取得は行わない。
+- 実状態・署名情報は合成スナップショット。手順・ログは`/tmp/flowguard-traffic-graph-{qa,extra}.cjs`、`/tmp/flowguard-traffic-graph-{tests,build,browser}.log`、画像は`/tmp/flowguard-traffic-graph-*.png`。実フローや実際の遮断を検証したものではない。
+
+⭕️ [Pending] 署名済みTauriアプリでの実アイコン・実フロー・Provider受領、複数ウインドウ選択同期、Retina／複数画面。GPU描画処理・ネイティブ通信制御は今回の変更対象外。既存署名候補の更新・Apple送信・公開は行っていない。
+
+
+## LAN調査の関連グラフと状態アニメーション — 2026-10-25
+
+ROADMAPの「機器情報とサービス・診断結果の関連付け」を優先して実装。`InvestigationGraph`を機器詳細に遅延ロードし、機器→TCPポート→サービス→診断を選択すると既存記録の内訳が切り替わる。アイコン、40pxのノード件数、リング／横棒と診断の重要度を使い、説明は情報アイコンにまとめる。Rust共有スナップショットを表示側で投影し、ローカルstateは選択表示・読込中・エラーのみ。Rust／Swift、通信制御、wgpuの処理は変更していない。
+
+`investigation-graph.ts`は収集世代・対象IP・インターフェース・現行ネットワークの送信元／ネットマスク・操作IDを照合する。既存の`samePortTarget`を狭い引数型にして再利用し、IPv6の正規化／zone判定を維持。IPv4の収集アンカーとIPv6のTCP送信元を分けて確認する。古い収集・ネットワーク変更・対象違いでは線を結ばない。TCPの不確定／未完了を閉鎖として扱わず、HTTPSの確認件数にはTLS検証を要求する。Rustが未選択レポートのfindingsを省略する契約に合わせ、明示読込まで「—」を表示し、空配列を安全や0件と判定しない。
+
+- `npm test`: 28ファイル・140成功。追加8ケースで関連スコープの一致／不一致、未読込と読込後、IPv6の表記・zone、TLS未検証、3言語キーを確認。
+- `npm run build`: 成功。新しいライブラリや画像は追加せず、調査グラフと診断画面のSyslogReceiverを遅延ロード。main JSは約486.48KB、500KB超警告なし。
+- Browser plugin not availableのためbundled Playwright＋Chromeを使用。日本語／英語／简体中文 × 1500／768／414／375／320pxの15条件で、4ノード・件数・リング／横棒・キーボード選択・診断の明示読込・TCP／サービス／診断画面への移動、世代／送信元／対象変更・記録欠落・中断を検証。グラフ／ノード内とrootの横溢れ、Vite overlay、JSエラーなし（既存favicon 404を除外）。表示・移動による調査開始コマンドは0回。
+- 初回の狭幅試験でツール画面のグリッドが内容幅に拡張し、ボタンが画面外へ出る問題を検出。`tools-workspace`に`minmax(0,1fr)`を指定して修正し、全15条件で再検証。狭幅では縦グラフと全幅のIP見出しに切り替える。
+- 内訳の登場／横棒伸長、通信マップの選択時ハイライトを追加。ループするパケット移動や架空の通信量は表示しない。`prefers-reduced-motion: reduce`で調査内訳・横棒・通信マップ選択ノード／線のanimationがnoneになることをブラウザーで確認。
+- 合成スナップショット・テスト用IPCを使用。手順: `/tmp/flowguard-investigation-qa.cjs`、`/tmp/flowguard-animation-qa.cjs`。ログ: `/tmp/flowguard-investigation-{tests,build,browser-final}.log`、`/tmp/flowguard-animation-browser.log`。画像: `/tmp/flowguard-investigation-{ja,en,zh-CN}-{1500,768,414,375,320}.png`。広幅と狭幅を視認。
+
+⭕️ [Pending] 署名済みTauriアプリの実LAN調査・ネットワーク切替、フローティング／ドッキング・複数ウインドウ同期、WebKit／Retinaと実機の動きを減らす設定。今回はフロントエンドのみを変更し、実LANの追加調査・OS設定変更・再署名・公証申請・リリース公開は行っていない。
+
+
+## 2026-10-25 履歴の時間分布
+
+- `npm test`: 29ファイル・143テスト成功。区間境界、空区間、長期間の最大12区間、空／無効時刻を検証。
+- `npm run build`: 成功。
+- Browser skillが利用可能一覧にないため、既存のbundled PlaywrightとChromeを使用。`http://127.0.0.1:1420`、JA／EN／简体中文 × 1500／375／320px。デモ履歴でサイドバー→履歴→棒選択→1行→解除→4行→検索→1行→保持オフ→0件を確認。ページidentity、非空表示、Vite overlayなし、横はみ出しなし、アプリconsole errorなし。既存favicon 404は分離。
+- 画面証跡: `/tmp/flowguard-history-timeline-{ja,en,zh-CN}-{1500,375,320}.png`。日本語のdesktop／375px画像を目視確認。検証スクリプトは`/tmp/flowguard-history-timeline-qa.cjs`。
+- 新しい外部依存・Rust／Swift変更なし。ネイティブ実測、長時間・時計補正・複数ウインドウはPending。
+
+
+## 2026-10-25 通信マップの中継情報・詳細固定
+
+- `npm test`: 143件成功。`npm run build`: 成功。
+- Chrome／Playwright、`http://127.0.0.1:1420`、JA／EN／简体中文 × 1500／768／375／320px。各接続先に中継ラベルが存在し、クリックでTerminalと選択状態が共有されることを確認。詳細パネルはスクロール後もviewport上端8／16pxへ追従し、内部に独立スクロールがあることを確認。横はみ出し・Vite overlay・pageerrorなし。
+- `/tmp/flowguard-route-detail-qa.cjs`と`/tmp/flowguard-route-detail-{locale}-{width}.png`、`/tmp/flowguard-route-detail-pinned.png`。日本語1500／375px・上端固定のスクリーンショットを目視確認。
+- 実Tauri、フローティング／ドッキングのネイティブ操作は未検証。Rust共有状態・通信処理の変更なし。
+
+
+## 2026-10-25 実Tauriの通信情報・上部固定
+
+- `npm run tauri -- build --debug --bundles app`成功。`src-tauri/target/debug/bundle/macos/FlowGuard.app`をフルパス指定で起動。実WebViewのURLは`tauri://localhost`、表示版0.1.1、1440×960、日本語、実際のTCP観測。GPU既定featureあり、Extension未配置の観測状態。
+- CUAで中継ラベルをクリック。codexの172.64.155.209:443とCodex (Service)の104.18.39.21:443が詳細へ反映され、ラベルと接続先の選択色も同期。接続数の定期更新と実アイコンを確認。
+- グラフ上を下スクロールしても詳細カード上端がウインドウ上部に維持されることをスクリーンショットで確認。詳細内をスクロールするとグラフ位置を維持したまま下部の保存ボタン等に到達。詳細の先頭へ戻してアプリを起動したまま残した。ルール保存・DNS許可・OS保護設定変更は行っていない。
+- アプリ名だけの解決は旧`/Applications/FlowGuard.app` 0.1.0を起動しSIGABRTが発生（ユーザー添付レポート）。旧版の起動panicの原因はこの検証では未確定。最新バンドルでは起動・観測・上記操作に成功。インストール済み旧版の置換はしていない。
+- 今回の実機確認は開発debugバンドルのみ。署名／公証済み配布版、他言語・別画面幅、Providerによる許可／遮断・複数画面の検証へ拡大しない。

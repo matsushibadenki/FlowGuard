@@ -9,6 +9,9 @@ use std::{
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub comparison: crate::service_comparison::Comparison,
+    pub requested_ports: Vec<u16>,
+    pub source_netmask: String,
     pub operation: u64,
     pub port_operation: u64,
     pub generation: u64,
@@ -113,6 +116,8 @@ impl Plan {
     pub fn snapshot(&self) -> Snapshot {
         let t = self.tcp.snapshot();
         Snapshot {
+            requested_ports: self.tcp.ports.clone(),
+            source_netmask: self.tcp.netmask.clone(),
             port_operation: self.port_operation,
             generation: t.generation,
             target: t.target,
@@ -465,9 +470,9 @@ pub fn run(p: Plan, mut publish: impl FnMut(Snapshot), cancelled: impl Fn() -> b
     publish(result);
 }
 pub fn csv(s: &Snapshot, generation: u64, ports: u64) -> String {
-    let mut out=String::from("\u{feff}operation,port_operation,generation,stale,stage,error,mode,target,source,interface,family,port,candidate,service,status,method,product_reported,response,tls,observed_at_unix,requested_hostname,tls_server_name,tls_verification,tls_reason,certificate_issuer,certificate_not_before_unix,certificate_not_after_unix\r\n");
+    let mut out=String::from("\u{feff}operation,port_operation,generation,stale,stage,error,mode,target,source,interface,family,port,candidate,service,status,method,product_reported,response,tls,observed_at_unix,requested_hostname,tls_server_name,tls_verification,tls_reason,certificate_issuer,certificate_not_before_unix,certificate_not_after_unix,requested_ports,source_netmask,comparison_status,baseline_operation,baseline_port_operation,change,changed_fields,previous_status,previous_method,previous_service,previous_product_reported,previous_response,previous_tls,previous_tls_details_json,previous_observed_at_unix\r\n");
     for r in &s.rows {
-        let cells = vec![
+        let mut cells = vec![
             s.operation.to_string(),
             s.port_operation.to_string(),
             s.generation.to_string(),
@@ -519,6 +524,44 @@ pub fn csv(s: &Snapshot, generation: u64, ports: u64) -> String {
                 .map(|t| t.to_string())
                 .unwrap_or_default(),
         ];
+        let change = s.comparison.rows.iter().find(|c| c.port == r.port);
+        let previous = change.and_then(|c| c.previous.as_ref());
+        cells.extend([
+            s.requested_ports
+                .iter()
+                .map(u16::to_string)
+                .collect::<Vec<_>>()
+                .join(" "),
+            s.source_netmask.clone(),
+            s.comparison.status.clone(),
+            s.comparison
+                .baseline_operation
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+            s.comparison
+                .baseline_port_operation
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+            change
+                .map(|c| c.kind.clone())
+                .unwrap_or_else(|| "uncompared".into()),
+            change.map(|c| c.fields.join(" ")).unwrap_or_default(),
+            previous.map(|r| r.status.clone()).unwrap_or_default(),
+            previous.map(|r| r.method.clone()).unwrap_or_default(),
+            previous.and_then(|r| r.service.clone()).unwrap_or_default(),
+            previous.and_then(|r| r.product.clone()).unwrap_or_default(),
+            previous
+                .and_then(|r| r.response.clone())
+                .unwrap_or_default(),
+            previous.and_then(|r| r.tls.clone()).unwrap_or_default(),
+            previous
+                .and_then(|r| r.tls_details.as_ref())
+                .map(|d| serde_json::to_string(d).unwrap_or_default())
+                .unwrap_or_default(),
+            previous
+                .map(|r| r.observed_at.to_string())
+                .unwrap_or_default(),
+        ]);
         out.push_str(
             &cells
                 .iter()

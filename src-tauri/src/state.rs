@@ -22,6 +22,7 @@ pub struct Session {
     pub asks: crate::asks::Machine,
     pub updates: crate::updates::Machine,
     pub services: crate::services::Snapshot,
+    services_comparator: crate::service_comparison::Comparator,
     services_operation: u64,
     services_cancel: bool,
     services_plan: Option<crate::services::Plan>,
@@ -212,6 +213,8 @@ impl SharedState {
         s.revision += 1;
         Ok(s.snapshot())
     }
+    // Integration-test facade; production router commands are not exposed yet.
+    #[cfg(test)]
     pub fn register_router(
         &self,
         source: crate::routers::Source,
@@ -227,6 +230,8 @@ impl SharedState {
         s.revision += 1;
         Ok(s.snapshot())
     }
+    // Integration-test facade; production router commands are not exposed yet.
+    #[cfg(test)]
     pub fn remove_router(&self, id: &str) -> Result<Snapshot, crate::routers::Error> {
         let mut s = self
             .inner
@@ -236,6 +241,8 @@ impl SharedState {
         s.revision += 1;
         Ok(s.snapshot())
     }
+    // Integration-test facade; production router commands are not exposed yet.
+    #[cfg(test)]
     pub fn stop_router(&self, id: &str) -> Result<Snapshot, crate::routers::Error> {
         let mut s = self
             .inner
@@ -245,6 +252,8 @@ impl SharedState {
         s.revision += 1;
         Ok(s.snapshot())
     }
+    // Integration-test facade; production router commands are not exposed yet.
+    #[cfg(test)]
     pub fn collect_router(
         &self,
         id: &str,
@@ -350,6 +359,7 @@ impl SharedState {
                 asks: Default::default(),
                 updates,
                 services: Default::default(),
+                services_comparator: Default::default(),
                 services_operation: 0,
                 services_cancel: false,
                 services_plan: None,
@@ -936,6 +946,7 @@ impl SharedState {
         s.services_operation += 1;
         s.services_cancel = false;
         s.services = plan.snapshot();
+        s.services.comparison = s.services_comparator.begin(plan);
         s.services.operation = s.services_operation;
         s.services_plan = Some(plan.clone());
         s.document.preferences.view = "servers".into();
@@ -990,6 +1001,9 @@ impl SharedState {
         }
         result.operation = op;
         result.selected_port = s.services.selected_port;
+        if let Some(plan) = s.services_plan.clone() {
+            s.services_comparator.update(&plan, &mut result);
+        }
         s.services = result;
         s.revision += 1;
         Ok(s.snapshot())
@@ -1454,6 +1468,11 @@ impl SharedState {
             return Err("services_busy".into());
         }
         s.ports_comparator.invalidate();
+        s.services_comparator.invalidate();
+        s.services.comparison = crate::service_comparison::Comparison {
+            status: "invalidated".into(),
+            ..Default::default()
+        };
         s.discovery_operation += 1;
         s.discovery_cancel = false;
         let generation = s.discovery_operation;
@@ -1575,10 +1594,16 @@ impl SharedState {
         if s.services_plan
             .as_ref()
             .is_some_and(|p| !p.tcp.matches(&s.network))
-            && ["completed", "cancelled"].contains(&s.services.stage.as_str())
         {
-            s.services.stage = "failed".into();
-            s.services.error = Some("network_changed".into());
+            s.services_comparator.invalidate();
+            s.services.comparison = crate::service_comparison::Comparison {
+                status: "invalidated".into(),
+                ..Default::default()
+            };
+            if ["completed", "cancelled"].contains(&s.services.stage.as_str()) {
+                s.services.stage = "failed".into();
+                s.services.error = Some("network_changed".into());
+            }
         }
         if s.ports_plan
             .as_ref()
@@ -1606,6 +1631,11 @@ impl SharedState {
         if s.discovery.errors.iter().any(|e| e == "network_changed") {
             let result = s.discovery.clone();
             s.inventory.invalidate(&result);
+            s.services_comparator.invalidate();
+            s.services.comparison = crate::service_comparison::Comparison {
+                status: "invalidated".into(),
+                ..Default::default()
+            };
             if ["completed", "cancelled"].contains(&s.services.stage.as_str()) {
                 s.services.stage = "failed".into();
                 s.services.error = Some("network_changed".into());
@@ -2760,7 +2790,23 @@ mod tests {
             observed_at: 0,
         });
         complete.completed = 1;
-        state.update_services(next, complete).unwrap();
+        let first = state.update_services(next, complete).unwrap();
+        assert_eq!(first.services.comparison.status, "first");
+        let (again, started) = state.begin_services(&plan).unwrap();
+        assert_eq!(started.services.comparison.baseline_operation, Some(next));
+        state.stop_services().unwrap();
+        let mut late = first.services.clone();
+        late.operation = again;
+        let stopped = state.update_services(again, late).unwrap();
+        assert_eq!(stopped.services.comparison.status, "incomplete");
+        let (final_op, _) = state.begin_services(&plan).unwrap();
+        let mut repeated = first.services;
+        repeated.operation = final_op;
+        repeated.rows[0].product = Some("Changed/2".into());
+        let compared = state.update_services(final_op, repeated).unwrap();
+        assert_eq!(compared.services.comparison.baseline_operation, Some(next));
+        assert_eq!(compared.services.comparison.rows[0].kind, "changed");
+        let next = final_op;
         assert!(state.services_csv(job).is_err());
         assert!(state
             .services_csv(next)
@@ -2781,6 +2827,8 @@ mod tests {
         let firewall = state.snapshot().unwrap().firewall;
         let invalidated = state.observed(vec![], firewall, changed).unwrap();
         assert_eq!(invalidated.services.stage, "failed");
+        assert_eq!(invalidated.services.comparison.status, "invalidated");
+        assert!(invalidated.services.comparison.rows.is_empty());
         assert_eq!(
             invalidated.services.error.as_deref(),
             Some("network_changed")

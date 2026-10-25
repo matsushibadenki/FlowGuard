@@ -29,7 +29,9 @@ export interface InventorySnapshot {checkedIds?:string[];comments?:Record<string
 export type ServiceMode='auto'|'http'|'https'|'ssh'|'smtp';
 export interface TlsDetails {serverName:string;verification:string;reason:string;certificate:{issuer:string|null;notBefore:number|null;notAfter:number|null}|null}
 export interface ServiceRow {tlsDetails?:TlsDetails|null;port:number;candidate:string;service:string|null;status:string;method:string;product:string|null;response:string|null;tls:string|null;observedAt:number}
-export interface ServiceSnapshot {hostname?:string|null;operation:number;portOperation:number;generation:number;target:string;sourceAddress:string;interface:string;family:string;mode:string;stage:string;total:number;completed:number;rows:ServiceRow[];error:string|null;selectedPort:number|null}
+export interface ServiceChange {port:number;kind:'changed'|'unchanged'|'uncertain'|'uncompared';fields:string[];previous:ServiceRow|null}
+export interface ServiceComparison {status:string;baselineOperation:number|null;baselinePortOperation:number|null;rows:ServiceChange[]}
+export interface ServiceSnapshot {comparison?:ServiceComparison;requestedPorts?:number[];sourceNetmask?:string;hostname?:string|null;operation:number;portOperation:number;generation:number;target:string;sourceAddress:string;interface:string;family:string;mode:string;stage:string;total:number;completed:number;rows:ServiceRow[];error:string|null;selectedPort:number|null}
 
 export interface UpdateSnapshot {channel?:'stable'|'beta';history?:{at:number;status:string;from:string;to:string|null}[];historyPersistent?:boolean;stage:string;operation:number;currentVersion:string;version:string|null;notes:string|null;checkedAt:number|null;downloaded:number;total:number|null;error:string|null;development:boolean}
 

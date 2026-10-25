@@ -426,3 +426,9 @@
  .workspace-map .panel-left{grid-template-columns:340px minmax(0,1fr)}
  .workspace-map .map-panes{grid-template-columns:minmax(240px,340px) minmax(0,1fr)}
 }
+/* Keep the selected communication inspector at the viewport top while browsing branches. */
+.workspace-map .map-workspace>.inspector{position:sticky;top:16px;max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contain;z-index:12;scrollbar-gutter:stable}
+@media(max-width:850px){
+ .workspace-map .map-workspace>.inspector{grid-column:1;grid-row:1;top:8px;max-height:42dvh}
+ .workspace-map .map-workspace>.map-main{grid-column:1;grid-row:2}
+}

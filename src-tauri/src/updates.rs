@@ -293,6 +293,7 @@ pub fn can_install(s: &crate::model::Snapshot) -> bool {
             .iter()
             .all(|stage| !["running", "cancelling"].contains(&stage.as_str()))
 }
+#[cfg(test)]
 fn validate_release(current: &str, version: &str, url: &str) -> Result<(), String> {
     validate_channel_release(current, version, url, "stable")
 }

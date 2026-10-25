@@ -7,11 +7,12 @@ import type {Rule} from './types';
 const rule:Rule={identity:signing,id:'r',app:'Test',appKey:subject,destination:'example.com',port:443,direction:'both',action:'block',source:'live',updatedAt:1};
 describe('provider acknowledgement UI contract',()=>{
  it('requires current applied state and a live rule receipt',()=>{
-  const applied={...defaultExtension,stage:'applied',appliedRuleIds:['r']};
+  const applied={...defaultExtension,stage:'applied',signed:true,instanceId:'provider',providerRevision:1,appliedRuleIds:['r']};
   expect(ruleApplied(rule,applied)).toBe(true);
   expect(ruleApplied({...rule,source:'demo'},applied)).toBe(false);
   for(const stage of ['initial_sync','disabled','disabling','removed','removing','ready','configuration_saved','stale','failed','disconnected','applying'])expect(ruleApplied(rule,{...applied,stage})).toBe(false);
   expect(ruleApplied(rule,{...applied,busy:true})).toBe(false);
+  for(const patch of [{signed:false},{instanceId:null},{instanceId:''},{providerRevision:null},{error:'lost'}])expect(ruleApplied(rule,{...applied,...patch})).toBe(false);
  });
  it('explains stale and uncertain policies instead of claiming observation only',()=>{
   expect(policyNotice({...defaultExtension,stage:'stale'},'live')).toBe('stalePolicyHelp');

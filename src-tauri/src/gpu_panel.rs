@@ -218,10 +218,6 @@ pub fn destroy() {
     #[cfg(all(feature = "gpu", target_os = "macos"))]
     platform::destroy();
 }
-pub fn suspend() {
-    #[cfg(all(feature = "gpu", target_os = "macos"))]
-    platform::suspend();
-}
 #[cfg(test)]
 mod tests {
     use super::*;

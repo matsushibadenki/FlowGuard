@@ -46,6 +46,7 @@ impl Filter {
     pub fn matches_source(&self, mode: &str) -> bool {
         mode == self.source.as_str()
     }
+    #[cfg(test)]
     pub fn project(&self, connections: Vec<Connection>, rules: &[Rule]) -> Vec<Connection> {
         self.project_with_names(connections, rules, &[])
     }

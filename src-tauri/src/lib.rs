@@ -29,6 +29,7 @@ mod ports;
 mod renderer;
 pub mod routers;
 mod security;
+mod service_comparison;
 mod services;
 mod state;
 mod syslog;

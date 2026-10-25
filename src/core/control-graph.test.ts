@@ -1,0 +1,10 @@
+import {describe,it,expect} from 'vitest';
+import {controlGraphState,controlGraphWords} from './control-graph';
+import {defaultExtension} from './enforcement';
+import type {Snapshot} from './types';
+const make=()=>({document:{preferences:{mode:'live'},rules:[]},extension:{...defaultExtension,stage:'applied',signed:true,instanceId:'provider',providerRevision:4},firewall:{error:null,observer:'mac_socket'},lastObserved:100,connections:[{destination:'127.0.0.1'},{destination:'127.0.0.1'},{destination:'192.168.1.1'}],applications:[{app:'Example'}]} as unknown as Snapshot);
+describe('control graph state evidence',()=>{
+ it('never presents demo, failed observation or incomplete receipts as live confirmation',()=>{for(const change of [(s:Snapshot)=>{s.document.preferences.mode='demo';},(s:Snapshot)=>{s.firewall.error='failed';},(s:Snapshot)=>{s.extension.busy=true;},(s:Snapshot)=>{s.extension.signed=false;},(s:Snapshot)=>{s.extension.instanceId=null;},(s:Snapshot)=>{s.extension.providerRevision=null;},(s:Snapshot)=>{s.extension.stage='disconnected';}]){const s=make();change(s);expect(controlGraphState(s).acknowledged).toBe(false);}expect(controlGraphState(make()).acknowledged).toBe(true);});
+ it('keeps observation, saved intent and policy receipt independent',()=>{const s=make();s.lastObserved=null;s.extension.stage='ready';s.document.rules=[{source:'live',action:'block'},{source:'demo',action:'allow'}] as Snapshot['document']['rules'];const state=controlGraphState(s);expect(state.observed).toBe(false);expect(state.ready).toBe(true);expect(state.acknowledged).toBe(false);expect(state.actions).toEqual({allow:0,block:1,ask:0});expect(state.destinations).toBe(2);expect(state.connections).toBe(3);s.document.preferences.mode='demo';expect(controlGraphState(s).actions).toEqual({allow:1,block:0,ask:0});});
+ it('provides six matching node explanations in each language',()=>{for(const w of Object.values(controlGraphWords)){expect(Object.keys(w).sort()).toEqual(Object.keys(controlGraphWords.en).sort());expect(Object.keys(w.nodes).sort()).toEqual(Object.keys(w.details).sort());expect(Object.values(w.details).every(Boolean)).toBe(true);}});
+});

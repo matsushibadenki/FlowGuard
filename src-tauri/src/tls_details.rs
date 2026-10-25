@@ -1,6 +1,6 @@
 //! Display-only certificate metadata. Trust decisions remain entirely in rustls/webpki.
 use serde::Serialize;
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Details {
     pub server_name: String,
@@ -8,7 +8,7 @@ pub struct Details {
     pub reason: String,
     pub certificate: Option<Certificate>,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Certificate {
     pub issuer: Option<String>,

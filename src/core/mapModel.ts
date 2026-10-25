@@ -47,7 +47,8 @@ export function buildAppRows(args: {
       const intent = rule?.action ?? 'none';
       row.byClass[klass]++; row.intentCounts[intent]++;
       if (klass === 'public' && intent === 'none') row.attention++;
-      const key = `${c.destination}|${c.port}|${c.protocol}|${c.direction}`;
+      // A path may contain different signing identities; do not merge different rule matches.
+      const key = JSON.stringify([c.destination, c.port, c.protocol, c.direction, rule?.id ?? null]);
       const previous = destinations.get(key);
       if (previous) {
         previous.connectionIds.push(c.id);

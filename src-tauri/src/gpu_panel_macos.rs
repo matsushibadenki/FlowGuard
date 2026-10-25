@@ -54,6 +54,7 @@ impl Drop for Panel {
         self.container.removeFromSuperview();
     }
 }
+#[cfg(feature = "gpu-qa")]
 pub fn open() -> u64 {
     open_for("main")
 }
@@ -73,6 +74,7 @@ pub fn open_for(owner: &str) -> u64 {
         c.next
     })
 }
+#[cfg(feature = "gpu-qa")]
 pub fn close(id: u64) {
     close_for(id, "main")
 }
@@ -93,6 +95,7 @@ pub fn destroy() {
         c.panel = None;
     });
 }
+#[cfg(feature = "gpu-qa")]
 pub fn suspend() {
     CONTROLLER.with_borrow(|c| {
         if let Some(p) = &c.panel {
@@ -234,6 +237,7 @@ impl Panel {
         Ok(())
     }
 }
+#[cfg(feature = "gpu-qa")]
 pub fn sync(
     app: &tauri::AppHandle,
     window: tauri::Window,
