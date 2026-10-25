@@ -1,10 +1,12 @@
 mod app_icons;
 mod asks;
 mod destination_names;
+mod diagnostics;
 mod discovery;
 mod enforcement;
 mod extension;
 mod firewall_control;
+mod flow_names;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 mod gpu_filter;
@@ -33,11 +35,63 @@ mod syslog;
 mod system_protection;
 mod tls_details;
 mod unknown_flows;
+mod update_cache;
+mod update_trust;
 mod updates;
 use model::{Command, Rule, Snapshot};
 use state::SharedState;
 use tauri::{Emitter, Manager};
 
+#[tauri::command]
+async fn clear_update_download_cache(app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let snapshot = app.state::<SharedState>().snapshot()?;
+    if ["checking", "downloading", "installing"].contains(&snapshot.updates.stage.as_str()) {
+        return Err("updater_busy".into());
+    }
+    let root = app
+        .path()
+        .app_cache_dir()
+        .map_err(|_| "update_cache_failed")?
+        .join("updater-v1");
+    tauri::async_runtime::spawn_blocking(move || update_cache::Cache::clear(&root))
+        .await
+        .map_err(|_| "update_cache_failed")??;
+    app.state::<SharedState>().snapshot()
+}
+#[tauri::command]
+fn set_flow_names(
+    app: tauri::AppHandle,
+    enabled: bool,
+    search: bool,
+    operation: u64,
+) -> Result<Snapshot, String> {
+    let next = app
+        .state::<SharedState>()
+        .configure_flow_names(enabled, search, operation)?;
+    let _ = app.emit("state-changed", &next);
+    Ok(next)
+}
+#[tauri::command]
+async fn collect_flow_names(app: tauri::AppHandle, operation: u64) -> Result<Snapshot, String> {
+    let (ticket, next) = app.state::<SharedState>().begin_flow_names(operation)?;
+    let _ = app.emit("state-changed", next);
+    let work = ticket.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let executable = std::env::current_exe().map_err(|_| "bundle_path")?;
+        let contents = executable
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or("bundle_path")?;
+        flow_names::query(contents, &work)
+    })
+    .await
+    .unwrap_or_else(|_| Err("flow_name_worker".into()));
+    let next = app
+        .state::<SharedState>()
+        .finish_flow_names(&ticket, result)?;
+    let _ = app.emit("state-changed", &next);
+    Ok(next)
+}
 #[tauri::command]
 async fn set_destination_names(
     app: tauri::AppHandle,
@@ -286,6 +340,32 @@ fn stop_services(app: tauri::AppHandle) -> Result<Snapshot, String> {
     let s = app.state::<SharedState>().stop_services()?;
     let _ = app.emit("state-changed", &s);
     Ok(s)
+}
+#[tauri::command]
+fn diagnostic_action(
+    app: tauri::AppHandle,
+    service_operation: u64,
+    report: u64,
+    finding: Option<String>,
+    action: String,
+    disposition: Option<diagnostics::Disposition>,
+    reason: Option<String>,
+) -> Result<Snapshot, String> {
+    let next = app.state::<SharedState>().diagnostic_action(
+        service_operation,
+        report,
+        finding,
+        action,
+        disposition,
+        reason,
+    )?;
+    let _ = app.emit("state-changed", &next);
+    Ok(next)
+}
+#[tauri::command]
+fn diagnostic_export(app: tauri::AppHandle, report: u64, format: String) -> Result<String, String> {
+    app.state::<SharedState>()
+        .diagnostic_export(report, &format)
 }
 #[tauri::command]
 fn services_csv(app: tauri::AppHandle, operation: u64) -> Result<String, String> {
@@ -973,7 +1053,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if window.label() == "main"
+            if ["main", "gpu-map"].contains(&window.label())
                 && matches!(
                     event,
                     tauri::WindowEvent::Resized(_)
@@ -982,9 +1062,9 @@ pub fn run() {
                 )
             {
                 if matches!(event, tauri::WindowEvent::Destroyed) {
-                    gpu_panel::destroy();
+                    gpu_panel::window_event(window.label(), true);
                 } else {
-                    gpu_panel::suspend();
+                    gpu_panel::window_event(window.label(), false);
                 }
             }
             if window.label() == "main"
@@ -1027,11 +1107,13 @@ pub fn run() {
             answer_ask,
             check_update,
             download_update,
+            clear_update_download_cache,
             cancel_update,
             install_update,
             start_services,
             gpu_panel::gpu_panel_available,
             gpu_panel::open_gpu_panel,
+            gpu_panel::float_gpu_panel,
             gpu_panel::sync_gpu_panel,
             gpu_panel::close_gpu_panel,
             control_firewall,
@@ -1041,6 +1123,10 @@ pub fn run() {
             select_syslog,
             stop_services,
             services_csv,
+            diagnostic_action,
+            set_flow_names,
+            collect_flow_names,
+            diagnostic_export,
             select_service,
             start_lan_ports,
             open_lan_ports,
@@ -1088,4 +1174,13 @@ pub fn run_gpu_panel_check() -> Result<(), String> {
 
 fn app_context() -> tauri::Context<tauri::Wry> {
     tauri::generate_context!()
+}
+
+/// Local release tooling only; no OS installation or network access.
+pub fn verify_update_artifact(
+    path: &std::path::Path,
+    version: &str,
+    channel: &str,
+) -> Result<(), String> {
+    updates::verify_artifact(path, version, channel)
 }

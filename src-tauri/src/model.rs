@@ -26,6 +26,8 @@ pub struct Connection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Rule {
+    #[serde(default = "default_transport")]
+    pub transport: String,
     #[serde(default)]
     pub system_exception: bool,
     #[serde(default = "default_ask_action")]
@@ -45,6 +47,8 @@ pub struct Rule {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
+    #[serde(default = "default_channel")]
+    pub update_channel: String,
     #[serde(default)]
     pub history_retention: crate::history::Retention,
     #[serde(default)]
@@ -62,6 +66,12 @@ pub struct Preferences {
     #[serde(default = "default_auto_updates")]
     pub auto_updates: bool,
 }
+fn default_transport() -> String {
+    "TCP".into()
+}
+fn default_channel() -> String {
+    "stable".into()
+}
 fn default_ask_action() -> String {
     "allow".into()
 }
@@ -71,6 +81,7 @@ fn default_auto_updates() -> bool {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            update_channel: default_channel(),
             history_retention: Default::default(),
             protection_guide_seen: false,
             ask_timeout_action: default_ask_action(),
@@ -153,6 +164,9 @@ pub fn group_applications(connections: &[Connection]) -> Vec<ApplicationGroup> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub flow_names: crate::flow_names::Snapshot,
+    pub gpu_filter: crate::gpu_filter::Filter,
+    pub diagnostics: crate::diagnostics::Snapshot,
     pub destination_names: crate::destination_names::Snapshot,
     pub firewall_control: crate::firewall_control::Snapshot,
     pub syslog: crate::syslog::Snapshot,
@@ -179,6 +193,9 @@ pub struct Snapshot {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Command {
+    SetUpdateChannel {
+        channel: String,
+    },
     SetHistoryRetention {
         retention: crate::history::Retention,
     },
@@ -258,7 +275,8 @@ pub fn enforceable(rule: &Rule) -> bool {
             .is_some_and(|i| i.valid() && rule.app_key == i.key())
 }
 pub fn validate_rule(rule: &Rule) -> bool {
-    ["allow", "block"].contains(&rule.timeout_action.as_str())
+    rule.transport == "TCP"
+        && ["allow", "block"].contains(&rule.timeout_action.as_str())
         && (rule.identity.is_none()
             || (rule.source == "live"
                 && rule
@@ -333,6 +351,7 @@ mod tests {
     fn rule_scope_includes_port_direction_and_source() {
         let c = demo_connections().remove(0);
         let mut r = Rule {
+            transport: "TCP".into(),
             system_exception: false,
             timeout_action: "allow".into(),
             identity: None,

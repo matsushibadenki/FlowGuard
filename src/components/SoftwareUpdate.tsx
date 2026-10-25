@@ -1,3 +1,4 @@
+import {UpdateExtras} from './UpdateExtras';
 import {useState} from 'react';
 import {DownloadCloud} from 'lucide-react';
 import {dispatch,native,checkUpdate,downloadUpdate,cancelUpdate,installUpdate} from '../core/store';
@@ -17,6 +18,6 @@ export function SoftwareUpdate({snapshot,onAction,nativeOverride}:{snapshot:Snap
  {u.stage==='downloading'&&<><progress aria-label={w.downloading} value={progress??undefined} max={100}/><small>{(u.downloaded/1048576).toFixed(1)} MB{u.total&&` / ${(u.total/1048576).toFixed(1)} MB`}</small></>}
  {u.error&&<p role="alert">{w[u.error as 'check_failed']??w.error}</p>}{error&&<p role="alert">{w.error}</p>}{u.development&&<small className="update-note">{w.development}</small>}{u.stage==='ready'&&!canInstall&&!u.development&&<p role="status">{w.wait}</p>}
  <div className="button-row extension-actions"><button className="secondary-button" disabled={!desktop||busy||pending||u.stage==='ready'} onClick={()=>void action('check')}>{w.check}</button><button className="secondary-button" disabled={!desktop||pending||u.stage!=='available'} onClick={()=>void action('download')}>{w.download}</button><button className="primary-button" disabled={!desktop||pending||!canInstall} onClick={()=>void action('install')}>{w.install}</button>{['checking','available','downloading','ready','failed'].includes(u.stage)&&<button className="text-button" disabled={!desktop||pending} onClick={()=>void action('cancel')}>{w.cancel}</button>}</div>
- {u.notes&&<details className="update-notes"><summary>{w.notes}</summary><p>{u.notes}</p></details>}
+ <UpdateExtras snapshot={snapshot} desktop={desktop}/>{u.notes&&<details className="update-notes"><summary>{w.notes}</summary><p>{u.notes}</p></details>}
  </section>;
 }

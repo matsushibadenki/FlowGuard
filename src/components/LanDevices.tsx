@@ -1,3 +1,4 @@
+import {downloadEvidence} from '../core/evidence-sheet';
 import {LanTable} from './LanTable';
 import {PortChecks} from './PortChecks';
 import {LanDetails,changeKeys} from './LanDetails';
@@ -17,7 +18,7 @@ export function LanDevices({snapshot,t,native,onSelect=selectLanDevice,onExport=
  const portsBusy=['running','cancelling'].includes(snapshot.ports.stage)||['running','cancelling'].includes(snapshot.services.stage);
  const rows=inventory.rows.filter(r=>matchesDevice(r.device,search)).sort((a,b)=>(descending?-1:1)*addressCompare(a.device.address,b.device.address));
  const time=(timestamp:number)=>new Intl.DateTimeFormat(snapshot.document.preferences.locale,{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(timestamp*1000);
- async function exportCsv(){setError(null);try{const text=await onExport(inventory.generation);const url=URL.createObjectURL(new Blob([text],{type:'text/csv;charset=utf-8'}));const anchor=document.createElement('a');anchor.href=url;anchor.download=`flowguard-lan-${inventory.generation}.csv`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{setError('lanExportError');}}
+ async function exportCsv(){setError(null);try{const text=await onExport(inventory.generation);downloadEvidence(text,`flowguard-lan-${inventory.generation}.csv`);}catch{setError('lanExportError');}}
  async function start(active:boolean){if(!choice)return;setError(null);setPending(true);try{await startLanDiscovery(choice.interface,choice.address,active,nameMode);}catch{setError('lanStartError');}finally{setPending(false);}}
  async function stop(){setError(null);setPending(true);try{await stopLanDiscovery();}catch{setError('lanStartError');}finally{setPending(false);}}
  return <section className="surface lan-workspace"><div className="section-head"><h2>{t('lanDevices')}</h2><span role="status">{t(stages[job.stage]??'lanFailed')}</span></div><p className="application-help">{t('lanHelp')}</p>

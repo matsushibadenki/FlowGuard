@@ -1,3 +1,4 @@
+import {matchesEvidence} from './evidence-sheet';
 import type {NetworkSnapshot} from './types';
 export function lanRange(row:NetworkSnapshot['addresses'][number]) {
  const octets=row.address.split('.').map(Number), mask=row.netmask.split('.').map(Number);
@@ -17,5 +18,5 @@ export function addressCompare(a:string,b:string) {
 }
 
 export function matchesDevice(device:Pick<import('./types').LanDevice,'address'|'mac'|'interface'|'name'>,search:string) {
- return `${device.address} ${device.mac??''} ${device.interface} ${device.name.value??''}`.toLowerCase().includes(search.toLowerCase());
+ return matchesEvidence(`${device.address} ${device.mac??''} ${device.interface} ${device.name.value??''}`,search);
 }

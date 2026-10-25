@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "rootValidUntil": "1.1.9",
+  "delegations": [
+    {
+      "id": "test-next",
+      "publicKey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdFOUFDOEZBMjIyRDlGNTUKUldSVm55MGkrc2lhZmpoU1Fpakk1OFBONmRzWVpPUnZQM2NacXAxN2dWN0U1MEdYcCtnZHJ6UkYK",
+      "minVersion": "1.2.0",
+      "channels": [
+        "stable",
+        "beta"
+      ],
+      "authorization": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVROVZ1S1hXUXU5Y1RJUDJSSDFTRWRDVjdGdFVxTFlTQnEzK0NtbERNQjIvcEdWT2xoSENrR1dTM1FJdXN1Z1NJblZmS0NKVkhZQVF6WCtxakl4OWU1TDFJYlU5c25ZRlFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTE5Njk0CWZpbGU6Z3JhbnQudHh0CXZlcnNpb246MS4yLjAKdjJLOFM5d2M1akt4cWNvQ1NPbXp1OE1iYVMvZkwrWUdZZGRnajVTd3FkVitVUWhkS2ZEVlpVb1pidHRSdng1bGs1OXEvZUszQmVxNitrYzFBR2JrQ0E9PQo="
+    }
+  ]
+}

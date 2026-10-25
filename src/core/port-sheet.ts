@@ -1,7 +1,7 @@
+import {evidenceRows} from './evidence-sheet';
 import type {PortSnapshot} from './types';
 export function portRows(job:PortSnapshot,search:string,status:string,descending=false){
- const needle=search.trim().toLowerCase();
- return job.rows.filter(row=>(status==='all'||row.status===status)&&(!needle||[job.target,job.interface,job.sourceAddress,String(row.port),'TCP'].some(value=>value.toLowerCase().includes(needle)))).sort((a,b)=>(descending?-1:1)*(a.port-b.port));
+ return evidenceRows(job.rows,search,status,row=>[job.target,job.interface,job.sourceAddress,String(row.port),'TCP'].join(' '),row=>row.status,(a,b)=>(descending?-1:1)*(a.port-b.port));
 }
 export function portScope(ports:number[]){
  if(!ports.length)return '—';

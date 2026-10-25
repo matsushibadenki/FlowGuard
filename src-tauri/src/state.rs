@@ -8,6 +8,9 @@ pub struct SharedState {
     _document_lock: fs::File,
 }
 pub struct Session {
+    pub flow_names: crate::flow_names::Machine,
+    pub gpu_filter: crate::gpu_filter::Filter,
+    diagnostics: crate::diagnostics::Snapshot,
     destination_names: crate::destination_names::Machine,
     firewall_control: crate::firewall_control::Machine,
     syslog: crate::syslog::Machine,
@@ -300,7 +303,8 @@ impl SharedState {
             return Err("Invalid saved rules".into());
         }
         let p = &document.preferences;
-        if !["allow", "block"].contains(&p.ask_timeout_action.as_str())
+        if !["stable", "beta"].contains(&p.update_channel.as_str())
+            || !["allow", "block"].contains(&p.ask_timeout_action.as_str())
             || !["ja", "en", "zh-CN"].contains(&p.locale.as_str())
             || ![
                 "map",
@@ -320,16 +324,23 @@ impl SharedState {
         }
         let mut document = document;
         document.preferences.panel = "right".into(); // no floating window survives restart
+        let updates = crate::updates::Machine::with_history(
+            &path.with_extension("updates.json"),
+            &document.preferences.update_channel,
+        );
         Ok(Self {
             path,
             _document_lock: document_lock,
             inner: Mutex::new(Session {
+                flow_names: Default::default(),
+                gpu_filter: Default::default(),
+                diagnostics: Default::default(),
                 destination_names: Default::default(),
                 firewall_control: Default::default(),
                 syslog: Default::default(),
                 routers: Default::default(),
                 asks: Default::default(),
-                updates: Default::default(),
+                updates,
                 services: Default::default(),
                 services_operation: 0,
                 services_cancel: false,
@@ -419,6 +430,15 @@ impl SharedState {
             return Err("update_installing".into());
         }
         match command {
+            Command::SetUpdateChannel { channel } => {
+                if !["stable", "beta"].contains(&channel.as_str())
+                    || ["checking", "downloading", "ready", "installing"]
+                        .contains(&s.updates.snapshot.stage.as_str())
+                {
+                    return Err("updater_busy".into());
+                }
+                s.document.preferences.update_channel = channel;
+            }
             Command::SetHistoryRetention { retention } => {
                 s.document.preferences.history_retention = retention
             }
@@ -552,6 +572,7 @@ impl SharedState {
                     source, subject, c.destination, c.port, direction
                 );
                 let rule = Rule {
+                    transport: "TCP".into(),
                     system_exception: false,
                     timeout_action: s.document.preferences.ask_timeout_action.clone(),
                     identity,
@@ -647,12 +668,26 @@ impl SharedState {
             s.selected_id = previous_selected;
             return Err(e);
         }
+        if previous.preferences.update_channel != s.document.preferences.update_channel {
+            s.updates.snapshot.channel = s.document.preferences.update_channel.clone();
+            s.updates.snapshot.stage = "idle".into();
+            s.updates.update = None;
+            s.updates.bytes = None;
+        }
         // Drop history only after the preference was saved successfully.
         let retention = s.document.preferences.history_retention;
         retention.prune(&mut s.history, now());
         retention.prune(&mut s.demo_history, now());
         if previous.preferences.mode != s.document.preferences.mode {
             s.destination_names.invalidate();
+            {
+                let mode = s.document.preferences.mode.clone();
+                let network = s.network.clone();
+                let instance = s.extension.status.instance_id.clone();
+                let connections = s.connections.clone();
+                s.flow_names
+                    .observe(&mode, &network, instance.as_deref(), &connections);
+            }
         }
         let rules = s.document.rules.clone();
         s.extension.reconcile(&rules);
@@ -839,7 +874,12 @@ impl SharedState {
         change: impl FnOnce(&mut crate::updates::Machine) -> Result<T, String>,
     ) -> Result<(T, Snapshot), String> {
         let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        let old_stage = s.updates.snapshot.stage.clone();
         let value = change(&mut s.updates)?;
+        if old_stage != s.updates.snapshot.stage {
+            s.updates
+                .record_history(&self.path.with_extension("updates.json"));
+        }
         s.revision += 1;
         Ok((value, s.snapshot()))
     }
@@ -859,6 +899,8 @@ impl SharedState {
             return Err("update_install_unavailable".into());
         }
         let (op, update, bytes) = s.updates.install()?;
+        s.updates
+            .record_history(&self.path.with_extension("updates.json"));
         s.revision += 1;
         Ok((op, update, bytes, s.snapshot()))
     }
@@ -935,6 +977,200 @@ impl SharedState {
         result.operation = op;
         result.selected_port = s.services.selected_port;
         s.services = result;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn configure_flow_names(
+        &self,
+        enabled: bool,
+        search: bool,
+        operation: u64,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if enabled && s.updates.snapshot.stage == "installing" {
+            return Err("update_installing".into());
+        }
+        let mode = s.document.preferences.mode.clone();
+        let network = s.network.clone();
+        let instance = if s.extension.status.signed {
+            s.extension.status.instance_id.clone()
+        } else {
+            None
+        };
+        s.flow_names.configure(
+            enabled,
+            search,
+            operation,
+            &mode,
+            &network,
+            instance.as_deref(),
+        )?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn begin_flow_names(
+        &self,
+        operation: u64,
+    ) -> Result<(crate::flow_names::Ticket, Snapshot), String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.updates.snapshot.stage == "installing" {
+            return Err("update_installing".into());
+        }
+        let mode = s.document.preferences.mode.clone();
+        let network = s.network.clone();
+        let instance = s.extension.status.instance_id.clone();
+        let ticket = s
+            .flow_names
+            .begin(operation, &mode, &network, instance.as_deref())?;
+        s.revision += 1;
+        Ok((ticket, s.snapshot()))
+    }
+    pub fn finish_flow_names(
+        &self,
+        ticket: &crate::flow_names::Ticket,
+        result: Result<crate::flow_names::Reply, String>,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        let mode = s.document.preferences.mode.clone();
+        let network = s.network.clone();
+        let instance = s.extension.status.instance_id.clone();
+        let connections = s.connections.clone();
+        s.flow_names.finish(
+            ticket,
+            result,
+            &mode,
+            &network,
+            instance.as_deref(),
+            &connections,
+        );
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn diagnostic_export(&self, report: u64, format: &str) -> Result<String, String> {
+        let s = self.inner.lock().map_err(|_| "state_lock")?;
+        crate::diagnostics::export(s.diagnostics.report(report)?, format)
+    }
+    pub fn diagnostic_action(
+        &self,
+        op: u64,
+        report: u64,
+        finding: Option<String>,
+        action: String,
+        disposition: Option<crate::diagnostics::Disposition>,
+        reason: Option<String>,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.updates.snapshot.stage == "installing" {
+            return Err("update_installing".into());
+        }
+        match action.as_str() {
+            "assess" => {
+                if op != s.services.operation
+                    || s.services.generation != s.inventory.snapshot.generation
+                    || s.services.port_operation != s.ports.operation
+                    || s.ports.stage != "completed"
+                {
+                    return Err("stale_services".into());
+                }
+                let job = s.services.clone();
+                s.diagnostics.assess(&job, now())?;
+            }
+            "select" => s.diagnostics.select(report, finding)?,
+            "disposition" => s.diagnostics.disposition(
+                report,
+                finding.as_deref().ok_or("finding_required")?,
+                disposition.ok_or("disposition_required")?,
+                reason.as_deref().unwrap_or(""),
+            )?,
+            "services" | "network" => {
+                let r = s.diagnostics.report(report)?.clone();
+                if r.generation != s.inventory.snapshot.generation
+                    || r.service_operation != s.services.operation
+                    || s.services.error.is_some()
+                {
+                    return Err("stale_diagnostic_target".into());
+                }
+                let port = if let Some(id) = finding.as_ref() {
+                    Some(
+                        r.findings
+                            .iter()
+                            .find(|f| &f.id == id)
+                            .ok_or("stale_finding")?
+                            .port,
+                    )
+                } else {
+                    None
+                };
+                let device = s
+                    .inventory
+                    .snapshot
+                    .rows
+                    .iter()
+                    .find(|d| {
+                        d.device.address == r.target
+                            && d.device.interface == r.interface
+                            && d.kind != "not_seen"
+                    })
+                    .map(|d| d.device.id.clone());
+                if action == "network" && device.is_none() {
+                    return Err("stale_diagnostic_target".into());
+                }
+                let old = s.document.clone();
+                s.document.preferences.view = if action == "services" {
+                    "servers"
+                } else {
+                    "network"
+                }
+                .into();
+                if let Err(e) = self.persist(&s.document) {
+                    s.document = old;
+                    return Err(e);
+                }
+                if action == "services" {
+                    s.services.selected_port = port;
+                } else {
+                    s.inventory.snapshot.selected_id = device;
+                    s.ports_focus += 1;
+                }
+            }
+            "rule" => {
+                let r = s.diagnostics.report(report)?;
+                if r.generation != s.inventory.snapshot.generation
+                    || r.service_operation != s.services.operation
+                    || s.services.error.is_some()
+                    || s.document.preferences.mode != "live"
+                {
+                    return Err("stale_diagnostic_target".into());
+                }
+                let f = r
+                    .findings
+                    .iter()
+                    .find(|f| Some(&f.id) == finding.as_ref())
+                    .ok_or("stale_finding")?;
+                let candidates: Vec<_> = s
+                    .connections
+                    .iter()
+                    .filter(|c| {
+                        c.destination == r.target
+                            && c.port == f.port
+                            && c.protocol == "TCP"
+                            && c.identity.as_ref().is_some_and(|i| i.valid())
+                    })
+                    .collect();
+                if candidates.len() != 1 {
+                    return Err("ambiguous_or_unobserved_application".into());
+                }
+                let selected = candidates[0].id.clone();
+                let old = s.document.clone();
+                s.document.preferences.view = "map".into();
+                if let Err(e) = self.persist(&s.document) {
+                    s.document = old;
+                    return Err(e);
+                }
+                s.selected_id = Some(selected);
+            }
+            _ => return Err("invalid_diagnostic_action".into()),
+        }
         s.revision += 1;
         Ok(s.snapshot())
     }
@@ -1179,8 +1415,28 @@ impl SharedState {
         s.destination_names.observe(&network);
         if s.firewall.error.is_some() {
             s.destination_names.invalidate();
+            {
+                let mode = s.document.preferences.mode.clone();
+                let network = s.network.clone();
+                let instance = s.extension.status.instance_id.clone();
+                let connections = s.connections.clone();
+                s.flow_names
+                    .observe(&mode, &network, instance.as_deref(), &connections);
+            }
         }
         s.network = network;
+        {
+            let mode = s.document.preferences.mode.clone();
+            let network = s.network.clone();
+            let instance = if s.firewall.error.is_none() {
+                s.extension.status.instance_id.clone()
+            } else {
+                None
+            };
+            let connections = s.connections.clone();
+            s.flow_names
+                .observe(&mode, &network, instance.as_deref(), &connections);
+        }
         if s.services_plan
             .as_ref()
             .is_some_and(|p| !p.tcp.matches(&s.network))
@@ -1232,6 +1488,21 @@ impl SharedState {
     }
 }
 impl Session {
+    pub fn flow_name_snapshot(&self) -> crate::flow_names::Snapshot {
+        self.flow_names.snapshot(
+            &self.document.preferences.mode,
+            &self.network,
+            if self.extension.status.signed && self.firewall.error.is_none() {
+                self.extension.status.instance_id.as_deref()
+            } else {
+                None
+            },
+        )
+    }
+
+    pub fn snapshot_for_gpu(&self) -> Snapshot {
+        self.snapshot()
+    }
     fn security_snapshot(&self) -> crate::security::SecuritySnapshot {
         let demo = self.document.preferences.mode == "demo";
         let base = crate::security::normalize(&self.visible(), demo, self.last_observed);
@@ -1253,6 +1524,9 @@ impl Session {
         let connections = self.visible();
         let layout = renderer::layout(&connections);
         Snapshot {
+            flow_names: self.flow_name_snapshot(),
+            gpu_filter: self.gpu_filter.clone(),
+            diagnostics: self.diagnostics.clone(),
             destination_names: self.destination_names.snapshot(),
             firewall_control: self.firewall_control.snapshot.clone(),
             syslog: self.syslog.snapshot.clone(),
@@ -1301,6 +1575,72 @@ mod tests {
         ));
         let _ = fs::remove_file(&path);
         SharedState::load(path).unwrap()
+    }
+    #[test]
+    fn diagnostic_rule_navigation_requires_one_current_signed_connection_and_never_saves_rules() {
+        let state = state();
+        let identity = crate::identity::SigningIdentity {
+            authority: "developer".into(),
+            team_id: "TESTTEAM01".into(),
+            identifier: "com.example.diag".into(),
+        };
+        {
+            let mut s = state.inner.lock().unwrap();
+            let mut c = s.demo[0].clone();
+            c.identity = Some(identity);
+            c.destination = "192.0.2.1".into();
+            c.port = 443;
+            s.connections = vec![c];
+            s.document.preferences.mode = "live".into();
+            s.document.preferences.view = "diagnostics".into();
+            s.inventory.snapshot.generation = 7;
+            s.services.operation = 42;
+            s.diagnostics.reports.push(crate::diagnostics::Report {
+                id: 1,
+                service_operation: 42,
+                generation: 7,
+                target: "192.0.2.1".into(),
+                interface: "en0".into(),
+                created_at: 1,
+                findings: vec![crate::diagnostics::Finding {
+                    id: "443:tls".into(),
+                    port: 443,
+                    category: "tls".into(),
+                    severity: "warning".into(),
+                    certainty: "unverified".into(),
+                    evidence: "test".into(),
+                    recommendation: "review_tls".into(),
+                    observed_at: 1,
+                    change: "new".into(),
+                    disposition: Default::default(),
+                    reason: String::new(),
+                }],
+            });
+        }
+        let before = state.snapshot().unwrap();
+        let next = state
+            .diagnostic_action(0, 1, Some("443:tls".into()), "rule".into(), None, None)
+            .unwrap();
+        assert_eq!(next.document.preferences.view, "map");
+        assert_eq!(next.selected_id, Some(next.connections[0].id.clone()));
+        assert_eq!(next.document.rules, before.document.rules);
+        assert_eq!(
+            serde_json::to_value(next.extension).unwrap(),
+            serde_json::to_value(before.extension).unwrap()
+        );
+        {
+            let mut s = state.inner.lock().unwrap();
+            let mut duplicate = s.connections[0].clone();
+            duplicate.id = "another".into();
+            s.connections.push(duplicate);
+        }
+        assert!(state
+            .diagnostic_action(0, 1, Some("443:tls".into()), "rule".into(), None, None)
+            .is_err());
+        state.inner.lock().unwrap().inventory.snapshot.generation = 8;
+        assert!(state
+            .diagnostic_action(0, 1, None, "services".into(), None, None)
+            .is_err());
     }
     #[test]
     fn history_retention_migrates_persists_and_never_persists_rows() {
@@ -1649,6 +1989,7 @@ mod tests {
                 identifier: "com.example.guide".into(),
             };
             session.document.rules.push(Rule {
+                transport: "TCP".into(),
                 system_exception: false,
                 timeout_action: "allow".into(),
                 app_key: identity.key(),
@@ -2599,6 +2940,7 @@ mod tests {
         s.extension_change(|extension, _| extension.configure(true, true, true))
             .unwrap();
         let rule = Rule {
+            transport: "TCP".into(),
             system_exception: false,
             timeout_action: "ask".into(),
             identity: Some(crate::identity::SigningIdentity {
@@ -2773,6 +3115,7 @@ mod tests {
         let mut rules = Vec::new();
         let c = demo_connections().remove(0);
         rules.push(Rule {
+            transport: "TCP".into(),
             system_exception: false,
             timeout_action: "allow".into(),
             identity: None,
@@ -2814,6 +3157,7 @@ mod tests {
         c.identity = None;
         state.inner.lock().unwrap().connections = vec![c.clone()];
         let legacy = Rule {
+            transport: "TCP".into(),
             system_exception: false,
             timeout_action: "allow".into(),
             identity: None,
@@ -2864,6 +3208,7 @@ mod tests {
             c.identity = Some(identity.clone());
             state.inner.lock().unwrap().connections = vec![c.clone()];
             let legacy = Rule {
+                transport: "TCP".into(),
                 system_exception: false,
                 timeout_action: "allow".into(),
                 identity: None,

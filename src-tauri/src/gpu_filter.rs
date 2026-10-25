@@ -21,6 +21,8 @@ pub enum Source {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Filter {
+    #[serde(default)]
+    pub search_names: bool,
     pub search: String,
     pub intent: Intent,
     pub hide_loopback: bool,
@@ -29,6 +31,7 @@ pub struct Filter {
 impl Default for Filter {
     fn default() -> Self {
         Self {
+            search_names: false,
             search: String::new(),
             intent: Intent::All,
             hide_loopback: true,
@@ -44,15 +47,39 @@ impl Filter {
         mode == self.source.as_str()
     }
     pub fn project(&self, connections: Vec<Connection>, rules: &[Rule]) -> Vec<Connection> {
+        self.project_with_names(connections, rules, &[])
+    }
+    pub fn project_with_names(
+        &self,
+        connections: Vec<Connection>,
+        rules: &[Rule],
+        names: &[crate::flow_names::Row],
+    ) -> Vec<Connection> {
         let search = self.search.to_lowercase();
         connections
             .into_iter()
             .filter(|c| {
                 (!self.hide_loopback || !loopback(&c.destination))
-                    && (search.is_empty()
-                        || format!("{} {} {}", c.app, c.destination, c.app_key)
-                            .to_lowercase()
-                            .contains(&search))
+                    && (search.is_empty() || {
+                        let base = format!("{} {} {}", c.app, c.destination, c.app_key);
+                        let extra = if self.search_names {
+                            names
+                                .iter()
+                                .filter(|r| r.connection_id == c.id)
+                                .flat_map(|r| r.values.iter().map(|v| v.value.as_str()))
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        } else {
+                            String::new()
+                        };
+                        if extra.is_empty() {
+                            base
+                        } else {
+                            format!("{base} {extra}")
+                        }
+                    }
+                    .to_lowercase()
+                    .contains(&search))
                     && (self.intent == Intent::All
                         || self.intent.as_str() == intent_for(rules, c, self.source.as_str()))
             })
@@ -246,6 +273,7 @@ mod tests {
         rows[0].destination = "127.0.0.1".into();
         let c = &rows[1];
         let rule = Rule {
+            transport: "TCP".into(),
             id: "rule".into(),
             app_key: c.app_key.clone(),
             app: c.app.clone(),
@@ -300,6 +328,7 @@ mod tests {
         let mut c = crate::model::demo_connections().remove(0);
         c.direction = "outbound".into();
         let mut r = Rule {
+            transport: "TCP".into(),
             id: "r".into(),
             app_key: c.app_key.clone(),
             app: c.app.clone(),

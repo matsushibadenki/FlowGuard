@@ -30,7 +30,7 @@ mod tests {
     use super::*;
     #[test]
     fn decodes_swift_acknowledgement_field_names() {
-        let reply: BridgeStatus = serde_json::from_str(r#"{"protocolVersion":4,"requestID":"request","instanceID":"instance","revision":1,"status":"accepted","ruleCount":0}"#).unwrap();
+        let reply: BridgeStatus = serde_json::from_str(r#"{"protocolVersion":5,"requestID":"request","instanceID":"instance","revision":1,"status":"accepted","ruleCount":0}"#).unwrap();
         assert_eq!(reply.request_id, "request");
         assert_eq!(reply.instance_id, "instance");
         assert!(reply.error.is_none());
@@ -84,7 +84,7 @@ pub fn bridge_status(contents: &Path) -> Result<BridgeStatus, String> {
         return Err("signed_host_or_active_extension_required".into());
     }
     let status: BridgeStatus = serde_json::from_str(&output).map_err(|_| "invalid_bridge_reply")?;
-    if status.protocol_version != 4
+    if status.protocol_version != 5
         || !["ready", "unavailable"].contains(&status.status.as_str())
         || status.instance_id.len() != 36
         || status.rule_count > 2000
@@ -130,7 +130,7 @@ pub fn sync_rules(contents: &Path, rules: &[crate::model::Rule]) -> Result<Bridg
     }
     let reply: BridgeStatus = serde_json::from_str(&output).map_err(|_| "invalid_bridge_reply")?;
     // Swift host validates request ID, provider instance ID and exact next revision.
-    if reply.protocol_version != 4
+    if reply.protocol_version != 5
         || reply.status != "accepted"
         || reply.error.is_some()
         || reply.rule_count != live.len()
@@ -168,10 +168,11 @@ pub fn policy_payload(rules: &[crate::model::Rule]) -> Result<Vec<u8>, String> {
 pub fn policy_digest(rules: &[crate::model::Rule]) -> String {
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();
-    hash.update(b"FlowGuardPolicy/v4");
+    hash.update(b"FlowGuardPolicy/v5");
     for rule in rules.iter().filter(|r| crate::model::enforceable(r)) {
         for field in [
             &rule.id,
+            &rule.transport,
             &rule.app_key,
             &rule.app,
             &rule.destination,
@@ -203,7 +204,7 @@ mod digest_tests {
     fn empty_policy_matches_swift_contract() {
         assert_eq!(
             super::policy_digest(&[]),
-            "4a162fedfe1bcffbf24b599f057dc8165220fd5ccf380e1771353b86baf20030"
+            "179851694d92493625d6aea51ce56532985145b32fc81f68e48fc9303e50e8fa"
         );
     }
     #[test]
@@ -211,7 +212,7 @@ mod digest_tests {
         let rules: Vec<crate::model::Rule> = serde_json::from_str(r#"[{"id": "one", "appKey": "signed:v1:developer:ABCDE12345:com.test.app", "identity":{"authority":"developer","teamId":"ABCDE12345","identifier":"com.test.app"}, "app": "Test", "destination": "1.2.3.4", "port": 443, "direction": "both", "action": "block", "updatedAt": 1, "source": "live"}]"#).unwrap();
         assert_eq!(
             super::policy_digest(&rules),
-            "951cc1156c80be1e11af7cff72d23e92064c76ae8844d75b2e4a36a06452239b"
+            "2b653cd3a514e43bdaa1eec3cee32ac1985c45ebc9bfae94cfc54191c2aa0a0c"
         );
         let mut changed = rules.clone();
         changed[0].system_exception = true;

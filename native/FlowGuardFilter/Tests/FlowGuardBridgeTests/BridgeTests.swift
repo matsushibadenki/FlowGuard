@@ -4,7 +4,7 @@ import FlowGuardPolicy
 final class BridgeTests: XCTestCase {
     func rules(_ action: String = "block", source: String = "live") throws -> [PolicyRule] {
         let data = Data("""
-        [{"id":"one","appKey":"signed:v1:developer:ABCDE12345:com.test.app","identity":{"authority":"developer","teamId":"ABCDE12345","identifier":"com.test.app"},"app":"Test","destination":"1.2.3.4","port":443,"direction":"both","action":"\(action)","updatedAt":1,"source":"\(source)"}]
+        [{"id":"one","transport":"TCP","appKey":"signed:v1:developer:ABCDE12345:com.test.app","identity":{"authority":"developer","teamId":"ABCDE12345","identifier":"com.test.app"},"app":"Test","destination":"1.2.3.4","port":443,"direction":"both","action":"\(action)","updatedAt":1,"source":"\(source)"}]
         """.utf8)
         return try JSONDecoder().decode([PolicyRule].self, from: data)
     }
@@ -86,8 +86,8 @@ final class BridgeTests: XCTestCase {
     }
 
     func testDigestTracksExactPolicyAndLostAcknowledgement() throws {
-        XCTAssertEqual(BridgeContract.digest([]), "4a162fedfe1bcffbf24b599f057dc8165220fd5ccf380e1771353b86baf20030")
-        XCTAssertEqual(BridgeContract.digest(try rules()), "951cc1156c80be1e11af7cff72d23e92064c76ae8844d75b2e4a36a06452239b")
+        XCTAssertEqual(BridgeContract.digest([]), "179851694d92493625d6aea51ce56532985145b32fc81f68e48fc9303e50e8fa")
+        XCTAssertEqual(BridgeContract.digest(try rules()), "2b653cd3a514e43bdaa1eec3cee32ac1985c45ebc9bfae94cfc54191c2aa0a0c")
         let receiver = PolicyReceiver(); receiver.seed(try rules()); receiver.setReady(true)
         XCTAssertEqual(receiver.status().policyDigest, BridgeContract.digest(try rules()))
         let before = receiver.status().policyDigest
@@ -98,11 +98,11 @@ final class BridgeTests: XCTestCase {
     }
 
     func testLegacyPolicyAndOldProtocolAreRejected() throws {
-        let legacy = Data(#"{"rules":[{"id":"old","appKey":"/old/path","app":"Test","destination":"1.2.3.4","port":443,"direction":"both","action":"allow","updatedAt":1,"source":"live"}]}"#.utf8)
+        let legacy = Data(#"{"rules":[{"id":"old","transport":"TCP","appKey":"/old/path","app":"Test","destination":"1.2.3.4","port":443,"direction":"both","action":"allow","updatedAt":1,"source":"live"}]}"#.utf8)
         XCTAssertThrowsError(try InitialPolicy.decode(legacy))
         let receiver = PolicyReceiver(); receiver.setReady(true)
         var object = try JSONSerialization.jsonObject(with: payload(receiver, rules: rules())) as! [String: Any]
-        for version in [1, 2, 3] {
+        for version in [1, 2, 3, 4] {
             object["protocolVersion"] = version
             let reply = receiver.replace(try JSONSerialization.data(withJSONObject: object)) { _ in XCTFail("old protocol must not apply") }
             XCTAssertEqual(reply.error, "invalid_protocol")

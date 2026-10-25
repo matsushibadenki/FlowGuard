@@ -103,7 +103,7 @@ impl Request {
 impl Envelope {
     fn valid(&self) -> bool {
         let mut ids = std::collections::HashSet::new();
-        self.protocol_version == 4
+        self.protocol_version == 5
             && uuid(&self.instance_id)
             && uuid(&self.policy_id)
             && self.requests.len() <= 128
@@ -188,7 +188,7 @@ impl Machine {
             .find(|r| r.request_id == id && r.instance_id == instance && r.policy_id == policy)
             .ok_or("ask_unavailable")?;
         let answer = Answer {
-            protocol_version: 4,
+            protocol_version: 5,
             instance_id: request.instance_id.clone(),
             policy_id: request.policy_id.clone(),
             request_id: id.into(),
@@ -213,7 +213,7 @@ impl Machine {
         self.snapshot.busy_ids = self.busy.keys().cloned().collect();
         match result {
             Ok(r)
-                if r.protocol_version == 4
+                if r.protocol_version == 5
                     && r.request_id == answer.request_id
                     && r.instance_id == answer.instance_id
                     && r.policy_id == answer.policy_id
@@ -294,7 +294,7 @@ mod tests {
     }
     fn envelope() -> Envelope {
         Envelope {
-            protocol_version: 4,
+            protocol_version: 5,
             instance_id: INSTANCE.into(),
             policy_id: POLICY.into(),
             requests: vec![request()],
@@ -309,7 +309,7 @@ mod tests {
     }
     fn reply(answer: &Answer) -> Reply {
         Reply {
-            protocol_version: 4,
+            protocol_version: 5,
             instance_id: answer.instance_id.clone(),
             policy_id: answer.policy_id.clone(),
             request_id: answer.request_id.clone(),

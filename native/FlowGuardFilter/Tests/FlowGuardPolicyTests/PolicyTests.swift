@@ -3,7 +3,7 @@ import XCTest
 final class PolicyTests: XCTestCase {
     func rule(_ source: String = "live", _ direction: String = "both", _ action: String = "block", _ updated: Int = 1) throws -> PolicyRule {
         let json = """
-        {"id":"\(source)-\(direction)","appKey":"signed:v1:developer:ABCDE12345:com.test.app","identity":{"authority":"developer","teamId":"ABCDE12345","identifier":"com.test.app"},"app":"Mail","destination":"1.2.3.4","port":993,"direction":"\(direction)","action":"\(action)","updatedAt":\(updated),"source":"\(source)"}
+        {"id":"\(source)-\(direction)","transport":"TCP","appKey":"signed:v1:developer:ABCDE12345:com.test.app","identity":{"authority":"developer","teamId":"ABCDE12345","identifier":"com.test.app"},"app":"Mail","destination":"1.2.3.4","port":993,"direction":"\(direction)","action":"\(action)","updatedAt":\(updated),"source":"\(source)"}
         """
         return try JSONDecoder().decode(PolicyRule.self, from: Data(json.utf8))
     }
@@ -34,7 +34,7 @@ final class PolicyTests: XCTestCase {
         XCTAssertNil(SigningIdentity(authority: "developer", teamId: signing.teamId, identifier: "x\" or true").requirement)
     }
     func testLegacyRuleCannotMatchEvenAValidSignatureAtItsOldPath() throws {
-        let data = Data(#"{"id":"old","appKey":"/Applications/Mail.app/Contents/MacOS/Mail","app":"Mail","destination":"1.2.3.4","port":993,"direction":"both","action":"allow","updatedAt":1,"source":"live"}"#.utf8)
+        let data = Data(#"{"id":"old","transport":"TCP","appKey":"/Applications/Mail.app/Contents/MacOS/Mail","app":"Mail","destination":"1.2.3.4","port":993,"direction":"both","action":"allow","updatedAt":1,"source":"live"}"#.utf8)
         let old = try JSONDecoder().decode(PolicyRule.self, from: data)
         XCTAssertNil(old.identity)
         XCTAssertNil(Policy(rules: [old]).decision(for: flow))

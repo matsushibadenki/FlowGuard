@@ -1,14 +1,25 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{path::Component, sync::Arc, time::Duration};
 use tauri::{Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 const ENDPOINT: &str =
     "https://github.com/matsushibadenki/FlowGuard/releases/latest/download/latest.json";
 const MAX_DOWNLOAD: usize = 200 * 1024 * 1024;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HistoryEvent {
+    pub at: u64,
+    pub status: String,
+    pub from: String,
+    pub to: Option<String>,
+}
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub channel: String,
+    pub history: Vec<HistoryEvent>,
+    pub history_persistent: bool,
     pub stage: String,
     pub operation: u64,
     pub current_version: String,
@@ -23,6 +34,9 @@ pub struct Snapshot {
 impl Default for Snapshot {
     fn default() -> Self {
         Self {
+            channel: "stable".into(),
+            history: vec![],
+            history_persistent: true,
             stage: "idle".into(),
             operation: 0,
             current_version: env!("CARGO_PKG_VERSION").into(),
@@ -43,6 +57,104 @@ pub struct Machine {
     pub bytes: Option<Arc<Vec<u8>>>,
 }
 impl Machine {
+    pub fn with_history(path: &std::path::Path, channel: &str) -> Self {
+        let mut m = Self::default();
+        m.snapshot.channel = channel.into();
+        if path.exists() {
+            let parsed = std::fs::symlink_metadata(path)
+                .ok()
+                .filter(|v| v.is_file() && !v.file_type().is_symlink() && v.len() <= 65536)
+                .and_then(|_| std::fs::read(path).ok())
+                .and_then(|b| serde_json::from_slice::<Vec<HistoryEvent>>(&b).ok());
+            if let Some(events) = parsed.filter(|rows| {
+                rows.len() <= 20
+                    && rows.iter().all(|e| {
+                        semver::Version::parse(&e.from).is_ok()
+                            && e.to
+                                .as_ref()
+                                .is_none_or(|v| semver::Version::parse(v).is_ok())
+                            && [
+                                "ready",
+                                "installing",
+                                "failed",
+                                "cancelled",
+                                "launched_version",
+                            ]
+                            .contains(&e.status.as_str())
+                    })
+            }) {
+                m.snapshot.history = events;
+            } else {
+                m.snapshot.history_persistent = false;
+            }
+        }
+        if let Some(event) = m
+            .snapshot
+            .history
+            .iter()
+            .find(|e| {
+                e.status == "installing" && e.to.as_deref() == Some(env!("CARGO_PKG_VERSION"))
+            })
+            .cloned()
+        {
+            if !m
+                .snapshot
+                .history
+                .iter()
+                .any(|e| e.status == "launched_version" && e.to == event.to && e.at >= event.at)
+            {
+                m.snapshot.history.insert(
+                    0,
+                    HistoryEvent {
+                        at: crate::model::now(),
+                        status: "launched_version".into(),
+                        from: event.from,
+                        to: event.to,
+                    },
+                );
+                m.persist_history(path);
+            }
+        }
+        m
+    }
+    pub fn record_history(&mut self, path: &std::path::Path) {
+        if !["ready", "installing", "failed", "cancelled"].contains(&self.snapshot.stage.as_str()) {
+            return;
+        }
+        self.snapshot.history.insert(
+            0,
+            HistoryEvent {
+                at: crate::model::now(),
+                status: self.snapshot.stage.clone(),
+                from: self.snapshot.current_version.clone(),
+                to: self.snapshot.version.clone(),
+            },
+        );
+        self.snapshot.history.truncate(20);
+        self.persist_history(path);
+    }
+    fn persist_history(&mut self, path: &std::path::Path) {
+        let result = (|| -> Result<(), std::io::Error> {
+            use std::io::Write;
+            let tmp = path.with_extension("json.tmp");
+            if tmp.exists() || tmp.is_symlink() {
+                std::fs::remove_file(&tmp)?;
+            }
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+            }
+            let mut file = options.open(&tmp)?;
+            file.write_all(&serde_json::to_vec(&self.snapshot.history)?)?;
+            file.sync_all()?;
+            std::fs::rename(tmp, path)?;
+            Ok(())
+        })();
+        self.snapshot.history_persistent = result.is_ok();
+    }
     pub fn check(&mut self) -> Result<u64, String> {
         if ["checking", "downloading", "ready", "installing"]
             .contains(&self.snapshot.stage.as_str())
@@ -53,6 +165,9 @@ impl Machine {
         self.snapshot = Snapshot {
             stage: "checking".into(),
             operation,
+            channel: self.snapshot.channel.clone(),
+            history: self.snapshot.history.clone(),
+            history_persistent: self.snapshot.history_persistent,
             ..Default::default()
         };
         self.update = None;
@@ -69,10 +184,11 @@ impl Machine {
         self.current(op, "checking")?;
         self.snapshot.checked_at = Some(crate::model::now());
         if let Some(update) = update {
-            validate_release(
+            validate_channel_release(
                 &update.current_version,
                 &update.version,
                 update.download_url.as_str(),
+                &self.snapshot.channel,
             )?;
             self.snapshot.version = Some(update.version.clone());
             self.snapshot.notes = update.body.as_ref().map(|v| {
@@ -159,6 +275,7 @@ pub fn can_install(s: &crate::model::Snapshot) -> bool {
             .any(|source| source.stage == "collecting")
         && !["starting", "listening", "stopping"].contains(&s.syslog.stage.as_str())
         && !s.destination_names.busy
+        && !s.flow_names.busy
         && !s.firewall_control.busy
         && !s.extension.busy
         && ![
@@ -172,10 +289,21 @@ pub fn can_install(s: &crate::model::Snapshot) -> bool {
             .all(|stage| !["running", "cancelling"].contains(&stage.as_str()))
 }
 fn validate_release(current: &str, version: &str, url: &str) -> Result<(), String> {
+    validate_channel_release(current, version, url, "stable")
+}
+fn validate_channel_release(
+    current: &str,
+    version: &str,
+    url: &str,
+    channel: &str,
+) -> Result<(), String> {
     let current = semver::Version::parse(current).map_err(|_| "invalid_version")?;
     let next = semver::Version::parse(version).map_err(|_| "invalid_version")?;
     let url = reqwest::Url::parse(url).map_err(|_| "invalid_download_url")?;
-    if next <= current || !next.pre.is_empty() {
+    if !["stable", "beta"].contains(&channel)
+        || next <= current
+        || channel == "stable" && !next.pre.is_empty()
+    {
         return Err("invalid_version".into());
     }
     if url.scheme() != "https"
@@ -225,6 +353,31 @@ fn signature(data: &[u8], encoded: &str, key: &str, version: &str) -> Result<(),
         return Err("signature_version".into());
     }
     Ok(())
+}
+fn trusted_signature(
+    bytes: &[u8],
+    encoded: &str,
+    version: &str,
+    channel: &str,
+) -> Result<(), String> {
+    let keys = crate::update_trust::keys(
+        include_str!("../update-trust.json"),
+        &public_key(),
+        version,
+        channel,
+    )?;
+    let mut error = "signature_invalid".to_owned();
+    for key in keys {
+        match signature(bytes, encoded, &key, version) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                if e == "signature_version" {
+                    error = e;
+                }
+            }
+        }
+    }
+    Err(error)
 }
 // Validate before invoking the plugin installer, which strips the .app root during extraction.
 fn archive(data: &[u8], version: &str) -> Result<(), String> {
@@ -325,11 +478,26 @@ pub async fn check(
             return Ok(s);
         }
     }
-    let op = publish(&app, Machine::check)?;
+    let channel = app
+        .state::<crate::state::SharedState>()
+        .snapshot()?
+        .document
+        .preferences
+        .update_channel;
+    let op = publish(&app, |m| {
+        m.snapshot.channel = channel.clone();
+        m.check()
+    })?;
     let result = async {
         let updater = app
             .updater_builder()
-            .endpoints(vec![ENDPOINT.parse().unwrap()])
+            .endpoints(vec![if channel == "beta" {
+                "https://github.com/matsushibadenki/FlowGuard/releases/download/beta/latest.json"
+            } else {
+                ENDPOINT
+            }
+            .parse()
+            .unwrap()])
             .map_err(|_| "check_failed")?
             .timeout(Duration::from_secs(20))
             .configure_client(|builder| {
@@ -373,11 +541,17 @@ pub async fn check(
 }
 pub async fn download(app: tauri::AppHandle) -> Result<crate::model::Snapshot, String> {
     let (op, update) = publish(&app, Machine::download)?;
+    let channel = app
+        .state::<crate::state::SharedState>()
+        .snapshot()?
+        .updates
+        .channel;
     let result = async {
-        validate_release(
+        validate_channel_release(
             &update.current_version,
             &update.version,
             update.download_url.as_str(),
+            &channel,
         )?;
         let client = reqwest::Client::builder()
             .https_only(true)
@@ -403,19 +577,76 @@ pub async fn download(app: tauri::AppHandle) -> Result<crate::model::Snapshot, S
             }))
             .build()
             .map_err(|_| "download_failed")?;
-        let mut response = client
-            .get(update.download_url.clone())
-            .send()
-            .await
-            .map_err(|_| "download_failed")?;
+        let cache_root = app
+            .path()
+            .app_cache_dir()
+            .map_err(|_| "update_cache_failed")?
+            .join("updater-v1");
+        let (mut cache, mut bytes) = crate::update_cache::Cache::open(
+            cache_root,
+            crate::update_cache::Identity {
+                version: update.version.clone(),
+                url: update.download_url.to_string(),
+                signature: update.signature.clone(),
+                architecture: std::env::consts::ARCH.into(),
+            },
+        )?;
+        if !bytes.is_empty()
+            && trusted_signature(&bytes, &update.signature, &update.version, &channel).is_ok()
+        {
+            if let Err(error) = archive(&bytes, &update.version) {
+                cache.reset(None)?;
+                return Err(error);
+            }
+            publish(&app, |m| {
+                m.progress(op, bytes.len() as u64, Some(bytes.len() as u64))
+            })?;
+            return publish(&app, |m| m.ready(op, bytes));
+        }
+        let offset = bytes.len();
+        let mut request = client.get(update.download_url.clone());
+        if offset > 0 {
+            request = request
+                .header(reqwest::header::RANGE, format!("bytes={offset}-"))
+                .header(
+                    reqwest::header::IF_RANGE,
+                    cache.etag.clone().ok_or("update_cache_failed")?,
+                );
+        }
+        let mut response = request.send().await.map_err(|_| "download_failed")?;
         if !response.status().is_success() {
+            if response.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+                cache.reset(None)?;
+            }
             return Err("download_failed".into());
         }
-        let total = response.content_length();
+        let etag = response
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let total = if offset > 0 && response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+            if etag != cache.etag {
+                return Err("download_failed".into());
+            }
+            let total = response
+                .headers()
+                .get(reqwest::header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| crate::update_cache::range_total(v, offset))
+                .ok_or("download_failed")?;
+            Some(total as u64)
+        } else {
+            if response.status() != reqwest::StatusCode::OK {
+                return Err("download_failed".into());
+            }
+            bytes.clear();
+            cache.reset(etag)?;
+            response.content_length()
+        };
         if total.is_some_and(|n| n > MAX_DOWNLOAD as u64) {
             return Err("update_too_large".into());
         }
-        let mut bytes = Vec::new();
         let mut last_progress = std::time::Instant::now();
         loop {
             if cancelled(&app, op) {
@@ -431,6 +662,7 @@ pub async fn download(app: tauri::AppHandle) -> Result<crate::model::Snapshot, S
             if bytes.len() + chunk.len() > MAX_DOWNLOAD {
                 return Err("update_too_large".into());
             }
+            cache.append(&chunk, bytes.len())?;
             bytes.extend_from_slice(&chunk);
             if last_progress.elapsed() >= Duration::from_millis(250) {
                 publish(&app, |m| m.progress(op, bytes.len() as u64, total))?;
@@ -438,8 +670,15 @@ pub async fn download(app: tauri::AppHandle) -> Result<crate::model::Snapshot, S
             }
         }
         publish(&app, |m| m.progress(op, bytes.len() as u64, total))?;
-        signature(&bytes, &update.signature, &public_key(), &update.version)?;
-        archive(&bytes, &update.version)?;
+        if total.is_some_and(|n| n != bytes.len() as u64) {
+            return Err("download_failed".into());
+        }
+        if let Err(error) = trusted_signature(&bytes, &update.signature, &update.version, &channel)
+            .and_then(|_| archive(&bytes, &update.version))
+        {
+            cache.reset(None)?;
+            return Err(error);
+        }
         publish(&app, |m| m.ready(op, bytes))
     }
     .await;
@@ -534,6 +773,29 @@ pub fn schedule(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn channel_validation_and_persisted_history_never_claim_install_before_launch() {
+        let url="https://github.com/matsushibadenki/FlowGuard/releases/download/v0.2.0/FlowGuard.app.tar.gz";
+        assert!(validate_channel_release("0.1.0", "0.2.0-beta.1", url, "beta").is_ok());
+        assert!(validate_channel_release("0.1.0", "0.2.0-beta.1", url, "stable").is_err());
+        assert!(validate_channel_release("0.2.0", "0.1.0", url, "beta").is_err());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.json");
+        let mut m = Machine::default();
+        m.snapshot.stage = "installing".into();
+        m.snapshot.version = Some(env!("CARGO_PKG_VERSION").into());
+        m.record_history(&path);
+        assert_eq!(m.snapshot.history[0].status, "installing");
+        let loaded = Machine::with_history(&path, "beta");
+        assert_eq!(loaded.snapshot.channel, "beta");
+        assert_eq!(loaded.snapshot.history[0].status, "launched_version");
+        let loaded_again = Machine::with_history(&path, "stable");
+        assert_eq!(loaded_again.snapshot.history.len(), 2);
+        m.snapshot.stage = "ready".into();
+        m.record_history(std::path::Path::new("/dev/null/updates.json"));
+        assert!(!m.snapshot.history_persistent);
+        assert_eq!(m.snapshot.stage, "ready");
+    }
     #[test]
     fn signature_requires_unchanged_bytes_and_signed_version() {
         let data = include_bytes!("../tests/fixtures/updater-message.txt");
@@ -943,4 +1205,32 @@ mod signed_upgrade_tests {
         }
         println!("PASS production key: tamper rejected; signed copy transaction {}; old signed rollback and external test document preserved; no app launched",if expect_rejection{"Gatekeeper rejection restored the previous app"}else{"verified and installed"});
     }
+}
+
+pub fn verify_artifact(path: &std::path::Path, version: &str, channel: &str) -> Result<(), String> {
+    use std::io::Read;
+    let metadata = std::fs::symlink_metadata(path).map_err(|_| "invalid_archive")?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > MAX_DOWNLOAD as u64
+    {
+        return Err("invalid_archive".into());
+    }
+    let mut data = vec![];
+    std::fs::File::open(path)
+        .map_err(|_| "invalid_archive")?
+        .take(MAX_DOWNLOAD as u64 + 1)
+        .read_to_end(&mut data)
+        .map_err(|_| "invalid_archive")?;
+    if data.len() > MAX_DOWNLOAD {
+        return Err("invalid_archive".into());
+    }
+    let sigpath = std::path::PathBuf::from(format!("{}.sig", path.display()));
+    let m = std::fs::symlink_metadata(&sigpath).map_err(|_| "signature_invalid")?;
+    if !m.is_file() || m.file_type().is_symlink() || m.len() > 8192 {
+        return Err("signature_invalid".into());
+    }
+    let encoded = std::fs::read_to_string(sigpath).map_err(|_| "signature_invalid")?;
+    trusted_signature(&data, encoded.trim(), version, channel)?;
+    archive(&data, version)
 }

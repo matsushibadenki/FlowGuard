@@ -5,7 +5,7 @@ import FlowGuardPolicy
 final class AskQueueTests: XCTestCase {
     func rule(_ fallback: String = "allow") throws -> PolicyRule {
         let data = Data("""
-        {"id":"ask","appKey":"signed:v1:developer:ABCDE12345:com.test.app","identity":{"authority":"developer","teamId":"ABCDE12345","identifier":"com.test.app"},"app":"Test","destination":"1.2.3.4","port":443,"direction":"both","action":"ask","timeoutAction":"\(fallback)","updatedAt":1,"source":"live"}
+        {"id":"ask","transport":"TCP","appKey":"signed:v1:developer:ABCDE12345:com.test.app","identity":{"authority":"developer","teamId":"ABCDE12345","identifier":"com.test.app"},"app":"Test","destination":"1.2.3.4","port":443,"direction":"both","action":"ask","timeoutAction":"\(fallback)","updatedAt":1,"source":"live"}
         """.utf8)
         return try JSONDecoder().decode(PolicyRule.self, from: data)
     }

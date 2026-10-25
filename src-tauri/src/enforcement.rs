@@ -295,6 +295,7 @@ mod tests {
     use super::*;
     fn rules() -> Vec<Rule> {
         vec![Rule {
+            transport: "TCP".into(),
             system_exception: false,
             timeout_action: "allow".into(),
             identity: Some(crate::identity::SigningIdentity {

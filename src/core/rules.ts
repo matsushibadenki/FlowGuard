@@ -10,7 +10,7 @@ export function validRules(value:unknown): value is Rule[] {
   const ids=new Set<string>();
   return value.every(r=> {
     if(!r || typeof r!=='object') return false;
-    const valid=(r.systemException===undefined||typeof r.systemException==='boolean')&&(r.timeoutAction===undefined||['allow','block'].includes(r.timeoutAction))&&(r.identity==null||(r.source==='live'&&validIdentity(r.identity)&&r.appKey===identityKey(r.identity)))&&typeof r.id==='string'&&r.id.length<=8192&&typeof r.appKey==='string'&&r.appKey.length>0&&r.appKey.length<=4096&&typeof r.app==='string'&&r.app.length<=256&&typeof r.destination==='string'&&r.destination.length>0&&r.destination.length<=512&&Number.isInteger(r.port)&&r.port>0&&r.port<=65535&&['outbound','inbound','both'].includes(r.direction)&&['allow','block','ask'].includes(r.action)&&['live','demo'].includes(r.source)&&Number.isSafeInteger(r.updatedAt)&&r.updatedAt>=0&&!ids.has(r.id);
+    const valid=(r.transport===undefined||r.transport==='TCP')&&(r.systemException===undefined||typeof r.systemException==='boolean')&&(r.timeoutAction===undefined||['allow','block'].includes(r.timeoutAction))&&(r.identity==null||(r.source==='live'&&validIdentity(r.identity)&&r.appKey===identityKey(r.identity)))&&typeof r.id==='string'&&r.id.length<=8192&&typeof r.appKey==='string'&&r.appKey.length>0&&r.appKey.length<=4096&&typeof r.app==='string'&&r.app.length<=256&&typeof r.destination==='string'&&r.destination.length>0&&r.destination.length<=512&&Number.isInteger(r.port)&&r.port>0&&r.port<=65535&&['outbound','inbound','both'].includes(r.direction)&&['allow','block','ask'].includes(r.action)&&['live','demo'].includes(r.source)&&Number.isSafeInteger(r.updatedAt)&&r.updatedAt>=0&&!ids.has(r.id);
     ids.add(r.id);return valid;
   });
 }

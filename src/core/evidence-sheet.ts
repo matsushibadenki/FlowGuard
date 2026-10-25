@@ -1,0 +1,3 @@
+export function matchesEvidence(text:string,query:string){return text.toLowerCase().includes(query.trim().toLowerCase());}
+export function evidenceRows<T>(rows:readonly T[],query:string,status:string,text:(row:T)=>string,state:(row:T)=>string,compare:(a:T,b:T)=>number):T[]{const needle=query.trim().toLowerCase();return rows.filter(row=>(status==='all'||state(row)===status)&&(!needle||matchesEvidence(text(row),needle))).sort(compare);}
+export function downloadEvidence(text:string,name:string,format:'csv'|'html'='csv'){const url=URL.createObjectURL(new Blob([text],{type:format==='csv'?'text/csv;charset=utf-8':'text/html;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}

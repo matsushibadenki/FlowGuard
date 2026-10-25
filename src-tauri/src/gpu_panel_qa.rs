@@ -45,7 +45,7 @@ pub fn run() -> Result<(), String> {
             std::thread::spawn(move || {
                 let (tx, rx) = std::sync::mpsc::channel();
                 let mut lease = 0;
-                for step in 0..9 {
+                for step in 0..10 {
                     std::thread::sleep(std::time::Duration::from_millis(700));
                     let handle2 = handle.clone();
                     let tx = tx.clone();
@@ -212,7 +212,8 @@ pub fn run() -> Result<(), String> {
                                         {
                                             let shared=handle2.state::<SharedState>();let mut session=shared.inner.lock().map_err(|_|"state_lock")?;
                                             session.demo[0].destination="127.0.0.1".into();session.demo[1].destination="198.51.100.1".into();let row=session.demo[1].clone();
-                                            session.document.rules=vec![crate::model::Rule{id:"qa-rule".into(),app:row.app,app_key:row.app_key,destination:row.destination,port:row.port,direction:"both".into(),action:"block".into(),source:"demo".into(),updated_at:1,identity:None,system_exception:false,timeout_action:"allow".into()}];
+                                            session.document.rules=vec![crate::model::Rule{
+ transport:"TCP".into(),id:"qa-rule".into(),app:row.app,app_key:row.app_key,destination:row.destination,port:row.port,direction:"both".into(),action:"block".into(),source:"demo".into(),updated_at:1,identity:None,system_exception:false,timeout_action:"allow".into()}];
                                             session.revision+=1;
                                         }
                                         let s=platform::sync(&handle2,window.clone(),lease,4,Some(b),Filter::default())?;
@@ -224,9 +225,20 @@ pub fn run() -> Result<(), String> {
                                         if platform::sync(&handle2,window.clone(),lease,7,Some(b),Filter{source:Source::Live,..Default::default()}).is_ok(){return Err("qa_source_fence".into());}
                                         let s=platform::sync(&handle2,window.clone(),lease,8,Some(b),Filter::default())?;
                                         if s.matched!=10000 {return Err("qa_filter_recovery".into());}
-                                        if platform::sync(&handle2,window,lease,7,Some(b),Filter::default()).is_ok(){return Err("qa_old_filter_restored".into());}
+                                        if platform::sync(&handle2,window.clone(),lease,7,Some(b),Filter::default()).is_ok(){return Err("qa_old_filter_restored".into());}
                                         platform::wait_for_completion()?;
+                                        platform::verify_interactions(&handle2,window.clone(),lease,b)?;
                                         "filters_search_loopback_intent_empty_cap_source_and_sequence"
+                                    }
+                                    8 => {
+                                        let old=lease;let floating=tauri::WebviewWindowBuilder::new(&handle2,"gpu-map",tauri::WebviewUrl::External("about:blank".parse().unwrap())).title("FlowGuard GPU floating QA").inner_size(1000.0,720.0).build().map_err(|e|e.to_string())?;
+                                        let webview:&tauri::Webview=floating.as_ref();let floated=webview.window();
+                                        lease=platform::open_for("gpu-map");platform::close(old);platform::window_event("main",true);
+                                        let status=platform::sync(&handle2,floated.clone(),lease,1,Some(b),crate::gpu_filter::Filter::default())?;
+                                        if !status.presented{return Err("qa_float_surface".into());}platform::wait_for_completion()?;
+                                        if platform::sync(&handle2,window,lease,2,Some(b),crate::gpu_filter::Filter::default()).is_ok(){return Err("qa_owner_not_checked".into());}
+                                        platform::window_event("gpu-map",true);floating.close().map_err(|e|e.to_string())?;
+                                        "floating_surface_owner_isolation_labels_zoom_and_shared_selection"
                                     }
                                     _ => {
                                         platform::destroy();

@@ -1,3 +1,4 @@
+import {downloadEvidence} from '../core/evidence-sheet';
 import {useState} from 'react';
 import {startLanPorts,stopLanPorts,lanPortsCsv,dispatch} from '../core/store';
 import {portRows,portScope,eligiblePortDevice,samePortTarget} from '../core/port-sheet';
@@ -15,7 +16,7 @@ export function PortChecks({snapshot,native,onExport=lanPortsCsv}:{snapshot:Snap
  const rangeValid=Number.isInteger(first)&&Number.isInteger(last)&&first>0&&last<=65535&&last>=first&&last-first<256;
  const planned=preset==='range'?(rangeValid?`${first}–${last}`:'—'):portScope(presets[preset]);
  async function action(stop=false){setPending(true);setError(null);try{if(stop)await stopLanPorts();else if(row)await startLanPorts(row.device.id,snapshot.inventory.generation,preset==='range'?first:1,preset==='range'?last:1,preset);}catch(e){setError(String(e).includes('ipv6_')?'ipv6':'scan');}finally{setPending(false);}}
- async function exportCsv(){setPending(true);setError(null);try{const text=await onExport(job.operation);const url=URL.createObjectURL(new Blob([text],{type:'text/csv;charset=utf-8'}));const anchor=document.createElement('a');anchor.href=url;anchor.download=`flowguard-tcp-${job.operation}.csv`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{setError('export');}finally{setPending(false);}}
+ async function exportCsv(){setPending(true);setError(null);try{const text=await onExport(job.operation);downloadEvidence(text,`flowguard-tcp-${job.operation}.csv`);}catch{setError('export');}finally{setPending(false);}}
  const effectiveChangesOnly=changesOnly&&!busy&&!!job.comparison.baselineOperation&&['ready','uncertain'].includes(job.comparison.status);
  const changes=new Map(job.comparison.rows.map(c=>[c.port,c]));
  const label=(kind:string)=>kind==='closed'?w.closedChange:kind==='opened'?w.opened:kind==='unchanged'?w.unchanged:kind==='uncertain'?w.uncertain:w.uncompared;

@@ -55,6 +55,28 @@ pub struct Status {
     pub matched: usize,
     pub truncated: bool,
 }
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Interaction {
+    ZoomIn,
+    ZoomOut,
+    PanUp,
+    PanDown,
+    Reset,
+    Pick { x: f32, y: f32 },
+}
+impl Interaction {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::ZoomIn => "zoom_in",
+            Self::ZoomOut => "zoom_out",
+            Self::PanUp => "pan_up",
+            Self::PanDown => "pan_down",
+            Self::Reset => "reset",
+            Self::Pick { .. } => "pick",
+        }
+    }
+}
 pub struct Lease {
     pub id: u64,
     pub sequence: u64,
@@ -88,14 +110,14 @@ pub fn gpu_panel_available() -> bool {
 }
 #[tauri::command]
 pub async fn open_gpu_panel(window: tauri::Window, app: tauri::AppHandle) -> Result<u64, String> {
-    if window.label() != "main" {
+    if !["main", "gpu-map"].contains(&window.label()) {
         return Err("main_window_required".into());
     }
     #[cfg(all(feature = "gpu", target_os = "macos"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         app.run_on_main_thread(move || {
-            let _ = tx.send(platform::open());
+            let _ = tx.send(platform::open_for(window.label()));
         })
         .map_err(|_| "main_thread_unavailable")?;
         rx.await.map_err(|_| "main_thread_unavailable".into())
@@ -114,9 +136,16 @@ pub async fn sync_gpu_panel(
     sequence: u64,
     bounds: Option<Bounds>,
     filter: crate::gpu_filter::Filter,
+    interaction: Option<Interaction>,
 ) -> Result<Status, String> {
-    if window.label() != "main" {
+    if !["main", "gpu-map"].contains(&window.label()) {
         return Err("main_window_required".into());
+    }
+    if let Some(Interaction::Pick { x, y }) = interaction.as_ref() {
+        if !x.is_finite() || !y.is_finite() || !(0.0..=1.0).contains(x) || !(0.0..=1.0).contains(y)
+        {
+            return Err("invalid_gpu_pick".into());
+        }
     }
     if !filter.valid() {
         return Err("invalid_gpu_filter".into());
@@ -129,8 +158,14 @@ pub async fn sync_gpu_panel(
         let (tx, rx) = tokio::sync::oneshot::channel();
         let handle = app.clone();
         app.run_on_main_thread(move || {
-            let _ = tx.send(platform::sync(
-                &handle, window, lease, sequence, bounds, filter,
+            let _ = tx.send(platform::sync_action(
+                &handle,
+                window,
+                lease,
+                sequence,
+                bounds,
+                filter,
+                interaction,
             ));
         })
         .map_err(|_| "main_thread_unavailable")?;
@@ -138,7 +173,7 @@ pub async fn sync_gpu_panel(
     }
     #[cfg(not(all(feature = "gpu", target_os = "macos")))]
     {
-        let _ = (app, lease, sequence, filter);
+        let _ = (app, lease, sequence, filter, interaction);
         Err("gpu_unavailable".into())
     }
 }
@@ -148,14 +183,14 @@ pub async fn close_gpu_panel(
     app: tauri::AppHandle,
     lease: u64,
 ) -> Result<(), String> {
-    if window.label() != "main" {
+    if !["main", "gpu-map"].contains(&window.label()) {
         return Err("main_window_required".into());
     }
     #[cfg(all(feature = "gpu", target_os = "macos"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         app.run_on_main_thread(move || {
-            platform::close(lease);
+            platform::close_for(lease, window.label());
             let _ = tx.send(());
         })
         .map_err(|_| "main_thread_unavailable")?;
@@ -248,4 +283,48 @@ mod qa;
 #[cfg(all(feature = "gpu-qa", target_os = "macos"))]
 pub fn run_check() -> Result<(), String> {
     qa::run()
+}
+
+pub fn window_event(owner: &str, destroyed: bool) {
+    #[cfg(all(feature = "gpu", target_os = "macos"))]
+    platform::window_event(owner, destroyed);
+    #[cfg(not(all(feature = "gpu", target_os = "macos")))]
+    let _ = (owner, destroyed);
+}
+#[tauri::command]
+pub fn float_gpu_panel(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    filter: crate::gpu_filter::Filter,
+) -> Result<(), String> {
+    use tauri::Manager;
+    if window.label() != "main" || !filter.valid() {
+        return Err("invalid_gpu_filter".into());
+    }
+    let shared = app.state::<crate::state::SharedState>();
+    {
+        let mut s = shared.inner.lock().map_err(|_| "state_lock")?;
+        if !filter.matches_source(&s.document.preferences.mode) {
+            return Err("stale_gpu_source".into());
+        }
+        s.gpu_filter = filter;
+        s.revision += 1;
+    }
+    let snapshot = shared.snapshot()?;
+    let _ = tauri::Emitter::emit(&app, "state-changed", snapshot);
+    if let Some(w) = app.get_webview_window("gpu-map") {
+        w.show().map_err(|e| e.to_string())?;
+        return w.set_focus().map_err(|e| e.to_string());
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "gpu-map",
+        tauri::WebviewUrl::App("index.html?panel=gpu".into()),
+    )
+    .title("FlowGuard · GPU map")
+    .inner_size(1000.0, 720.0)
+    .min_inner_size(360.0, 400.0)
+    .build()
+    .map(|_| ())
+    .map_err(|e| e.to_string())
 }

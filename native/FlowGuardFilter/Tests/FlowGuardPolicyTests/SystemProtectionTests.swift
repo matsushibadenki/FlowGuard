@@ -3,7 +3,7 @@ import XCTest
 final class SystemProtectionTests: XCTestCase {
     func rule(action: String = "block", exception: Bool = false, direction: String = "both", destination: String = "1.1.1.1", identifier: String = "com.apple.mDNSResponder", port: Int = 53) throws -> PolicyRule {
         let json = """
-        {"id":"\(direction)","source":"live","appKey":"signed:v1:apple::\(identifier)","identity":{"authority":"apple","teamId":"","identifier":"\(identifier)"},"app":"DNS","destination":"\(destination)","port":\(port),"direction":"\(direction)","action":"\(action)","updatedAt":1,"systemException":\(exception)}
+        {"id":"\(direction)","source":"live","transport":"TCP","appKey":"signed:v1:apple::\(identifier)","identity":{"authority":"apple","teamId":"","identifier":"\(identifier)"},"app":"DNS","destination":"\(destination)","port":\(port),"direction":"\(direction)","action":"\(action)","updatedAt":1,"systemException":\(exception)}
         """
         return try JSONDecoder().decode(PolicyRule.self, from: Data(json.utf8))
     }

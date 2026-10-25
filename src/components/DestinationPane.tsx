@@ -1,3 +1,4 @@
+import {FlowNameEvidence} from './FlowNames';
 // パス: src/components/DestinationPane.tsx
 import {DestinationNameEvidence} from './DestinationNames';
 import {destinationName} from '../core/destination-names';
@@ -38,7 +39,7 @@ export function DestinationPane({snapshot,row, selectedId, select, t, expanded, 
             const selected = destination.connectionIds.includes(selectedId ?? '');
             return <li key={destination.key}><button className={`map-destination-row intent-${destination.intent}`}
               aria-pressed={selected} onClick={() => select(destination)}>
-              <span className="map-endpoint"><strong>{destination.destination.includes(':') ? `[${destination.destination}]` : destination.destination}:{destination.port}</strong><DestinationNameEvidence row={destinationName(snapshot,destination.destination)} locale={snapshot.document.preferences.locale}/>
+              <span className="map-endpoint"><strong>{destination.destination.includes(':') ? `[${destination.destination}]` : destination.destination}:{destination.port}</strong><DestinationNameEvidence row={destinationName(snapshot,destination.destination)} locale={snapshot.document.preferences.locale}/><FlowNameEvidence snapshot={snapshot} ids={destination.connectionIds}/>
                 <span><span>{destination.protocol}</span><DirectionIcon direction={destination.direction}/>
                   {t(destination.direction === 'unknown' ? 'unknownDirection' : destination.direction === 'inbound' ? 'inbound' : 'outbound')}</span>
               </span><span className="map-intent-chip">

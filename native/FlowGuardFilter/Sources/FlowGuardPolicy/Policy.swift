@@ -2,6 +2,7 @@ import Foundation
 public enum RuleAction: String, Codable { case allow, block, ask }
 public enum RuleDirection: String, Codable { case outbound, inbound, both }
 public struct PolicyRule: Codable, Equatable {
+    public let transport:String?
     public let systemException: Bool?
     public let timeoutAction: RuleAction?
     public let identity: SigningIdentity?
@@ -29,7 +30,7 @@ public struct FlowIdentity {
 }
 public struct Policy {
     public let rules: [PolicyRule]
-    public init(rules: [PolicyRule] = []) { self.rules = rules.filter { $0.source == "live" && $0.identity?.valid == true && $0.appKey == $0.identity?.key } }
+    public init(rules: [PolicyRule] = []) { self.rules = rules.filter { ($0.transport ?? "TCP")=="TCP" && $0.source == "live" && $0.identity?.valid == true && $0.appKey == $0.identity?.key } }
     public func matchingRule(for flow: FlowIdentity) -> PolicyRule? {
         guard flow.transport == .tcp else { return nil }
         // A specific direction overrides a both-directions fallback, newest first.

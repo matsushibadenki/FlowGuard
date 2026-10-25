@@ -2,7 +2,7 @@ import Foundation
 import FlowGuardBridge
 import FlowGuardPolicy
 public struct BridgePreflight: Encodable {
-    public let protocolVersion = 4
+    public let protocolVersion = 5
     public let packaged: Bool
     public let signed: Bool
     public let status: String
@@ -21,7 +21,7 @@ public final class HostBridge {
         transact(update: nil) { [self] result in
             do {
                 let status = try JSONDecoder().decode(BridgeReply.self, from: result.get())
-                guard status.protocolVersion == 4, status.status == "ready", status.error == nil else { throw NSError(domain: "FlowGuardBridge.not_ready", code: 6) }
+                guard status.protocolVersion == 5, status.status == "ready", status.error == nil else { throw NSError(domain: "FlowGuardBridge.not_ready", code: 6) }
                 let update = PolicyUpdate(requestID: UUID().uuidString, expectedInstanceID: status.instanceID, expectedRevision: status.revision, rules: rules)
                 let payload = try JSONEncoder().encode(update)
                 transact(update: payload) { result in
@@ -36,7 +36,8 @@ public final class HostBridge {
     }
     public func pendingAsks(completion: @escaping (Result<Data, Error>) -> Void) { transaction(operation: .pending, completion: completion) }
     public func answerAsk(_ data: Data, completion: @escaping (Result<Data, Error>) -> Void) { transaction(operation: .answer(data), completion: completion) }
-    private enum Operation { case status, policy(Data), pending, answer(Data) }
+    public func flowNames(_ data:Data,completion:@escaping(Result<Data,Error>)->Void){transaction(operation:.names(data),completion:completion)}
+    private enum Operation { case status, policy(Data), pending, answer(Data),names(Data) }
     /// Each transaction has a bounded lifetime. Reconnect starts with status, never a cached revision.
     public func transact(update: Data?, completion: @escaping (Result<Data, Error>) -> Void) {
         transaction(operation: update.map { .policy($0) } ?? .status, completion: completion)
@@ -58,6 +59,7 @@ public final class HostBridge {
         }
         let reply: (Data) -> Void = { finish.end(.success($0)) }
         switch operation {
+        case .names(let data): if remote.flowNames?(data,withReply:reply)==nil{finish.end(.failure(NSError(domain:"FlowGuardBridge.names_unavailable",code:8)))}
         case .status: remote.status(withReply: reply)
         case .policy(let data): remote.replacePolicy(data, withReply: reply)
         case .pending: remote.pendingAsks(withReply: reply)

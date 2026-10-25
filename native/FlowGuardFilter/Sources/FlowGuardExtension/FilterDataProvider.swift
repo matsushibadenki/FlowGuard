@@ -12,6 +12,7 @@ public final class FilterDataProvider: NEFilterDataProvider {
     private let lock = NSLock()
     private var policy = Policy()
     private let asks = AskQueue()
+    private let flowNames = FlowNameStore()
     private var askTimer: DispatchSourceTimer?
     private let work = DispatchQueue(label: "com.flowguard.filter.decisions")
     public override func startFilter(completionHandler: @escaping (Error?) -> Void) {
@@ -25,7 +26,7 @@ public final class FilterDataProvider: NEFilterDataProvider {
         let settings = NEFilterSettings(rules: [NEFilterRule(networkRule: network, action: .filterData)], defaultAction: .allow)
         apply(settings) { [weak self] error in
             guard let self, error == nil else { completionHandler(error); return }
-            let service = BridgeService(asks: self.asks) { [weak self] rules in
+            let service = BridgeService(asks: self.asks,names:self.flowNames) { [weak self] rules in
                 guard let self else { throw NSError(domain: "FlowGuardBridge", code: 2) }
                 try self.replacePolicy(rules)
             }
@@ -33,7 +34,7 @@ public final class FilterDataProvider: NEFilterDataProvider {
                 try service.start(initial: initial); self.bridge = service
                 let timer = DispatchSource.makeTimerSource(queue: self.work)
                 timer.schedule(deadline: .now() + .milliseconds(250), repeating: .milliseconds(250), leeway: .milliseconds(20))
-                timer.setEventHandler { [weak self] in self?.asks.expire() }
+                timer.setEventHandler { [weak self] in self?.asks.expire();self?.flowNames.expire() }
                 timer.resume(); self.askTimer = timer
                 completionHandler(nil)
             }
@@ -58,6 +59,9 @@ public final class FilterDataProvider: NEFilterDataProvider {
               let port = UInt16(remote.port),
               flow.direction == .inbound || flow.direction == .outbound,
               let signingIdentity = SigningIdentity.verified(auditToken: flow.sourceAppAuditToken) else { return .allow() }
+        if let name=socket.remoteHostname,let local=socket.localEndpoint as? NWHostEndpoint,let localPort=UInt16(local.port){
+            flowNames.record(FlowNameRecord(localAddress:local.hostname,localPort:localPort,remoteAddress:remote.hostname,remotePort:port,transport:"TCP",direction:flow.direction == .inbound ? "inbound":"outbound",identity:signingIdentity,name:name,observedAt:UInt64(Date().timeIntervalSince1970)))
+        }
         let identity = FlowIdentity(transport: .tcp, executable: "", destination: remote.hostname, port: port,
                                     direction: flow.direction == .inbound ? .inbound : .outbound, identity: signingIdentity)
         lock.lock()

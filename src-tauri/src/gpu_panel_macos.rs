@@ -31,6 +31,7 @@ struct Controller {
     next: u64,
     lease: Lease,
     panel: Option<Panel>,
+    owner: String,
 }
 // Main-thread-only native resources. Field order keeps surface alive no longer than its layer.
 struct Panel {
@@ -43,6 +44,9 @@ struct Panel {
     revision: Option<u64>,
     filter: Option<crate::gpu_filter::Filter>,
     status: Status,
+    camera: gpu_scene::Camera,
+    scene: Option<gpu_scene::Scene>,
+    labels: Vec<Retained<objc2_app_kit::NSTextField>>,
 }
 impl Drop for Panel {
     fn drop(&mut self) {
@@ -50,8 +54,12 @@ impl Drop for Panel {
     }
 }
 pub fn open() -> u64 {
+    open_for("main")
+}
+pub fn open_for(owner: &str) -> u64 {
     CONTROLLER.with_borrow_mut(|c| {
         c.panel = None;
+        c.owner = owner.into();
         c.next += 1;
         c.lease = Lease {
             id: c.next,
@@ -62,8 +70,11 @@ pub fn open() -> u64 {
     })
 }
 pub fn close(id: u64) {
+    close_for(id, "main")
+}
+pub fn close_for(id: u64, owner: &str) {
     CONTROLLER.with_borrow_mut(|c| {
-        if c.lease.id == id {
+        if c.lease.id == id && c.owner == owner {
             c.lease.closed = true;
             c.panel = None;
         }
@@ -127,7 +138,48 @@ impl Panel {
             revision: None,
             filter: None,
             status: Status::default(),
+            camera: Default::default(),
+            scene: None,
+            labels: Vec::new(),
         })
+    }
+    fn show_labels(&mut self, scene: &gpu_scene::Scene, mtm: MainThreadMarker) {
+        use objc2_app_kit::{NSColor, NSFont, NSTextField};
+        use objc2_foundation::NSString;
+        for label in self.labels.drain(..) {
+            label.removeFromSuperview();
+        }
+        let bounds = self.view.bounds();
+        let width = bounds.size.width;
+        let height = bounds.size.height;
+        let mut positions: [Vec<f32>; 2] = [vec![], vec![]];
+        for label in &scene.labels {
+            let y = label.position[1];
+            let side = usize::from(label.right);
+            if !(0.02..0.98).contains(&y)
+                || positions[side].len() >= 32
+                || positions[side]
+                    .iter()
+                    .any(|v| ((v - y) as f64 * height).abs() < 18.0)
+            {
+                continue;
+            }
+            positions[side].push(y);
+            let text = NSString::from_str(&label.text.chars().take(160).collect::<String>());
+            let field = NSTextField::labelWithString(&text, mtm);
+            field.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+            field.setTextColor(Some(&NSColor::labelColor()));
+            field.setUsesSingleLineMode(true);
+            field.setToolTip(Some(&NSString::from_str(&label.text)));
+            field.setFrame(frame(
+                label.position[0] as f64 * width,
+                (1.0 - y as f64) * height - 8.0,
+                width * 0.39,
+                18.0,
+            ));
+            self.view.addSubview(&field);
+            self.labels.push(field);
+        }
     }
     fn place(&mut self, host: &NSView, b: Bounds, scale: f64) -> Result<(), String> {
         let host_bounds = host.bounds();
@@ -181,8 +233,22 @@ pub fn sync(
     bounds: Option<Bounds>,
     filter: crate::gpu_filter::Filter,
 ) -> Result<Status, String> {
+    sync_action(app, window, id, sequence, bounds, filter, None)
+}
+pub fn sync_action(
+    app: &tauri::AppHandle,
+    window: tauri::Window,
+    id: u64,
+    sequence: u64,
+    bounds: Option<Bounds>,
+    filter: crate::gpu_filter::Filter,
+    interaction: Option<super::Interaction>,
+) -> Result<Status, String> {
     let mtm = MainThreadMarker::new().ok_or("main_thread_required")?;
     CONTROLLER.with_borrow_mut(|c| {
+        if c.owner != window.label() {
+            return Err("stale_gpu_owner".into());
+        }
         c.lease.accept(id, sequence)?;
         if bounds.is_none()
             || !window.is_visible().unwrap_or(false)
@@ -216,12 +282,42 @@ pub fn sync(
             )?;
             let (revision, connections, selected, total) = {
                 let shared = app.state::<SharedState>();
-                let session = shared.inner.lock().map_err(|_| "state_lock")?;
-                if session.document.preferences.view != "map" {
+                let mut session = shared.inner.lock().map_err(|_| "state_lock")?;
+                if window.label() == "main" && session.document.preferences.view != "map" {
                     return Err("map_view_required".into());
                 }
                 if !filter.matches_source(&session.document.preferences.mode) {
                     return Err("stale_gpu_source".into());
+                }
+                if let Some(action) = interaction.as_ref() {
+                    if let super::Interaction::Pick { x, y } = action {
+                        if p.revision == Some(session.revision)
+                            && p.filter.as_ref() == Some(&filter)
+                        {
+                            if let Some(id) = p.scene.as_ref().and_then(|scene| {
+                                gpu_scene::pick(
+                                    scene,
+                                    *x,
+                                    *y,
+                                    bounds.unwrap().rect.width as f32,
+                                    bounds.unwrap().rect.height as f32,
+                                )
+                            }) {
+                                if session.visible().iter().any(|c| c.id == id) {
+                                    session.selected_id = Some(id.into());
+                                    session.revision += 1;
+                                    let _ = tauri::Emitter::emit(
+                                        app,
+                                        "state-changed",
+                                        session.snapshot_for_gpu(),
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        p.camera.change(action.kind());
+                        p.revision = None;
+                    }
                 }
                 if p.revision == Some(session.revision)
                     && p.filter.as_ref() == Some(&filter)
@@ -235,12 +331,24 @@ pub fn sync(
                 let total = visible.len();
                 (
                     session.revision,
-                    filter.project(visible, &session.document.rules),
+                    {
+                        let names = session.flow_name_snapshot();
+                        filter.project_with_names(
+                            visible,
+                            &session.document.rules,
+                            if names.search_enabled {
+                                &names.rows
+                            } else {
+                                &[]
+                            },
+                        )
+                    },
                     session.selected_id.clone(),
                     total,
                 )
             };
-            let scene = gpu_scene::build(&connections, selected.as_deref());
+            let mut scene = gpu_scene::build(&connections, selected.as_deref());
+            gpu_scene::camera(&mut scene, p.camera);
             let presented = p.renderer.present(&p.surface, &scene.routes)?;
             p.container.setHidden(!presented);
             let status = Status {
@@ -253,6 +361,8 @@ pub fn sync(
             };
             p.revision = presented.then_some(revision);
             p.filter = Some(filter);
+            p.show_labels(&scene, mtm);
+            p.scene = Some(scene);
             p.status = status.clone();
             Ok(status)
         })();
@@ -281,4 +391,81 @@ pub(super) fn verify_clipped_geometry() -> Result<(), String> {
         }
         Ok(())
     })
+}
+
+pub fn window_event(owner: &str, destroyed: bool) {
+    CONTROLLER.with_borrow_mut(|c| {
+        if c.owner == owner {
+            if destroyed {
+                c.lease.closed = true;
+                c.panel = None;
+            } else if let Some(p) = &c.panel {
+                p.container.setHidden(true);
+            }
+        }
+    });
+}
+
+#[cfg(feature = "gpu-qa")]
+pub fn verify_interactions(
+    app: &tauri::AppHandle,
+    window: tauri::Window,
+    lease: u64,
+    b: Bounds,
+) -> Result<(), String> {
+    sync_action(
+        app,
+        window.clone(),
+        lease,
+        9,
+        Some(b),
+        crate::gpu_filter::Filter::default(),
+        Some(super::Interaction::ZoomIn),
+    )?;
+    CONTROLLER.with_borrow(|c| {
+        let p = c.panel.as_ref().ok_or("qa_panel")?;
+        if p.camera.zoom <= 1.0 || p.labels.is_empty() {
+            return Err("qa_labels_or_zoom".into());
+        }
+        Ok::<_, String>(())
+    })?;
+    sync_action(
+        app,
+        window.clone(),
+        lease,
+        10,
+        Some(b),
+        crate::gpu_filter::Filter::default(),
+        Some(super::Interaction::Reset),
+    )?;
+    let (x, y, expected) = CONTROLLER.with_borrow(|c| {
+        let p = c.panel.as_ref().ok_or("qa_panel")?;
+        let scene = p.scene.as_ref().ok_or("qa_scene")?;
+        let route = scene.routes.last().ok_or("qa_route")?;
+        let x = 0.5;
+        let y = (route.from[1] + route.to[1]) * 0.5;
+        let expected = gpu_scene::pick(scene, x, y, b.rect.width as f32, b.rect.height as f32)
+            .ok_or("qa_pick")?
+            .to_owned();
+        Ok::<_, String>((x, y, expected))
+    })?;
+    sync_action(
+        app,
+        window,
+        lease,
+        11,
+        Some(b),
+        crate::gpu_filter::Filter::default(),
+        Some(super::Interaction::Pick { x, y }),
+    )?;
+    if app
+        .state::<SharedState>()
+        .snapshot()?
+        .selected_id
+        .as_deref()
+        != Some(&expected)
+    {
+        return Err("qa_selection_not_shared".into());
+    }
+    Ok(())
 }

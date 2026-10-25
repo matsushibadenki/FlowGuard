@@ -3,8 +3,8 @@ import FlowGuardPolicy
 
 /// Stored in the OS-owned provider configuration, never read from an arbitrary file.
 public struct InitialPolicy: Codable {
-    public static let key = "flowguard.initialPolicy.v4"
-    public static let obsoleteKeys = ["flowguard.initialPolicy.v1", "flowguard.initialPolicy.v2", "flowguard.initialPolicy.v3"]
+    public static let key = "flowguard.initialPolicy.v5"
+    public static let obsoleteKeys = ["flowguard.initialPolicy.v1", "flowguard.initialPolicy.v2", "flowguard.initialPolicy.v3", "flowguard.initialPolicy.v4"]
     public static let legacyKey = "flowguard.initialPolicy.v1"
     public static func vendorConfiguration(previous: [String: Any], policy: Data) -> [String: Any] {
         var result = previous
