@@ -576,3 +576,14 @@ ROADMAPの「機器情報とサービス・診断結果の関連付け」を優�
 - `com.flowguard.lanqa`／`FlowGuard LAN QA.app`を別identifierでビルド。CUAから実Tauri（tauri://localhost、日本語1440×960）で近隣キャッシュ収集→2行→表示名保存→正常完了結果の明示保存→保存回表示を確認。終了／最新bundleで再起動後、現在結果0行・保存回1件を確認し、旧回2行と`LAN QA — local record`が読み取り専用で再表示されることを確認。テストデータは独立QAアプリ領域だけへ保存。既存FlowGuard文書・OS保護・配布候補は変更していない。
 - 実機確認はキャッシュだけ。能動Ping、mDNS／NBSTAT実LAN応答、IPinfoの実要求、SSID開示・切替、複数ウインドウ・権限・署名済み配布版はPending。IEEE公式の公開OUIデータのみ取得し、機器情報を外部送信していない。
 - 実装詳細と範囲は[lan-sheet-expansion.md](lan-sheet-expansion.md)。IPv6能動探索・仮想／ブリッジIFへの探索拡張は別途検討のLaterを維持。
+
+
+## 2026-10-26 LAN TCP確認の実行条件・リング表示
+
+- `npm test`: 31ファイル・151件成功。条件境界・120秒見積り・件数上限・プリセット・未確認／不確定の集計・翻訳を追加。
+- `cargo test --manifest-path src-tauri/Cargo.toml --offline --no-default-features --lib`: 170件成功・24件ignored。ワーカー注入試験で並列上限・選択待機・停止／予算／ネットワーク変更後の結果拒否・間隔中の停止・条件変更による比較失効・31列CSVを確認。
+- `cargo test --manifest-path src-tauri/Cargo.toml --offline --no-default-features --lib custom_timeout_connects_on_ipv4_and_ipv6_loopback -- --ignored`: 1件成功。1800ms設定の実ソケットでIPv4／IPv6のlo0にだけ接続し、送信元・開放・拒否を確認。LAN探索は行っていない。
+- TypeScript／Viteビルド成功。GPU既定feature有効のcargo check成功。
+- Browser skillが利用可能一覧にないためbundled Playwright／Chromeを使用。通常Viteページからコンポーネント検証ハーネスを載せ、JA／EN／简体中文 × 1500／768／375／320pxで低負荷／標準／長めに待つ、上限・予算による開始拒否、テスト用IPCの設定引数、確認中の編集ロック、停止、入力変更後も実行条件を保持すること、4状態リング、CSV呼び出し、予算切れ表示を確認。page identity・非空・overlayなし・関連console/pageerrorなし・ページ横溢れなし・外部HTTPS要求0件。
+- `/tmp/flowguard-port-settings-qa.cjs`と`/tmp/flowguard-port-settings-{ja,en,zh-CN}-{1500,768,375,320}.png`。日本語desktop／320pxを目視し、重複件数をリングへまとめ、送信元／要求ポートの情報アイコン、時間単位、次回入力と実行条件の区別を確認。
+- 今回の実LAN、実Tauri WebKit・複数ウインドウ・Retina、署名済み配布版はPending。サービス応答確認・ルール・OS保護設定は変更していない。詳細は[tcp-check-settings.md](tcp-check-settings.md)。

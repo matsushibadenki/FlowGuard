@@ -198,6 +198,7 @@ mod tests {
     fn plan() -> Plan {
         Plan {
             tcp: crate::ports::Plan {
+                settings: Default::default(),
                 target: "192.168.1.30".parse().unwrap(),
                 local: "192.168.1.20".parse().unwrap(),
                 interface: "en0".into(),

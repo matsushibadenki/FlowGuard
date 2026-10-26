@@ -89,7 +89,7 @@ export async function floatLanDetails(){if(!native)throw Error('desktop_required
 export async function dockLanDetails(){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('dock_lan_details'));}
 export async function lanCsv(generation:number):Promise<string>{if(!native)throw Error('desktop_required');return invoke<string>('lan_csv',{generation});}
 
-export async function startLanPorts(id:string,generation:number,first:number,last:number,preset:import('./types').PortPreset='range'){if(!native)throw Error("desktop_required");emit(await invoke<Snapshot>("start_lan_ports",{id,generation,first,last,preset}));}
+export async function startLanPorts(id:string,generation:number,first:number,last:number,preset:import('./types').PortPreset='range',settings?:import('./port-settings').PortScanSettings){if(!native)throw Error("desktop_required");emit(await invoke<Snapshot>("start_lan_ports",{id,generation,first,last,preset,settings}));}
 export async function stopLanPorts(){if(!native)throw Error("desktop_required");emit(await invoke<Snapshot>("stop_lan_ports"));}
 
 export async function lanPortsCsv(operation:number):Promise<string>{if(!native)throw Error("desktop_required");return invoke<string>("lan_ports_csv",{operation});}

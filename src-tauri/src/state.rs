@@ -1385,6 +1385,7 @@ impl SharedState {
         Ok(crate::ports::csv(&s.ports, s.inventory.snapshot.generation))
     }
     pub fn begin_ports(&self, plan: &crate::ports::Plan) -> Result<(u64, Snapshot), String> {
+        plan.settings.validate(plan.ports.len())?;
         let mut s = self.inner.lock().map_err(|_| "state_lock")?;
         if s.updates.snapshot.stage == "installing" {
             return Err("update_installing".into());

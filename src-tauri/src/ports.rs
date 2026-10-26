@@ -1,12 +1,55 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6},
     num::NonZeroU32,
     time::{Duration, Instant},
 };
+pub const JOB_BUDGET_MS: u64 = 120_000;
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct ScanSettings {
+    pub concurrency: usize,
+    pub timeout_ms: u32,
+    pub interval_ms: u32,
+    pub max_ports: usize,
+}
+impl Default for ScanSettings {
+    fn default() -> Self {
+        Self {
+            concurrency: 4,
+            timeout_ms: 600,
+            interval_ms: 0,
+            max_ports: 256,
+        }
+    }
+}
+impl ScanSettings {
+    pub fn estimate_ms(&self, count: usize) -> Option<u64> {
+        if !(1..=8).contains(&self.concurrency)
+            || !(100..=3000).contains(&self.timeout_ms)
+            || self.interval_ms > 1000
+            || !(1..=256).contains(&self.max_ports)
+            || count == 0
+            || count > self.max_ports
+        {
+            return None;
+        }
+        let batches = count.div_ceil(self.concurrency) as u64;
+        Some(batches * u64::from(self.timeout_ms) + (batches - 1) * u64::from(self.interval_ms))
+    }
+    pub fn validate(&self, count: usize) -> Result<(), String> {
+        let estimate = self.estimate_ms(count).ok_or("invalid_port_settings")?;
+        if estimate > JOB_BUDGET_MS {
+            return Err("port_budget_exceeded".into());
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub settings: ScanSettings,
+    pub budget_ms: u64,
     pub selected_port: Option<u16>,
     pub comparison: Comparison,
     pub operation: u64,
@@ -53,6 +96,7 @@ struct Scope {
     mask: String,
     generation: u64,
     ports: Vec<u16>,
+    settings: ScanSettings,
 }
 impl Scope {
     fn new(p: &Plan) -> Self {
@@ -63,6 +107,7 @@ impl Scope {
             mask: p.netmask.clone(),
             generation: p.generation,
             ports: p.ports.clone(),
+            settings: p.settings.clone(),
         }
     }
 }
@@ -173,6 +218,7 @@ impl Comparator {
 }
 #[derive(Clone)]
 pub struct Plan {
+    pub settings: ScanSettings,
     pub target: IpAddr,
     pub local: IpAddr,
     pub interface: String,
@@ -251,6 +297,7 @@ impl Plan {
             return Err("invalid_family".into());
         };
         Ok(Self {
+            settings: Default::default(),
             target,
             local,
             interface: d.interface.clone(),
@@ -260,8 +307,14 @@ impl Plan {
             selection: "range".into(),
         })
     }
+    pub fn with_settings(mut self, settings: ScanSettings) -> Result<Self, String> {
+        settings.validate(self.ports.len())?;
+        self.settings = settings;
+        Ok(self)
+    }
     pub fn with_preset(mut self, preset: &str) -> Result<Self, String> {
         if preset == "range" {
+            self.settings.validate(self.ports.len())?;
             return Ok(self);
         }
         let catalog: std::collections::BTreeMap<String, Vec<u16>> =
@@ -274,6 +327,7 @@ impl Plan {
         self.ports.sort_unstable();
         self.ports.dedup();
         self.selection = preset.into();
+        self.settings.validate(self.ports.len())?;
         Ok(self)
     }
     pub fn matches(&self, n: &crate::network::NetworkSnapshot) -> bool {
@@ -286,6 +340,8 @@ impl Plan {
     }
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
+            settings: self.settings.clone(),
+            budget_ms: JOB_BUDGET_MS,
             selected_port: None,
             source_address: display_address(self.local, &self.interface),
             family: if self.target.is_ipv4() {
@@ -365,6 +421,15 @@ pub(crate) fn connect(
     interface: Option<&str>,
     port: u16,
 ) -> std::io::Result<std::net::TcpStream> {
+    connect_with_timeout(local, target, interface, port, Duration::from_millis(600))
+}
+fn connect_with_timeout(
+    local: IpAddr,
+    target: IpAddr,
+    interface: Option<&str>,
+    port: u16,
+    timeout: Duration,
+) -> std::io::Result<std::net::TcpStream> {
     let socket = socket2::Socket::new(
         if target.is_ipv4() {
             socket2::Domain::IPV4
@@ -416,18 +481,19 @@ pub(crate) fn connect(
         )),
     };
     socket.bind(&address(local, 0).into())?;
-    socket.connect_timeout(&address(target, port).into(), Duration::from_millis(600))?;
+    socket.connect_timeout(&address(target, port).into(), timeout)?;
     Ok(socket.into())
 }
-fn probe(
+fn probe_with_timeout(
     local: impl Into<IpAddr>,
     target: impl Into<IpAddr>,
     interface: Option<&str>,
     port: u16,
+    timeout: Duration,
 ) -> Row {
     let (local, target) = (local.into(), target.into());
     let started = Instant::now();
-    let result = connect(local, target, interface, port);
+    let result = connect_with_timeout(local, target, interface, port, timeout);
     Row {
         port,
         status: result
@@ -442,29 +508,109 @@ fn probe(
             .as_secs(),
     }
 }
-pub fn run(plan: Plan, mut publish: impl FnMut(Snapshot), cancelled: impl Fn() -> bool) {
+#[cfg(test)]
+fn probe(
+    local: impl Into<IpAddr>,
+    target: impl Into<IpAddr>,
+    interface: Option<&str>,
+    port: u16,
+) -> Row {
+    probe_with_timeout(local, target, interface, port, Duration::from_millis(600))
+}
+pub fn run(plan: Plan, publish: impl FnMut(Snapshot), cancelled: impl Fn() -> bool) {
+    run_with(
+        plan,
+        publish,
+        cancelled,
+        crate::network::observe,
+        &|local, target, interface, port, timeout| {
+            probe_with_timeout(local, target, Some(interface), port, timeout)
+        },
+        Duration::from_millis(JOB_BUDGET_MS),
+    );
+}
+fn run_with(
+    plan: Plan,
+    mut publish: impl FnMut(Snapshot),
+    cancelled: impl Fn() -> bool,
+    network: impl Fn() -> crate::network::NetworkSnapshot,
+    probe: &(impl Fn(IpAddr, IpAddr, &str, u16, Duration) -> Row + Sync),
+    budget: Duration,
+) {
     let mut result = plan.snapshot();
-    for chunk in plan.ports.chunks(4) {
+    if plan.settings.validate(plan.ports.len()).is_err() {
+        result.stage = "failed".into();
+        result.error = Some("invalid_port_settings".into());
+        publish(result);
+        return;
+    }
+    let started = Instant::now();
+    for (index, chunk) in plan.ports.chunks(plan.settings.concurrency).enumerate() {
+        if index > 0 {
+            let pause = Instant::now();
+            while pause.elapsed() < Duration::from_millis(u64::from(plan.settings.interval_ms))
+                && !cancelled()
+                && started.elapsed() < budget
+            {
+                std::thread::sleep(
+                    Duration::from_millis(10).min(
+                        Duration::from_millis(u64::from(plan.settings.interval_ms))
+                            .saturating_sub(pause.elapsed()),
+                    ),
+                );
+            }
+        }
         if cancelled() {
             result.stage = "cancelled".into();
             publish(result);
             return;
         }
-        if !plan.matches(&crate::network::observe()) {
+        if started.elapsed() >= budget {
+            result.stage = "failed".into();
+            result.error = Some("port_budget_exceeded".into());
+            publish(result);
+            return;
+        }
+        if !plan.matches(&network()) {
             result.stage = "failed".into();
             result.error = Some("network_changed".into());
             publish(result);
             return;
         }
+        if cancelled() {
+            result.stage = "cancelled".into();
+            publish(result);
+            return;
+        }
+        let remaining = budget.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            result.stage = "failed".into();
+            result.error = Some("port_budget_exceeded".into());
+            publish(result);
+            return;
+        }
+        let timeout = Duration::from_millis(u64::from(plan.settings.timeout_ms)).min(remaining);
         let rows = std::thread::scope(|scope| {
             chunk
                 .iter()
                 .map(|port| {
-                    scope.spawn(|| probe(plan.local, plan.target, Some(&plan.interface), *port))
+                    (
+                        *port,
+                        scope.spawn(|| {
+                            probe(plan.local, plan.target, &plan.interface, *port, timeout)
+                        }),
+                    )
                 })
                 .collect::<Vec<_>>()
                 .into_iter()
-                .map(|h| h.join().expect("TCP worker"))
+                .map(|(port, h)| {
+                    h.join().unwrap_or(Row {
+                        port,
+                        status: "error".into(),
+                        elapsed_ms: 0,
+                        observed_at: crate::model::now(),
+                    })
+                })
                 .collect::<Vec<_>>()
         });
         if cancelled() {
@@ -472,18 +618,45 @@ pub fn run(plan: Plan, mut publish: impl FnMut(Snapshot), cancelled: impl Fn() -
             publish(result);
             return;
         }
+        if started.elapsed() >= budget {
+            result.stage = "failed".into();
+            result.error = Some("port_budget_exceeded".into());
+            publish(result);
+            return;
+        }
+        // A changed source invalidates the whole batch, including successful connects.
+        if !plan.matches(&network()) {
+            result.stage = "failed".into();
+            result.error = Some("network_changed".into());
+            publish(result);
+            return;
+        }
+        if cancelled() {
+            result.stage = "cancelled".into();
+            publish(result);
+            return;
+        }
+        if started.elapsed() >= budget {
+            result.stage = "failed".into();
+            result.error = Some("port_budget_exceeded".into());
+            publish(result);
+            return;
+        }
         result.rows.extend(rows);
         result.completed = result.rows.len();
         publish(result.clone());
     }
-    result.stage = if plan.matches(&crate::network::observe()) {
-        "completed"
+    let final_network = network();
+    if cancelled() {
+        result.stage = "cancelled".into();
+    } else if started.elapsed() >= budget {
+        result.stage = "failed".into();
+        result.error = Some("port_budget_exceeded".into());
+    } else if !plan.matches(&final_network) {
+        result.stage = "failed".into();
+        result.error = Some("network_changed".into());
     } else {
-        "failed"
-    }
-    .into();
-    if result.stage == "failed" {
-        result.error = Some("network_changed".into())
+        result.stage = "completed".into();
     }
     publish(result);
 }
@@ -515,6 +688,11 @@ pub fn csv(job: &Snapshot, current_generation: u64) -> String {
         "previous_status",
         "previous_elapsed_ms",
         "previous_observed_at_unix",
+        "scan_concurrency",
+        "connect_timeout_ms",
+        "batch_interval_ms",
+        "max_ports",
+        "job_budget_ms",
     ];
     let mut text = String::from("\u{feff}");
     text.push_str(&headers.map(crate::inventory::cell).join(","));
@@ -562,6 +740,11 @@ pub fn csv(job: &Snapshot, current_generation: u64) -> String {
             previous
                 .map(|r| r.observed_at.to_string())
                 .unwrap_or_default(),
+            job.settings.concurrency.to_string(),
+            job.settings.timeout_ms.to_string(),
+            job.settings.interval_ms.to_string(),
+            job.settings.max_ports.to_string(),
+            job.budget_ms.to_string(),
         ];
         text.push_str(
             &values
@@ -577,9 +760,298 @@ pub fn csv(job: &Snapshot, current_generation: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn settings_plan() -> Plan {
+        Plan {
+            settings: Default::default(),
+            target: "192.168.1.30".parse().unwrap(),
+            local: "192.168.1.20".parse().unwrap(),
+            interface: "en0".into(),
+            netmask: "255.255.255.0".into(),
+            generation: 1,
+            ports: (1..=12).collect(),
+            selection: "test".into(),
+        }
+    }
+    fn settings_network() -> crate::network::NetworkSnapshot {
+        crate::network::NetworkSnapshot {
+            addresses: vec![crate::network::InterfaceAddress {
+                interface: "en0".into(),
+                address: "192.168.1.20".into(),
+                family: "IPv4".into(),
+                netmask: "255.255.255.0".into(),
+                up: true,
+            }],
+            ..Default::default()
+        }
+    }
+    fn open_row(port: u16) -> Row {
+        Row {
+            port,
+            status: "open".into(),
+            elapsed_ms: 0,
+            observed_at: 1,
+        }
+    }
+    #[test]
+    #[cfg(target_os = "macos")]
+    #[ignore = "explicit host IPv4/IPv6 loopback sockets only, no LAN targets"]
+    fn custom_timeout_connects_on_ipv4_and_ipv6_loopback() {
+        for ip in [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ] {
+            let listener = std::net::TcpListener::bind(SocketAddr::new(ip, 0)).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let stream =
+                connect_with_timeout(ip, ip, Some("lo0"), port, Duration::from_millis(1800))
+                    .unwrap();
+            assert_eq!(stream.local_addr().unwrap().ip(), ip);
+            assert_eq!(stream.peer_addr().unwrap().port(), port);
+            drop(stream);
+            drop(listener);
+            assert_eq!(
+                probe_with_timeout(ip, ip, Some("lo0"), port, Duration::from_millis(1800)).status,
+                "closed"
+            );
+        }
+    }
+    #[test]
+    fn cancellation_during_scope_check_and_changed_network_never_publish_new_rows() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let stopped = AtomicBool::new(false);
+        let count = AtomicUsize::new(0);
+        let mut result = None;
+        run_with(
+            settings_plan(),
+            |s| result = Some(s),
+            || stopped.load(Ordering::SeqCst),
+            || {
+                stopped.store(true, Ordering::SeqCst);
+                settings_network()
+            },
+            &|_, _, _, port, _| {
+                count.fetch_add(1, Ordering::SeqCst);
+                open_row(port)
+            },
+            Duration::from_secs(1),
+        );
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        assert_eq!(result.unwrap().stage, "cancelled");
+        let checks = AtomicUsize::new(0);
+        result = None;
+        run_with(
+            settings_plan(),
+            |s| result = Some(s),
+            || false,
+            || {
+                if checks.fetch_add(1, Ordering::SeqCst) == 0 {
+                    settings_network()
+                } else {
+                    Default::default()
+                }
+            },
+            &|_, _, _, port, _| open_row(port),
+            Duration::from_secs(1),
+        );
+        let result = result.unwrap();
+        assert_eq!(result.error.as_deref(), Some("network_changed"));
+        assert!(result.rows.is_empty());
+    }
+    #[test]
+    fn settings_reject_invalid_limits_and_excessive_job_estimates() {
+        assert_eq!(ScanSettings::default().estimate_ms(256), Some(38400));
+        let values = [
+            ScanSettings {
+                concurrency: 0,
+                ..Default::default()
+            },
+            ScanSettings {
+                concurrency: 9,
+                ..Default::default()
+            },
+            ScanSettings {
+                timeout_ms: 99,
+                ..Default::default()
+            },
+            ScanSettings {
+                timeout_ms: 3001,
+                ..Default::default()
+            },
+            ScanSettings {
+                interval_ms: 1001,
+                ..Default::default()
+            },
+            ScanSettings {
+                max_ports: 0,
+                ..Default::default()
+            },
+            ScanSettings {
+                max_ports: 257,
+                ..Default::default()
+            },
+            ScanSettings {
+                max_ports: 11,
+                ..Default::default()
+            },
+        ];
+        for settings in values {
+            assert!(settings_plan().with_settings(settings).is_err());
+        }
+        let slow = ScanSettings {
+            concurrency: 1,
+            timeout_ms: 3000,
+            ..Default::default()
+        };
+        assert_eq!(slow.validate(256).unwrap_err(), "port_budget_exceeded");
+        assert!(slow.validate(40).is_ok());
+        assert!(slow.validate(41).is_err());
+        assert!(
+            serde_json::from_str::<ScanSettings>(r#"{"timeoutMs":600,"unexpected":true}"#).is_err()
+        );
+        assert!(serde_json::from_str::<ScanSettings>(r#"{"concurrency":-1}"#).is_err());
+        assert_eq!(
+            serde_json::from_str::<ScanSettings>("{}").unwrap(),
+            ScanSettings::default()
+        );
+    }
+    #[test]
+    fn worker_uses_selected_timeout_and_concurrency_without_network_io() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let seen = AtomicUsize::new(0);
+        let settings = ScanSettings {
+            concurrency: 2,
+            timeout_ms: 1234,
+            interval_ms: 0,
+            max_ports: 16,
+        };
+        let plan = settings_plan().with_settings(settings.clone()).unwrap();
+        let mut snapshots = vec![];
+        run_with(
+            plan,
+            |s| snapshots.push(s),
+            || false,
+            settings_network,
+            &|_, _, _, port, timeout| {
+                assert_eq!(timeout, Duration::from_millis(1234));
+                let n = active.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(n, Ordering::SeqCst);
+                seen.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(3));
+                active.fetch_sub(1, Ordering::SeqCst);
+                open_row(port)
+            },
+            Duration::from_secs(10),
+        );
+        let final_result = snapshots.last().unwrap();
+        assert_eq!(final_result.stage, "completed");
+        assert_eq!(final_result.completed, 12);
+        assert_eq!(final_result.settings, settings);
+        assert_eq!(seen.load(Ordering::SeqCst), 12);
+        assert!(peak.load(Ordering::SeqCst) <= 2);
+        assert_eq!(final_result.budget_ms, JOB_BUDGET_MS);
+    }
+    #[test]
+    fn stop_and_budget_expiry_do_not_publish_late_rows() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let stopped = AtomicBool::new(false);
+        let called = AtomicUsize::new(0);
+        let mut result = None;
+        run_with(
+            settings_plan(),
+            |s| result = Some(s),
+            || stopped.load(Ordering::SeqCst),
+            settings_network,
+            &|_, _, _, port, _| {
+                called.fetch_add(1, Ordering::SeqCst);
+                stopped.store(true, Ordering::SeqCst);
+                open_row(port)
+            },
+            Duration::from_secs(1),
+        );
+        let final_result = result.unwrap();
+        assert_eq!(final_result.stage, "cancelled");
+        assert_eq!(final_result.completed, 0);
+        assert!(final_result.rows.is_empty());
+        assert!(called.load(Ordering::SeqCst) <= 4);
+        result = None;
+        run_with(
+            settings_plan(),
+            |s| result = Some(s),
+            || false,
+            settings_network,
+            &|_, _, _, port, timeout| {
+                assert!(timeout <= Duration::from_millis(1));
+                std::thread::sleep(Duration::from_millis(3));
+                open_row(port)
+            },
+            Duration::from_millis(1),
+        );
+        let final_result = result.unwrap();
+        assert_eq!(final_result.error.as_deref(), Some("port_budget_exceeded"));
+        assert!(final_result.rows.is_empty());
+    }
+    #[test]
+    fn pacing_is_interruptible_and_settings_reset_comparison_and_survive_csv() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let stopped = AtomicBool::new(false);
+        let called = AtomicUsize::new(0);
+        let mut plan = settings_plan();
+        plan.settings.interval_ms = 1000;
+        plan.settings.concurrency = 1;
+        let mut final_result = None;
+        run_with(
+            plan.clone(),
+            |s| {
+                if s.completed == 1 {
+                    stopped.store(true, Ordering::SeqCst);
+                }
+                final_result = Some(s);
+            },
+            || stopped.load(Ordering::SeqCst),
+            settings_network,
+            &|_, _, _, port, _| {
+                called.fetch_add(1, Ordering::SeqCst);
+                open_row(port)
+            },
+            Duration::from_secs(1),
+        );
+        assert_eq!(called.load(Ordering::SeqCst), 1);
+        assert_eq!(final_result.unwrap().stage, "cancelled");
+        let mut comparator = Comparator::default();
+        let mut old = plan.snapshot();
+        old.stage = "completed".into();
+        old.operation = 1;
+        old.rows = plan.ports.iter().copied().map(open_row).collect();
+        old.completed = old.rows.len();
+        comparator.begin(&plan);
+        comparator.update(&plan, &mut old);
+        assert!(comparator.begin(&plan).baseline_operation.is_some());
+        plan.settings.timeout_ms = 1700;
+        assert!(comparator.begin(&plan).baseline_operation.is_none());
+        let mut current = plan.snapshot();
+        current.stage = "completed".into();
+        current.rows = plan.ports.iter().copied().map(open_row).collect();
+        current.completed = current.rows.len();
+        comparator.update(&plan, &mut current);
+        assert_eq!(current.comparison.status, "scope_changed");
+        let csv = csv(&current, 1);
+        let lines = csv.lines().collect::<Vec<_>>();
+        let headers = lines[0].split(',').collect::<Vec<_>>();
+        let values = lines[1].split(',').collect::<Vec<_>>();
+        assert_eq!(headers.len(), 31);
+        assert_eq!(headers.len(), values.len());
+        let timeout = headers
+            .iter()
+            .position(|h| h.contains("connect_timeout_ms"))
+            .unwrap();
+        assert_eq!(values[timeout], "\"1700\"");
+    }
     #[test]
     fn presets_and_csv_keep_the_exact_request_and_partial_outcomes() {
         let base = Plan {
+            settings: Default::default(),
             target: "192.168.1.30".parse().unwrap(),
             local: "192.168.1.20".parse().unwrap(),
             interface: "en0".into(),
@@ -643,6 +1115,7 @@ mod tests {
     fn comparison_uses_completed_baselines_and_never_turns_timeouts_into_closed() {
         let mut comparator = Comparator::default();
         let plan = Plan {
+            settings: Default::default(),
             target: "192.168.1.30".parse().unwrap(),
             local: "192.168.1.20".parse().unwrap(),
             interface: "en0".into(),
@@ -750,6 +1223,7 @@ mod tests {
             .find(|a| a.interface == "lo0" && a.address == "::1")
             .unwrap();
         let plan = Plan {
+            settings: Default::default(),
             local: IpAddr::V6(Ipv6Addr::LOCALHOST),
             target: IpAddr::V6(Ipv6Addr::LOCALHOST),
             interface: "lo0".into(),
@@ -810,6 +1284,7 @@ mod tests {
             .find(|a| a.interface == "lo0" && a.address == "127.0.0.1")
             .unwrap();
         let plan = Plan {
+            settings: Default::default(),
             local: IpAddr::V4(Ipv4Addr::LOCALHOST),
             target: IpAddr::V4(Ipv4Addr::LOCALHOST),
             interface: "lo0".into(),
@@ -828,6 +1303,7 @@ mod tests {
         assert_eq!(final_result.rows[1].status, "closed");
         let mut comparator = Comparator::default();
         let base = Plan {
+            settings: Default::default(),
             local: IpAddr::V4(Ipv4Addr::LOCALHOST),
             target: IpAddr::V4(Ipv4Addr::LOCALHOST),
             interface: "lo0".into(),

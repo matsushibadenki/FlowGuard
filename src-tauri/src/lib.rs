@@ -480,6 +480,7 @@ async fn start_lan_ports(
     first: u16,
     last: u16,
     preset: Option<String>,
+    settings: Option<ports::ScanSettings>,
 ) -> Result<Snapshot, String> {
     let network = tauri::async_runtime::spawn_blocking(network::observe)
         .await
@@ -498,7 +499,8 @@ async fn start_lan_ports(
         first,
         last,
     )?
-    .with_preset(preset)?;
+    .with_preset(preset)?
+    .with_settings(settings.unwrap_or_default())?;
     let (op, snapshot) = app.state::<SharedState>().begin_ports(&plan)?;
     let _ = app.emit("state-changed", &snapshot);
     let handle = app.clone();

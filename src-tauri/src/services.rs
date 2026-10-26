@@ -660,6 +660,7 @@ mod tests {
             });
             let p = Plan {
                 tcp: ports::Plan {
+                    settings: Default::default(),
                     local: "127.0.0.1".parse().unwrap(),
                     target: "127.0.0.1".parse().unwrap(),
                     interface: "lo0".into(),
@@ -840,6 +841,7 @@ mod tests {
                     .unwrap();
                 let plan = Plan {
                     tcp: ports::Plan {
+                        settings: Default::default(),
                         target: address.parse().unwrap(),
                         local: if address == "127.0.0.2" {
                             "127.0.0.1"
@@ -930,6 +932,7 @@ mod tests {
             .netmask;
         let p = Plan {
             tcp: ports::Plan {
+                settings: Default::default(),
                 target: "::1".parse().unwrap(),
                 local: "::1".parse().unwrap(),
                 interface: "lo0".into(),
