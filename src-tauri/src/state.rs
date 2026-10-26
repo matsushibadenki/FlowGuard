@@ -341,7 +341,7 @@ impl SharedState {
             &path.with_extension("updates.json"),
             &document.preferences.update_channel,
         );
-        let inventory=crate::inventory::Inventory::load_archives(&path);
+        let inventory = crate::inventory::Inventory::load_archives(&path);
         Ok(Self {
             path,
             _document_lock: document_lock,
@@ -872,10 +872,17 @@ impl SharedState {
         if s.updates.snapshot.stage == "installing" {
             return Err("update_installing".into());
         }
-        if matches!(&command,crate::inventory::Edit::Archive{}){
-            if generation!=s.inventory.snapshot.generation||s.inventory.snapshot.status=="running"{return Err("lan_stale".into());}
-            let job=s.discovery.clone();s.inventory.archive(&job,&self.path)?;
-        }else{s.inventory.edit(generation, command)?;}
+        if matches!(&command, crate::inventory::Edit::Archive {}) {
+            if generation != s.inventory.snapshot.generation
+                || s.inventory.snapshot.status == "running"
+            {
+                return Err("lan_stale".into());
+            }
+            let job = s.discovery.clone();
+            s.inventory.archive(&job, &self.path)?;
+        } else {
+            s.inventory.edit(generation, command)?;
+        }
         s.revision += 1;
         Ok(s.snapshot())
     }
@@ -1328,9 +1335,29 @@ impl SharedState {
             s.ports.operation,
         ))
     }
-    pub fn set_port_layout(&self, expected: &crate::port_layout::Layout, value: crate::port_layout::Layout) -> Result<Snapshot, String> {
+    pub fn port_panel(&self, panel: crate::port_layout::Panel) -> Result<Snapshot, String> {
         let mut s = self.inner.lock().map_err(|_| "state_lock")?;
-        if s.updates.snapshot.stage == "installing" { return Err("update_installing".into()); }
+        s.ports.panel = panel;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn port_panel_closed(&self) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.ports.panel == crate::port_layout::Panel::Floating {
+            s.ports.panel = crate::port_layout::Panel::Bottom;
+            s.revision += 1;
+        }
+        Ok(s.snapshot())
+    }
+    pub fn set_port_layout(
+        &self,
+        expected: &crate::port_layout::Layout,
+        value: crate::port_layout::Layout,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.updates.snapshot.stage == "installing" {
+            return Err("update_installing".into());
+        }
         s.ports.layout.replace(expected, value)?;
         s.revision += 1;
         Ok(s.snapshot())
@@ -1409,7 +1436,9 @@ impl SharedState {
         s.ports_operation += 1;
         s.ports_cancel = false;
         let layout = s.ports.layout.clone();
+        let panel = s.ports.panel;
         s.ports = plan.snapshot();
+        s.ports.panel = panel;
         s.ports.layout = layout;
         s.ports.comparison = s.ports_comparator.begin(plan);
         s.ports.operation = s.ports_operation;
@@ -1452,6 +1481,7 @@ impl SharedState {
             result = s.ports.clone();
             result.stage = "cancelled".into();
         }
+        result.panel = s.ports.panel;
         result.layout = s.ports.layout.clone();
         result.operation = op;
         if let Some(plan) = s.ports_plan.clone() {
@@ -1465,10 +1495,48 @@ impl SharedState {
         s.revision += 1;
         Ok(s.snapshot())
     }
-    pub fn get_lan_archive(&self,generation:u64,observed_at:u64)->Result<crate::inventory::Archive,String>{self.inner.lock().map_err(|_|"state_lock")?.inventory.get_archive(generation,observed_at)}
-    pub fn configure_lan_public(&self,enabled:bool,expected:u64)->Result<Snapshot,String>{let mut s=self.inner.lock().map_err(|_|"state_lock")?;if s.updates.snapshot.stage=="installing"{return Err("update_installing".into());}s.inventory.public.configure(enabled,expected)?;s.inventory.snapshot.public_info=s.inventory.public.snapshot.clone();s.revision+=1;Ok(s.snapshot())}
-    pub fn begin_lan_public(&self,expected:u64)->Result<(u64,Snapshot),String>{let mut s=self.inner.lock().map_err(|_|"state_lock")?;if s.updates.snapshot.stage=="installing"{return Err("update_installing".into());}let op=s.inventory.public.begin(expected)?;s.inventory.snapshot.public_info=s.inventory.public.snapshot.clone();s.revision+=1;Ok((op,s.snapshot()))}
-    pub fn finish_lan_public(&self,op:u64,result:Result<crate::public_network::Snapshot,String>)->Result<Snapshot,String>{let mut s=self.inner.lock().map_err(|_|"state_lock")?;s.inventory.public.finish(op,result);s.inventory.snapshot.public_info=s.inventory.public.snapshot.clone();s.revision+=1;Ok(s.snapshot())}
+    pub fn get_lan_archive(
+        &self,
+        generation: u64,
+        observed_at: u64,
+    ) -> Result<crate::inventory::Archive, String> {
+        self.inner
+            .lock()
+            .map_err(|_| "state_lock")?
+            .inventory
+            .get_archive(generation, observed_at)
+    }
+    pub fn configure_lan_public(&self, enabled: bool, expected: u64) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.updates.snapshot.stage == "installing" {
+            return Err("update_installing".into());
+        }
+        s.inventory.public.configure(enabled, expected)?;
+        s.inventory.snapshot.public_info = s.inventory.public.snapshot.clone();
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn begin_lan_public(&self, expected: u64) -> Result<(u64, Snapshot), String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.updates.snapshot.stage == "installing" {
+            return Err("update_installing".into());
+        }
+        let op = s.inventory.public.begin(expected)?;
+        s.inventory.snapshot.public_info = s.inventory.public.snapshot.clone();
+        s.revision += 1;
+        Ok((op, s.snapshot()))
+    }
+    pub fn finish_lan_public(
+        &self,
+        op: u64,
+        result: Result<crate::public_network::Snapshot, String>,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        s.inventory.public.finish(op, result);
+        s.inventory.snapshot.public_info = s.inventory.public.snapshot.clone();
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
     pub fn begin_discovery(
         &self,
         plan: &crate::discovery::Plan,
@@ -1498,7 +1566,7 @@ impl SharedState {
         s.inventory.begin(plan, generation);
         s.discovery_plan = Some(plan.clone());
         s.discovery = crate::discovery::DiscoverySnapshot {
-            context:plan.context.clone(),
+            context: plan.context.clone(),
             options: plan.options.clone(),
             name_mode: plan.name_mode.clone(),
             stage: "running".into(),
@@ -2857,18 +2925,55 @@ mod tests {
         assert!(state.begin_services(&plan).is_err());
     }
     #[test]
+    fn port_panel_close_restores_only_floating_without_editing_results_or_document() {
+        use crate::port_layout::Panel;
+        let state = state();
+        let before = state.snapshot().unwrap();
+        assert_eq!(before.ports.panel, Panel::Bottom);
+        for panel in [Panel::Left, Panel::Right, Panel::Bottom] {
+            state.port_panel(panel).unwrap();
+            let current = state.port_panel_closed().unwrap();
+            assert_eq!(current.ports.panel, panel); // A late close does not undo a dock choice.
+        }
+        let floating = state.port_panel(Panel::Floating).unwrap();
+        assert_eq!(floating.ports.panel, Panel::Floating);
+        let closed = state.port_panel_closed().unwrap();
+        assert_eq!(closed.ports.panel, Panel::Bottom);
+        assert_eq!(closed.ports.operation, before.ports.operation);
+        assert_eq!(closed.ports.rows.len(), before.ports.rows.len());
+        assert_eq!(closed.ports.layout, before.ports.layout);
+        assert_eq!(
+            serde_json::to_value(&closed.document).unwrap(),
+            serde_json::to_value(&before.document).unwrap()
+        );
+        for panel in ["left", "right", "bottom", "floating"] {
+            assert!(serde_json::from_str::<Panel>(&format!("\"{panel}\"")).is_ok());
+        }
+        assert!(serde_json::from_str::<Panel>("\"other\"").is_err());
+    }
+    #[test]
     fn port_layout_is_shared_conflict_checked_and_does_not_edit_the_document() {
         let state = state();
         let before = state.snapshot().unwrap();
         let mut layout = before.ports.layout.clone();
         layout.widths.insert("target".into(), 400);
-        let after = state.set_port_layout(&before.ports.layout, layout.clone()).unwrap();
+        let after = state
+            .set_port_layout(&before.ports.layout, layout.clone())
+            .unwrap();
         assert_eq!(after.revision, before.revision + 1);
         assert_eq!(state.snapshot().unwrap().ports.layout, layout);
-        assert_eq!(serde_json::to_value(&after.document).unwrap(), serde_json::to_value(&before.document).unwrap());
+        assert_eq!(
+            serde_json::to_value(&after.document).unwrap(),
+            serde_json::to_value(&before.document).unwrap()
+        );
         assert_eq!(after.ports.rows.len(), before.ports.rows.len());
         assert_eq!(after.ports.operation, before.ports.operation);
-        assert_eq!(state.set_port_layout(&before.ports.layout, before.ports.layout.clone()).unwrap_err(), "port_layout_conflict");
+        assert_eq!(
+            state
+                .set_port_layout(&before.ports.layout, before.ports.layout.clone())
+                .unwrap_err(),
+            "port_layout_conflict"
+        );
         state.inner.lock().unwrap().updates.snapshot.stage = "installing".into();
         assert!(state.set_port_layout(&layout, before.ports.layout).is_err());
         assert_eq!(state.snapshot().unwrap().ports.layout, layout);
@@ -2941,12 +3046,20 @@ mod tests {
         let initial_layout = state.snapshot().unwrap().ports.layout;
         let mut compact_layout = initial_layout.clone();
         compact_layout.columns = vec!["port".into(), "status".into(), "inspect".into()];
-        state.set_port_layout(&initial_layout, compact_layout.clone()).unwrap();
+        state
+            .set_port_layout(&initial_layout, compact_layout.clone())
+            .unwrap();
+        state
+            .port_panel(crate::port_layout::Panel::Floating)
+            .unwrap();
         let (job, started) = state.begin_ports(&plan).unwrap();
+        assert_eq!(started.ports.panel, crate::port_layout::Panel::Floating);
         assert_eq!(started.ports.layout, compact_layout);
         let mut resized_layout = compact_layout.clone();
         resized_layout.widths.insert("port".into(), 260);
-        state.set_port_layout(&compact_layout, resized_layout.clone()).unwrap();
+        state
+            .set_port_layout(&compact_layout, resized_layout.clone())
+            .unwrap();
         assert_eq!(started.ports.operation, job);
         assert!(state.ports_csv(job).is_err());
         assert!(state.begin_discovery(&discovery).is_err());
@@ -2964,6 +3077,7 @@ mod tests {
         });
         let frozen = state.update_ports(job, late).unwrap();
         assert_eq!(frozen.ports.layout, resized_layout);
+        assert_eq!(frozen.ports.panel, crate::port_layout::Panel::Floating);
         assert_eq!(frozen.ports.stage, "cancelled");
         assert!(frozen.ports.rows.is_empty());
         let (next, _) = state.begin_ports(&plan).unwrap();
@@ -2981,10 +3095,13 @@ mod tests {
         finished.layout = Default::default(); // A worker does not own presentation settings.
         let updated = state.update_ports(next, finished).unwrap();
         assert_eq!(updated.ports.layout, resized_layout);
+        assert_eq!(updated.ports.panel, crate::port_layout::Panel::Floating);
         assert!(state.ports_csv(job).is_err());
         assert!(state.ports_csv(next).unwrap().contains("requested_ports"));
         let csv_before_layout = state.ports_csv(next).unwrap();
-        state.set_port_layout(&resized_layout, Default::default()).unwrap();
+        state
+            .set_port_layout(&resized_layout, Default::default())
+            .unwrap();
         assert_eq!(state.ports_csv(next).unwrap(), csv_before_layout);
 
         state.begin_discovery(&discovery).unwrap();

@@ -18,9 +18,8 @@ mod identity;
 #[cfg(target_os = "macos")]
 mod instance;
 mod inventory;
-mod lan_vendor;
 mod lan_metadata;
-mod public_network;
+mod lan_vendor;
 mod menubar;
 mod model;
 mod names;
@@ -28,8 +27,9 @@ mod native_runtime;
 mod network;
 mod notifications;
 mod observer;
-mod ports;
 mod port_layout;
+mod ports;
+mod public_network;
 mod renderer;
 pub mod routers;
 mod security;
@@ -434,9 +434,63 @@ fn services_csv(app: tauri::AppHandle, operation: u64) -> Result<String, String>
     app.state::<SharedState>().services_csv(operation)
 }
 #[tauri::command]
-fn set_port_layout(app: tauri::AppHandle, expected: port_layout::Layout, value: port_layout::Layout) -> Result<Snapshot, String> {
+fn position_port_details(
+    app: tauri::AppHandle,
+    panel: port_layout::Panel,
+) -> Result<Snapshot, String> {
+    use port_layout::Panel;
+    if panel == Panel::Floating {
+        let locale = app
+            .state::<SharedState>()
+            .snapshot()?
+            .document
+            .preferences
+            .locale;
+        let title = match locale.as_str() {
+            "ja" => "FlowGuard · TCPポート詳細",
+            "zh-CN" => "FlowGuard · TCP端口详情",
+            _ => "FlowGuard · TCP port details",
+        };
+        let window = if let Some(window) = app.get_webview_window("port-details") {
+            window
+        } else {
+            tauri::WebviewWindowBuilder::new(
+                &app,
+                "port-details",
+                tauri::WebviewUrl::App("index.html?panel=port-details".into()),
+            )
+            .title(title)
+            .inner_size(500.0, 680.0)
+            .min_inner_size(320.0, 420.0)
+            .visible(false)
+            .build()
+            .map_err(|e| e.to_string())?
+        };
+        window.set_title(title).map_err(|e| e.to_string())?;
+        if let Err(error) = window.show().and_then(|_| window.set_focus()) {
+            let _ = window.hide();
+            if let Ok(snapshot) = app.state::<SharedState>().port_panel_closed() {
+                let _ = app.emit("state-changed", snapshot);
+            }
+            return Err(error.to_string());
+        }
+    } else if let Some(window) = app.get_webview_window("port-details") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    let snapshot = app.state::<SharedState>().port_panel(panel)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
+#[tauri::command]
+fn set_port_layout(
+    app: tauri::AppHandle,
+    expected: port_layout::Layout,
+    value: port_layout::Layout,
+) -> Result<Snapshot, String> {
     let result = app.state::<SharedState>().set_port_layout(&expected, value);
-    if let Ok(current) = app.state::<SharedState>().snapshot() { let _ = app.emit("state-changed", current); }
+    if let Ok(current) = app.state::<SharedState>().snapshot() {
+        let _ = app.emit("state-changed", current);
+    }
     result
 }
 #[tauri::command]
@@ -632,8 +686,11 @@ async fn start_lan_discovery(
     let network = tauri::async_runtime::spawn_blocking(network::observe)
         .await
         .map_err(|_| "interfaces_unavailable")?;
-    let context_interface=interface.clone();
-    let context=tauri::async_runtime::spawn_blocking(move||network::lan_context(&context_interface)).await.map_err(|_|"context_unavailable")?;
+    let context_interface = interface.clone();
+    let context =
+        tauri::async_runtime::spawn_blocking(move || network::lan_context(&context_interface))
+            .await
+            .map_err(|_| "context_unavailable")?;
     let plan = discovery::Plan::new(&network, &interface, &address, active)?
         .with_names(name_mode.as_deref().unwrap_or("none"))?
         .with_options(options.unwrap_or_default())?
@@ -658,13 +715,34 @@ async fn start_lan_discovery(
     Ok(snapshot)
 }
 #[tauri::command]
-fn get_lan_archive(app:tauri::AppHandle,generation:u64,observed_at:u64)->Result<inventory::Archive,String>{app.state::<SharedState>().get_lan_archive(generation,observed_at)}
+fn get_lan_archive(
+    app: tauri::AppHandle,
+    generation: u64,
+    observed_at: u64,
+) -> Result<inventory::Archive, String> {
+    app.state::<SharedState>()
+        .get_lan_archive(generation, observed_at)
+}
 #[tauri::command]
-fn configure_lan_public(app:tauri::AppHandle,enabled:bool,expected:u64)->Result<Snapshot,String>{let snapshot=app.state::<SharedState>().configure_lan_public(enabled,expected)?;let _=app.emit("state-changed",&snapshot);Ok(snapshot)}
+fn configure_lan_public(
+    app: tauri::AppHandle,
+    enabled: bool,
+    expected: u64,
+) -> Result<Snapshot, String> {
+    let snapshot = app
+        .state::<SharedState>()
+        .configure_lan_public(enabled, expected)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
 #[tauri::command]
-async fn query_lan_public(app:tauri::AppHandle,expected:u64)->Result<Snapshot,String>{
-    let (op,snapshot)=app.state::<SharedState>().begin_lan_public(expected)?;let _=app.emit("state-changed",&snapshot);
-    let result=public_network::fetch().await;let snapshot=app.state::<SharedState>().finish_lan_public(op,result)?;let _=app.emit("state-changed",&snapshot);Ok(snapshot)
+async fn query_lan_public(app: tauri::AppHandle, expected: u64) -> Result<Snapshot, String> {
+    let (op, snapshot) = app.state::<SharedState>().begin_lan_public(expected)?;
+    let _ = app.emit("state-changed", &snapshot);
+    let result = public_network::fetch().await;
+    let snapshot = app.state::<SharedState>().finish_lan_public(op, result)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
 }
 #[tauri::command]
 fn stop_lan_discovery(app: tauri::AppHandle) -> Result<Snapshot, String> {
@@ -1188,6 +1266,26 @@ pub fn run() {
                     let _ = window.emit("state-changed", snapshot);
                 }
             }
+            if window.label() == "port-details" {
+                match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        if window.hide().is_ok() {
+                            api.prevent_close();
+                            let app = window.app_handle();
+                            if let Ok(snapshot) = app.state::<SharedState>().port_panel_closed() {
+                                let _ = app.emit("state-changed", snapshot);
+                            }
+                        }
+                    }
+                    tauri::WindowEvent::Destroyed => {
+                        let app = window.app_handle();
+                        if let Ok(snapshot) = app.state::<SharedState>().port_panel_closed() {
+                            let _ = app.emit("state-changed", snapshot);
+                        }
+                    }
+                    _ => {}
+                }
+            }
             if window.label() == "lan-details" && matches!(event, tauri::WindowEvent::Destroyed) {
                 let app = window.app_handle();
                 if let Ok(snapshot) = app.state::<SharedState>().lan_panel("docked") {
@@ -1241,6 +1339,7 @@ pub fn run() {
             select_service,
             select_port,
             set_port_layout,
+            position_port_details,
             start_lan_ports,
             open_lan_ports,
             lan_ports_csv,

@@ -1,6 +1,16 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Panel {
+    Left,
+    Right,
+    #[default]
+    Bottom,
+    Floating,
+}
+
 pub const COLUMNS: [&str; 8] = [
     "target", "port", "change", "status", "previous", "duration", "time", "inspect",
 ];

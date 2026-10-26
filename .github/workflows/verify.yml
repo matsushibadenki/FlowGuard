@@ -9,13 +9,16 @@ jobs:
   verify:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt && rustup default stable
+      - name: Check formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
       - name: Install frontend dependencies
         run: npm ci
       - name: Verify frontend
@@ -28,6 +31,3 @@ jobs:
       - name: Verify controlled updater transaction
         working-directory: src-tauri
         run: cargo test --locked --lib updates::tests -- --ignored
-      - name: Check formatting
-        working-directory: src-tauri
-        run: cargo fmt --check

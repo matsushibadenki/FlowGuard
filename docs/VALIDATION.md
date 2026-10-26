@@ -609,3 +609,19 @@ ROADMAPの「機器情報とサービス・診断結果の関連付け」を優�
 - 🟢 [Done] 別IDの最新debug Tauri `FlowGuard LAN QA.app`、実WebKit・日本語1440×960で4列／8列切り替え、幅400pxへの変更・130pxへ初期化、画面往復後の保持、自己en0 IPv4・TCP50944の1ポートの結果更新後の保持を確認。実結果は接続拒否0ms。他のLAN機器への検査やOS保護設定変更なし。
 - 🟢 [Done] QA `/tmp/flowguard-port-layout-qa.cjs`、画像 `/tmp/flowguard-port-layout-{ja,en,zh-CN}-{1500,768,375,320}.png`、設定部 `/tmp/flowguard-port-layout-controls-{ja,en,zh-CN}-{1500,768,375,320}.png`。日本語desktop／320pxと実ネイティブ画面を目視確認。
 - ⭕️ [Pending] 実複数ウインドウ同時編集、別言語／画面幅・Retina／複数画面、署名済み配布版。列順変更・アプリ再起動後の設定保存は未実装。詳細は[port-sheet-layout.md](port-sheet-layout.md)。
+
+## 2026-10-27 — GitHub Actions整形エラー修正
+
+- 原因をrun `40323466556`／job `121574031400`の実ログで確認。フロントエンド・リリースゲート・Rust177件・更新処理3件は成功し、最後の `cargo fmt --check` が `lib.rs`／`state.rs` の整形差分で失敗していた。
+- 🟢 [Done] `cargo fmt`で不足していた整形とモジュール順序を修正。CIの整形チェックをRust toolchainの導入直後へ移し、整形不一致を早期に検出する。
+- 🟢 [Done] `actions/checkout`／`actions/setup-node`をv4からNode.js 24ランタイムのv6へ更新。両公式action.ymlでruntimeを確認。アプリのビルド用 `node-version: '22'` と `macos-15`、読み取り権限・検証内容は維持する。macOS arm64のキュー通知は今回の終了コード1とは別。
+- 🟢 [Done] ローカル `cargo fmt --check`、`cargo test --locked --offline --lib`（177件・24ignored）、`cargo test --locked --offline --lib updates::tests -- --ignored`（3件、ループバック／使い捨てアプリのみ）、`npm test`（154件）、`npm run build`、`python3 scripts/test_release.py`（3件）、`git diff --check`成功。
+- ⭕️ [Pending] 修正のpush後、GitHub上での新しいCI実行。過去の失敗runを再実行するだけでは修正済みのファイルには切り替わらない。今回push・既存runの再実行は行っていない。
+
+## 2026-10-27 — TCP詳細の独立ウインドウとドッキング
+
+- 🟢 [Done] Rust178件（24ignored）・UI155件、production build、cargo fmt --check、更新処理3件・リリースゲート3件、git diff --check成功。閉じる復帰・古いcloseの拒否・enum境界・ジョブ更新時の配置保持・文書不変を検証。
+- 🟢 [Done] Browser plugin/skill不在につき既存Playwright/Chromeを使用。localhost:1421、3言語 × 1500／768／375／320pxの合成結果／模擬IPCで左右／下／独立、選択追従、IPv6コピー、失敗時の配置維持、新ジョブでの詳細消去、未確認無効、横はみ出し・overlay・consoleを確認。
+- 🟢 [Done] 最新debug Tauri（別ID FlowGuard LAN QA）の実WebKit・日本語で、独立500×680の生成・再表示／再利用、閉じる→下部復帰、左右配置、メイン1440×960との双方向選択同期を確認。自身のIPv6リンクローカルの50063開放／50064拒否を使用し、実コピーを検索欄へ貼り付けて内容を照合。検索欄は空へ復帰、一時待受は終了。IPv4 /19は既存の対応範囲外として開始拒否され、制限は変更していない。他LAN機器の検査・OS保護設定変更なし。
+- 🟢 [Done] QA `/tmp/flowguard-port-panel-qa.cjs`。画像 `/tmp/flowguard-port-panel-{docked,floating}-{ja,en,zh-CN}-{1500,768,375,320}.png`、日本語desktop／320pxと実ネイティブ画面を目視確認。
+- ⭕️ [Pending] 実Tauriの別言語／画面幅、Retina／複数ディスプレイ、OSウインドウ生成／フォーカス拒否・スリープ／終了との競合、署名済み配布版。ドラッグ式の任意ドッキング／サイズ調整は未実装。[実装と検証範囲](port-detail-panels.md)。

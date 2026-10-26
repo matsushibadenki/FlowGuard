@@ -170,3 +170,5 @@ export function acceptSnapshot(value:Snapshot){emit(value);}
 export async function getLanArchive(generation:number,observedAt:number):Promise<import('./lan-sheet').LanArchive>{if(!native)throw Error('desktop_required');return invoke('get_lan_archive',{generation,observedAt});}
 
 export async function setPortLayout(expected:import('./port-layout').PortLayout,value:import('./port-layout').PortLayout){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('set_port_layout',{expected,value}));}
+
+export async function positionPortDetails(panel:import('./port-panel').PortPanel){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('position_port_details',{panel}));}

@@ -1,0 +1,5 @@
+import type {Locale} from './types';
+export type PortPanel='left'|'right'|'bottom'|'floating';
+export const portPanelWords:Record<Locale,{title:string;left:string;right:string;bottom:string;floating:string;empty:string;detached:string;error:string;stale:string}>={ja:{title:'TCPポート詳細',left:'左へドッキング',right:'右へドッキング',bottom:'下へドッキング',floating:'独立ウインドウで開く',empty:'ポートを選択',detached:'独立ウインドウで表示中',error:'パネルを変更できませんでした。',stale:'以前のLAN収集の結果'},en:{title:'TCP port details',left:'Dock left',right:'Dock right',bottom:'Dock below',floating:'Open floating window',empty:'Select a port',detached:'Shown in floating window',error:'Could not change the panel.',stale:'Results from an earlier LAN collection'},'zh-CN':{title:'TCP端口详情',left:'停靠左侧',right:'停靠右侧',bottom:'停靠下方',floating:'打开独立窗口',empty:'选择端口',detached:'已在独立窗口显示',error:'无法更改面板。',stale:'之前LAN采集的结果'}};
+
+export const portPanelStages={ja:{running:'確認中',cancelling:'停止中',cancelled:'未完了',completed:'確認完了',failed:'中断'},en:{running:'Checking',cancelling:'Stopping',cancelled:'Incomplete',completed:'Complete',failed:'Interrupted'},'zh-CN':{running:'检查中',cancelling:'停止中',cancelled:'未完成',completed:'已完成',failed:'已中断'}};
