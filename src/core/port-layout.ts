@@ -1,0 +1,9 @@
+export const portColumns=['target','port','change','status','previous','duration','time','inspect'] as const;
+export type PortColumn=typeof portColumns[number];
+export interface PortLayout {columns:PortColumn[];widths:Record<PortColumn,number>}
+export const defaultPortLayout:PortLayout={columns:[...portColumns],widths:{target:190,port:130,change:130,status:130,previous:190,duration:130,time:190,inspect:80}};
+export const compactPortColumns:PortColumn[]=['port','status','duration','inspect'];
+export const requiredPortColumns:readonly PortColumn[]=['port','status','inspect'];
+export function validPortLayout(value:PortLayout){return Array.isArray(value.columns)&&value.columns.length<=portColumns.length&&value.columns.join('|')===portColumns.filter(c=>value.columns.includes(c)).join('|')&&requiredPortColumns.every(c=>value.columns.includes(c))&&Object.keys(value.widths).length===portColumns.length&&portColumns.every(c=>Number.isInteger(value.widths[c])&&value.widths[c]>=80&&value.widths[c]<=400);}
+export function portTableWidth(layout:PortLayout){return layout.columns.reduce((sum,c)=>sum+layout.widths[c],0);}
+export const portLayoutWords={ja:{columns:'表示する列',compact:'コンパクト',all:'全項目',reset:'幅を初期化',width:'列幅',help:'列の表示と幅はセッション中、全ウインドウで共有します。ポート・状態・詳細は常に表示。マップ・確認条件・全結果CSVには影響しません。',error:'列設定を更新できませんでした。最新の表示で再試行してください。'},en:{columns:'Visible columns',compact:'Compact',all:'All fields',reset:'Reset widths',width:'Column width',help:'Column visibility and widths are shared across windows for this session. Port, status and details remain visible. The map, check settings and full CSV are unaffected.',error:'Could not update columns. Retry using the latest layout.'},'zh-CN':{columns:'显示列',compact:'紧凑',all:'全部字段',reset:'重置列宽',width:'列宽',help:'列显示和宽度在本次会话的所有窗口间共享。端口、状态和详情始终显示。不影响端口图、检查条件或全部结果CSV。',error:'无法更新列设置。请基于最新布局重试。'}};

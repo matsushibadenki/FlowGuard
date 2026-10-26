@@ -1328,6 +1328,13 @@ impl SharedState {
             s.ports.operation,
         ))
     }
+    pub fn set_port_layout(&self, expected: &crate::port_layout::Layout, value: crate::port_layout::Layout) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.updates.snapshot.stage == "installing" { return Err("update_installing".into()); }
+        s.ports.layout.replace(expected, value)?;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
     pub fn select_port(&self, operation: u64, port: u16) -> Result<Snapshot, String> {
         let mut s = self.inner.lock().map_err(|_| "state_lock")?;
         if s.ports.operation != operation || !s.ports.rows.iter().any(|r| r.port == port) {
@@ -1401,7 +1408,9 @@ impl SharedState {
         }
         s.ports_operation += 1;
         s.ports_cancel = false;
+        let layout = s.ports.layout.clone();
         s.ports = plan.snapshot();
+        s.ports.layout = layout;
         s.ports.comparison = s.ports_comparator.begin(plan);
         s.ports.operation = s.ports_operation;
         s.ports_plan = Some(plan.clone());
@@ -1443,6 +1452,7 @@ impl SharedState {
             result = s.ports.clone();
             result.stage = "cancelled".into();
         }
+        result.layout = s.ports.layout.clone();
         result.operation = op;
         if let Some(plan) = s.ports_plan.clone() {
             s.ports_comparator.update(&plan, &mut result);
@@ -2847,6 +2857,23 @@ mod tests {
         assert!(state.begin_services(&plan).is_err());
     }
     #[test]
+    fn port_layout_is_shared_conflict_checked_and_does_not_edit_the_document() {
+        let state = state();
+        let before = state.snapshot().unwrap();
+        let mut layout = before.ports.layout.clone();
+        layout.widths.insert("target".into(), 400);
+        let after = state.set_port_layout(&before.ports.layout, layout.clone()).unwrap();
+        assert_eq!(after.revision, before.revision + 1);
+        assert_eq!(state.snapshot().unwrap().ports.layout, layout);
+        assert_eq!(serde_json::to_value(&after.document).unwrap(), serde_json::to_value(&before.document).unwrap());
+        assert_eq!(after.ports.rows.len(), before.ports.rows.len());
+        assert_eq!(after.ports.operation, before.ports.operation);
+        assert_eq!(state.set_port_layout(&before.ports.layout, before.ports.layout.clone()).unwrap_err(), "port_layout_conflict");
+        state.inner.lock().unwrap().updates.snapshot.stage = "installing".into();
+        assert!(state.set_port_layout(&layout, before.ports.layout).is_err());
+        assert_eq!(state.snapshot().unwrap().ports.layout, layout);
+    }
+    #[test]
     fn tcp_stop_and_scope_fencing() {
         let state = state();
         let network = crate::network::NetworkSnapshot {
@@ -2911,7 +2938,15 @@ mod tests {
         );
         let plan = make(22, 22).unwrap();
         assert!(!plan.matches(&Default::default()));
+        let initial_layout = state.snapshot().unwrap().ports.layout;
+        let mut compact_layout = initial_layout.clone();
+        compact_layout.columns = vec!["port".into(), "status".into(), "inspect".into()];
+        state.set_port_layout(&initial_layout, compact_layout.clone()).unwrap();
         let (job, started) = state.begin_ports(&plan).unwrap();
+        assert_eq!(started.ports.layout, compact_layout);
+        let mut resized_layout = compact_layout.clone();
+        resized_layout.widths.insert("port".into(), 260);
+        state.set_port_layout(&compact_layout, resized_layout.clone()).unwrap();
         assert_eq!(started.ports.operation, job);
         assert!(state.ports_csv(job).is_err());
         assert!(state.begin_discovery(&discovery).is_err());
@@ -2928,6 +2963,7 @@ mod tests {
             observed_at: now(),
         });
         let frozen = state.update_ports(job, late).unwrap();
+        assert_eq!(frozen.ports.layout, resized_layout);
         assert_eq!(frozen.ports.stage, "cancelled");
         assert!(frozen.ports.rows.is_empty());
         let (next, _) = state.begin_ports(&plan).unwrap();
@@ -2942,9 +2978,15 @@ mod tests {
             elapsed_ms: 2,
             observed_at: now(),
         }];
-        state.update_ports(next, finished).unwrap();
+        finished.layout = Default::default(); // A worker does not own presentation settings.
+        let updated = state.update_ports(next, finished).unwrap();
+        assert_eq!(updated.ports.layout, resized_layout);
         assert!(state.ports_csv(job).is_err());
         assert!(state.ports_csv(next).unwrap().contains("requested_ports"));
+        let csv_before_layout = state.ports_csv(next).unwrap();
+        state.set_port_layout(&resized_layout, Default::default()).unwrap();
+        assert_eq!(state.ports_csv(next).unwrap(), csv_before_layout);
+
         state.begin_discovery(&discovery).unwrap();
         assert!(state.ports_csv(next).unwrap().contains("\"true\""));
     }

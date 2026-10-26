@@ -29,6 +29,7 @@ mod network;
 mod notifications;
 mod observer;
 mod ports;
+mod port_layout;
 mod renderer;
 pub mod routers;
 mod security;
@@ -431,6 +432,12 @@ fn diagnostic_export(app: tauri::AppHandle, report: u64, format: String) -> Resu
 #[tauri::command]
 fn services_csv(app: tauri::AppHandle, operation: u64) -> Result<String, String> {
     app.state::<SharedState>().services_csv(operation)
+}
+#[tauri::command]
+fn set_port_layout(app: tauri::AppHandle, expected: port_layout::Layout, value: port_layout::Layout) -> Result<Snapshot, String> {
+    let result = app.state::<SharedState>().set_port_layout(&expected, value);
+    if let Ok(current) = app.state::<SharedState>().snapshot() { let _ = app.emit("state-changed", current); }
+    result
 }
 #[tauri::command]
 fn select_port(app: tauri::AppHandle, operation: u64, port: u16) -> Result<Snapshot, String> {
@@ -1233,6 +1240,7 @@ pub fn run() {
             diagnostic_export,
             select_service,
             select_port,
+            set_port_layout,
             start_lan_ports,
             open_lan_ports,
             lan_ports_csv,

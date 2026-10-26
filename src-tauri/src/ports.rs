@@ -48,6 +48,7 @@ impl ScanSettings {
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub layout: crate::port_layout::Layout,
     pub settings: ScanSettings,
     pub budget_ms: u64,
     pub selected_port: Option<u16>,

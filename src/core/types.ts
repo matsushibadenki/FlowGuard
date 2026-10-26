@@ -17,7 +17,7 @@ export interface DiscoverySnapshot {metadata?:Record<string,import('./lan-sheet'
 export type PortPreset = 'common' | 'web' | 'admin' | 'range';
 export interface PortRow {port:number;status:string;elapsedMs:number;observedAt:number}
 export interface PortComparison {status:string;baselineOperation:number|null;rows:{port:number;kind:string;previous:PortRow|null}[]}
-export interface PortSnapshot {settings?:import('./port-settings').PortScanSettings;budgetMs?:number;selectedPort?:number|null;family:string;sourceNetmask:string;comparison:PortComparison;operation:number;sourceAddress:string;requestedPorts:number[];selection:PortPreset|'';stage:string;target:string;interface:string;generation:number;completed:number;total:number;rows:PortRow[];error:string|null}
+export interface PortSnapshot {layout?:import('./port-layout').PortLayout;settings?:import('./port-settings').PortScanSettings;budgetMs?:number;selectedPort?:number|null;family:string;sourceNetmask:string;comparison:PortComparison;operation:number;sourceAddress:string;requestedPorts:number[];selection:PortPreset|'';stage:string;target:string;interface:string;generation:number;completed:number;total:number;rows:PortRow[];error:string|null}
 export interface FirewallControlSnapshot {operation:number;busy:boolean;service:string;enabled:boolean|null;error:string|null}
 export interface DestinationNameRow {address:string;value:string|null;source:'system_resolver';observedAt:number;status:string;stale:boolean;trust:'unverified_name'}
 export interface DestinationNamesSnapshot {enabled:boolean;operation:number;busy:boolean;cancelling:boolean;activeAddress:string|null;cooldownSeconds:number;rows:DestinationNameRow[]}

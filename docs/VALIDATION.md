@@ -587,3 +587,25 @@ ROADMAPの「機器情報とサービス・診断結果の関連付け」を優�
 - Browser skillが利用可能一覧にないためbundled Playwright／Chromeを使用。通常Viteページからコンポーネント検証ハーネスを載せ、JA／EN／简体中文 × 1500／768／375／320pxで低負荷／標準／長めに待つ、上限・予算による開始拒否、テスト用IPCの設定引数、確認中の編集ロック、停止、入力変更後も実行条件を保持すること、4状態リング、CSV呼び出し、予算切れ表示を確認。page identity・非空・overlayなし・関連console/pageerrorなし・ページ横溢れなし・外部HTTPS要求0件。
 - `/tmp/flowguard-port-settings-qa.cjs`と`/tmp/flowguard-port-settings-{ja,en,zh-CN}-{1500,768,375,320}.png`。日本語desktop／320pxを目視し、重複件数をリングへまとめ、送信元／要求ポートの情報アイコン、時間単位、次回入力と実行条件の区別を確認。
 - 今回の実LAN、実Tauri WebKit・複数ウインドウ・Retina、署名済み配布版はPending。サービス応答確認・ルール・OS保護設定は変更していない。詳細は[tcp-check-settings.md](tcp-check-settings.md)。
+
+## 2026-10-26 — LAN TCPポートマップ
+
+- 🟢 [Done] TypeScript151件、`npm run build`、`git diff --check`成功。Rust変更なし。
+- 🟢 [Done] localhost:1420 + Playwright/Chrome（Browser plugin/skill不在）。通常ページの起動後、PortTopology単体とPortChecks組み込みに合成結果を表示。JA／EN／简体中文 × 1500／768／375／320pxで256タイル、未確認無効、選択・詳細更新、コピー内容／拒否／表示解除、横はみ出し・overlay・consoleを検証。
+- 🟢 [Done] `/tmp/flowguard-port-topology-qa.cjs`、画像 `/tmp/flowguard-port-topology-{ja,en,zh-CN}-{1500,768,375,320}.png`。日本語desktop／320pxを目視確認。クリップボードは模擬、LAN送信なし。
+- ⭕️ [Pending] 実Tauri／WebKit、OSクリップボード権限、複数ウインドウ選択共有、署名済み配布版。[実装範囲](port-topology.md)。
+
+### 実Tauri追試 — ポートマップ
+
+- 🟢 [Done] 2026-10-26 20:34–20:36 JST、最新debug `FlowGuard LAN QA.app`（別ID `com.flowguard.lanqa`）の実WebKit、日本語1440×960。
+- 🟢 [Done] 自身のen0 IPv4のみをGUIから2ポート確認：50943開放1ms／50944接続拒否0ms。タイル選択・詳細状態／IP／interface／時刻の追従、コピー済み表示、実OSクリップボードから検索欄への貼り付け内容一致。2ポートとも確認し、検索欄を空へ復帰。一時TCP待受は終了。
+- 🟢 [Done] ネイティブ画面で色・選択枠・送信元→TCP→接続先・コピー表示を目視。通常版・OS保護設定変更なし、他LAN機器への検査なし。詳細は[port-topology.md](port-topology.md)。
+- ⭕️ [Pending] 実Tauriの別言語／画面幅／IPv6、クリップボード拒否、複数ウインドウ、署名済み配布版。
+
+## 2026-10-26 — TCPシートの表示列・幅
+
+- 🟢 [Done] Rust173件（24件ignored）・フロントエンド154件、production build、GPU有効cargo check、diffの空白チェック成功。表示設定の必須列／幅境界／競合拒否、文書不変、ジョブ開始・停止・古いワーカー更新での保持、全結果CSV不変を検証。
+- 🟢 [Done] Browser plugin/skill不在のためPlaywright/Chromeでlocalhost:1421を使用。通常ページ起動後に実PortChecksへ合成snapshot／模擬IPCを供給し、JA／EN／简体中文 × 1500／768／375／320pxを確認。4／8列、表示切替・必須列、幅変更・初期化、競合から再試行、CSV導線・マップ維持、横はみ出し・overlay・console、256行でのヘッダー／先頭列固定を確認。
+- 🟢 [Done] 別IDの最新debug Tauri `FlowGuard LAN QA.app`、実WebKit・日本語1440×960で4列／8列切り替え、幅400pxへの変更・130pxへ初期化、画面往復後の保持、自己en0 IPv4・TCP50944の1ポートの結果更新後の保持を確認。実結果は接続拒否0ms。他のLAN機器への検査やOS保護設定変更なし。
+- 🟢 [Done] QA `/tmp/flowguard-port-layout-qa.cjs`、画像 `/tmp/flowguard-port-layout-{ja,en,zh-CN}-{1500,768,375,320}.png`、設定部 `/tmp/flowguard-port-layout-controls-{ja,en,zh-CN}-{1500,768,375,320}.png`。日本語desktop／320pxと実ネイティブ画面を目視確認。
+- ⭕️ [Pending] 実複数ウインドウ同時編集、別言語／画面幅・Retina／複数画面、署名済み配布版。列順変更・アプリ再起動後の設定保存は未実装。詳細は[port-sheet-layout.md](port-sheet-layout.md)。
