@@ -34,6 +34,7 @@ mod renderer;
 pub mod routers;
 mod security;
 mod service_comparison;
+mod service_notes;
 mod services;
 mod state;
 mod syslog;
@@ -498,6 +499,20 @@ fn select_port(app: tauri::AppHandle, operation: u64, port: u16) -> Result<Snaps
     let next = app.state::<SharedState>().select_port(operation, port)?;
     let _ = app.emit("state-changed", &next);
     Ok(next)
+}
+#[tauri::command]
+fn edit_service_note(
+    app: tauri::AppHandle,
+    operation: u64,
+    command: service_notes::Edit,
+) -> Result<Snapshot, String> {
+    let result = app
+        .state::<SharedState>()
+        .edit_service_note(operation, command);
+    if let Ok(snapshot) = app.state::<SharedState>().snapshot() {
+        let _ = app.emit("state-changed", snapshot);
+    }
+    result
 }
 #[tauri::command]
 fn select_service(app: tauri::AppHandle, operation: u64, port: u16) -> Result<Snapshot, String> {
@@ -1337,6 +1352,7 @@ pub fn run() {
             collect_flow_names,
             diagnostic_export,
             select_service,
+            edit_service_note,
             select_port,
             set_port_layout,
             position_port_details,

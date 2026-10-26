@@ -625,3 +625,11 @@ ROADMAPの「機器情報とサービス・診断結果の関連付け」を優�
 - 🟢 [Done] 最新debug Tauri（別ID FlowGuard LAN QA）の実WebKit・日本語で、独立500×680の生成・再表示／再利用、閉じる→下部復帰、左右配置、メイン1440×960との双方向選択同期を確認。自身のIPv6リンクローカルの50063開放／50064拒否を使用し、実コピーを検索欄へ貼り付けて内容を照合。検索欄は空へ復帰、一時待受は終了。IPv4 /19は既存の対応範囲外として開始拒否され、制限は変更していない。他LAN機器の検査・OS保護設定変更なし。
 - 🟢 [Done] QA `/tmp/flowguard-port-panel-qa.cjs`。画像 `/tmp/flowguard-port-panel-{docked,floating}-{ja,en,zh-CN}-{1500,768,375,320}.png`、日本語desktop／320pxと実ネイティブ画面を目視確認。
 - ⭕️ [Pending] 実Tauriの別言語／画面幅、Retina／複数ディスプレイ、OSウインドウ生成／フォーカス拒否・スリープ／終了との競合、署名済み配布版。ドラッグ式の任意ドッキング／サイズ調整は未実装。[実装と検証範囲](port-detail-panels.md)。
+
+## 2026-10-27 — サービス結果の表示名・コメント
+
+- 🟢 [Done] Rust182件（24ignored）・UI158件、production build、cargo fmt --check、リリースゲート3件。文字数／制御文字・競合／消去後の古い編集拒否、操作番号／ポート／実行中／更新中の拒否、新ジョブでの消去・観測行／文書／比較不変、45列CSVの引用符・数式対策を確認。
+- 🟢 [Done] Browser plugin/skill不在のため既存Playwright/Chrome、localhost:1421で実ServiceChecksへ合成Snapshot／模擬IPC。3言語 × 1500／768／375／320pxで保存・検索・競合時の下書き保持・読み直し・入力境界・新ジョブ消去・CSV導線・列幅220px以上・横はみ出し／overlay／consoleを確認。QA `/tmp/flowguard-service-notes-qa.cjs`、画像 `/tmp/flowguard-service-notes-{ja,en,zh-CN}-{1500,768,375,320}.png`。
+- 🟢 [Done] 別IDの最新debug Tauri／実WebKit・日本語1440×960。自身のIPv6リンクローカル・TCP50728でHTTP HEAD /の固定応答を取得し、表示名と複数行メモを実保存。コメント検索、画面往復後の保持と観測応答不変を確認。初回の日本語コメント列の細かい折り返しを修正し、再ビルド後の実保存・表示でも意図した改行を目視確認。一時HTTP待受は終了。他LAN機器への検査・外部DNS照会・OS保護設定変更は行わない。
+- ⭕️ [Pending] 実Tauri複数ウインドウの競合編集、他言語／画面幅、ネイティブCSV保存・署名済み配布版。長期保存・再確認への自動継承は未実装。[詳細](service-notes.md)。
+- 🟢 [Done] 更新処理のCI用3試験（`updates::tests -- --ignored`）も、使い捨てアプリとループバックで成功。

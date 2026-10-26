@@ -1010,6 +1010,7 @@ impl SharedState {
                 result.error = Some("network_changed".into());
             }
         }
+        result.notes = s.services.notes.clone();
         result.operation = op;
         result.selected_port = s.services.selected_port;
         if let Some(plan) = s.services_plan.clone() {
@@ -1368,6 +1369,25 @@ impl SharedState {
             return Err("stale_port".into());
         }
         s.ports.selected_port = Some(port);
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn edit_service_note(
+        &self,
+        operation: u64,
+        command: crate::service_notes::Edit,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.updates.snapshot.stage == "installing" {
+            return Err("update_installing".into());
+        }
+        if s.services.operation != operation
+            || !["completed", "cancelled", "failed"].contains(&s.services.stage.as_str())
+            || !s.services.rows.iter().any(|r| r.port == command.port)
+        {
+            return Err("stale_or_running_service_note".into());
+        }
+        crate::service_notes::edit(&mut s.services.notes, command, now())?;
         s.revision += 1;
         Ok(s.snapshot())
     }
@@ -2881,8 +2901,39 @@ mod tests {
         complete.completed = 1;
         let first = state.update_services(next, complete).unwrap();
         assert_eq!(first.services.comparison.status, "first");
+        let note = |port, expected_revision| crate::service_notes::Edit {
+            port,
+            expected_revision,
+            label: "管理用".into(),
+            comment: "確認メモ".into(),
+        };
+        assert!(state.edit_service_note(next + 1, note(22, 0)).is_err());
+        assert!(state.edit_service_note(next, note(80, 0)).is_err());
+        let annotated = state.edit_service_note(next, note(22, 0)).unwrap();
+        assert_eq!(annotated.services.notes[&22].label, "管理用");
+        assert_eq!(annotated.services.notes[&22].revision, 1);
+        assert_eq!(
+            annotated.services.comparison.status,
+            first.services.comparison.status
+        );
+        assert_eq!(
+            serde_json::to_value(&annotated.services.rows).unwrap(),
+            serde_json::to_value(&first.services.rows).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&annotated.document).unwrap(),
+            serde_json::to_value(&first.document).unwrap()
+        );
+        assert_eq!(
+            state.edit_service_note(next, note(22, 0)).unwrap_err(),
+            "service_note_conflict"
+        );
+        assert!(state.services_csv(next).unwrap().contains("管理用"));
+
         let (again, started) = state.begin_services(&plan).unwrap();
         assert_eq!(started.services.comparison.baseline_operation, Some(next));
+        assert!(started.services.notes.is_empty());
+        assert!(state.edit_service_note(again, note(22, 0)).is_err());
         state.stop_services().unwrap();
         let mut late = first.services.clone();
         late.operation = again;
@@ -2923,6 +2974,42 @@ mod tests {
             Some("network_changed")
         );
         assert!(state.begin_services(&plan).is_err());
+    }
+    #[test]
+    fn service_notes_are_blocked_while_running_or_installing_and_scope_by_operation() {
+        let state = state();
+        {
+            let mut s = state.inner.lock().unwrap();
+            s.services.operation = 7;
+            s.services.stage = "completed".into();
+            s.services.rows = vec![crate::services::Row {
+                port: 443,
+                candidate: "HTTPS".into(),
+                service: None,
+                status: "timeout".into(),
+                method: "https".into(),
+                product: None,
+                response: None,
+                tls: None,
+                tls_details: None,
+                observed_at: 1,
+            }];
+        }
+        let edit = || crate::service_notes::Edit {
+            port: 443,
+            expected_revision: 0,
+            label: "admin".into(),
+            comment: "unknown".into(),
+        };
+        state.inner.lock().unwrap().services.stage = "running".into();
+        assert!(state.edit_service_note(7, edit()).is_err());
+        state.inner.lock().unwrap().services.stage = "cancelled".into();
+        assert!(state.edit_service_note(6, edit()).is_err());
+        state.inner.lock().unwrap().updates.snapshot.stage = "installing".into();
+        assert!(state.edit_service_note(7, edit()).is_err());
+        state.inner.lock().unwrap().updates.snapshot.stage = "idle".into();
+        assert!(state.edit_service_note(7, edit()).is_ok());
+        assert_eq!(state.snapshot().unwrap().services.rows[0].status, "timeout");
     }
     #[test]
     fn port_panel_close_restores_only_floating_without_editing_results_or_document() {

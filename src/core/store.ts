@@ -172,3 +172,5 @@ export async function getLanArchive(generation:number,observedAt:number):Promise
 export async function setPortLayout(expected:import('./port-layout').PortLayout,value:import('./port-layout').PortLayout){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('set_port_layout',{expected,value}));}
 
 export async function positionPortDetails(panel:import('./port-panel').PortPanel){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('position_port_details',{panel}));}
+
+export async function editServiceNote(operation:number,command:import('./service-notes').ServiceNoteEdit){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('edit_service_note',{operation,command}));}

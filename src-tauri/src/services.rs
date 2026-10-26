@@ -9,6 +9,7 @@ use std::{
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub notes: std::collections::BTreeMap<u16, crate::service_notes::Note>,
     pub comparison: crate::service_comparison::Comparison,
     pub requested_ports: Vec<u16>,
     pub source_netmask: String,
@@ -470,7 +471,7 @@ pub fn run(p: Plan, mut publish: impl FnMut(Snapshot), cancelled: impl Fn() -> b
     publish(result);
 }
 pub fn csv(s: &Snapshot, generation: u64, ports: u64) -> String {
-    let mut out=String::from("\u{feff}operation,port_operation,generation,stale,stage,error,mode,target,source,interface,family,port,candidate,service,status,method,product_reported,response,tls,observed_at_unix,requested_hostname,tls_server_name,tls_verification,tls_reason,certificate_issuer,certificate_not_before_unix,certificate_not_after_unix,requested_ports,source_netmask,comparison_status,baseline_operation,baseline_port_operation,change,changed_fields,previous_status,previous_method,previous_service,previous_product_reported,previous_response,previous_tls,previous_tls_details_json,previous_observed_at_unix\r\n");
+    let mut out=String::from("\u{feff}operation,port_operation,generation,stale,stage,error,mode,target,source,interface,family,port,candidate,service,status,method,product_reported,response,tls,observed_at_unix,requested_hostname,tls_server_name,tls_verification,tls_reason,certificate_issuer,certificate_not_before_unix,certificate_not_after_unix,requested_ports,source_netmask,comparison_status,baseline_operation,baseline_port_operation,change,changed_fields,previous_status,previous_method,previous_service,previous_product_reported,previous_response,previous_tls,previous_tls_details_json,previous_observed_at_unix,user_display_name,user_comment,user_note_updated_at_unix\r\n");
     for r in &s.rows {
         let mut cells = vec![
             s.operation.to_string(),
@@ -562,6 +563,12 @@ pub fn csv(s: &Snapshot, generation: u64, ports: u64) -> String {
                 .map(|r| r.observed_at.to_string())
                 .unwrap_or_default(),
         ]);
+        let note = s.notes.get(&r.port);
+        cells.extend([
+            note.map(|n| n.label.clone()).unwrap_or_default(),
+            note.map(|n| n.comment.clone()).unwrap_or_default(),
+            note.map(|n| n.updated_at.to_string()).unwrap_or_default(),
+        ]);
         out.push_str(
             &cells
                 .iter()
@@ -576,6 +583,30 @@ pub fn csv(s: &Snapshot, generation: u64, ports: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn user_notes_are_exported_separately_with_csv_escaping() {
+        let mut snapshot = Snapshot {
+            rows: vec![row()],
+            ..Default::default()
+        };
+        crate::service_notes::edit(
+            &mut snapshot.notes,
+            crate::service_notes::Edit {
+                port: 80,
+                expected_revision: 0,
+                label: "=SUM(1)".into(),
+                comment: "manual,\"note\"".into(),
+            },
+            123,
+        )
+        .unwrap();
+        let exported = csv(&snapshot, 0, 0);
+        assert_eq!(exported.lines().next().unwrap().split(',').count(), 45);
+        assert!(exported.contains("user_display_name,user_comment,user_note_updated_at_unix"));
+        assert!(exported.contains("'=SUM(1)"));
+        assert!(exported.contains("\"manual,\"\"note\"\"\""));
+        assert!(exported.ends_with("\"123\"\r\n"));
+    }
     fn row() -> Row {
         Row {
             port: 80,
