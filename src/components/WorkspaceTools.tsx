@@ -1,4 +1,5 @@
 import {lazy,Suspense} from 'react';
+const WhoisLookup=lazy(()=>import('./WhoisLookup').then(m=>({default:m.WhoisLookup})));
 const DiagnosticChecks=lazy(()=>import('./DiagnosticChecks').then(m=>({default:m.DiagnosticChecks})));
 const SyslogReceiver=lazy(()=>import('./SyslogReceiver').then(m=>({default:m.SyslogReceiver})));
 const ServiceChecks=lazy(()=>import('./ServiceChecks').then(m=>({default:m.ServiceChecks})));
@@ -7,6 +8,7 @@ import type {Snapshot,View} from '../core/types';
 import type {T} from './ui';
 export function WorkspaceTools({snapshot,view,t,native}:{snapshot:Snapshot;view:View;t:T;native:boolean}) {
  const network=snapshot.network;
+ if(view==='whois')return <div className="tools-workspace"><Suspense fallback={<p>{t('loading')}</p>}><WhoisLookup snapshot={snapshot} native={native}/></Suspense></div>;
  if(view==='diagnostics')return <div className="tools-workspace"><Suspense fallback={<p>{t('loading')}</p>}><DiagnosticChecks snapshot={snapshot} native={native}/></Suspense><Suspense fallback={<p>{t('loading')}</p>}><SyslogReceiver snapshot={snapshot} native={native}/></Suspense></div>;
  if(view==='servers')return <div className="tools-workspace"><Suspense fallback={<p>{t('loading')}</p>}><ServiceChecks snapshot={snapshot} native={native}/></Suspense></div>;
  return <div className="tools-workspace"><section className="surface tools-summary"><span className="tool-stage">{t(view==='network'?(native?'lanTools':'lanDesktopOnly'):'plannedFeature')}</span><h2>{t(view==='network'?'network':'diagnostics')}</h2><p>{t(view==='network'?(native?'lanSession':'interfacePreview'):'diagnosticPlan')}</p></section>

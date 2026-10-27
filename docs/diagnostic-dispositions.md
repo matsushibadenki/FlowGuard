@@ -8,4 +8,6 @@
 
 🟢 [Done] UI166件、production build、cargo fmt --check、git diff --check。Browser skill不在のため既存Playwright/Chromeで、実コンポーネントに合成Snapshot／模擬IPCを供給。3言語 × 1500／768／375／320pxで集計・絞り込み・解除・根拠状態との組み合わせ・共有Snapshot更新・空状態・横はみ出し・consoleを確認。QA /tmp/flowguard-diagnostic-disposition-qa.cjs、画像 /tmp/flowguard-diagnostic-disposition-{ja,en,zh-CN}-{1500,768,375,320}.png。
 
-⭕️ [Pending] 実Tauriで対応状況を記録した後のカード・絞り込み、複数ウインドウの同時更新、署名済み配布版。
+🟢 [Done] 別IDのdebug Tauri・日本語1440×960で、このMacのHTTPサービスから2事項を診断。サービス応答を再確認待ちとして記録すると未対応1／再確認待ち1に更新。各カードの絞り込みと解除、未実施との組み合わせで0件、画面移動後の記録保持を確認。
+
+⭕️ [Pending] 複数ウインドウの同時更新、実Tauriの他言語・狭幅、署名済み配布版。

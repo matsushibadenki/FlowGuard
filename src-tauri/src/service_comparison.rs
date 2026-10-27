@@ -59,6 +59,28 @@ fn fields(old: &Row, row: &Row) -> Vec<String> {
         ("response", old.response != row.response),
         ("tls", old.tls != row.tls),
         ("tls_details", old.tls_details != row.tls_details),
+        (
+            "http_headers",
+            old.http_headers
+                .as_ref()
+                .zip(row.http_headers.as_ref())
+                .is_some_and(|(a, b)| {
+                    a.content_security_policy != b.content_security_policy
+                        || a.x_content_type_options != b.x_content_type_options
+                        || a.x_content_type_options_value != b.x_content_type_options_value
+                        || a.referrer_policy != b.referrer_policy
+                        || a.strict_transport_security != b.strict_transport_security
+                }),
+        ),
+        (
+            "http_redirect",
+            row.method == "http"
+                && old
+                    .http_headers
+                    .as_ref()
+                    .zip(row.http_headers.as_ref())
+                    .is_some_and(|(a, b)| a.redirect != b.redirect),
+        ),
     ]
     .into_iter()
     .filter(|(_, changed)| *changed)
@@ -68,6 +90,11 @@ fn fields(old: &Row, row: &Row) -> Vec<String> {
 fn confirmed(row: &Row) -> bool {
     row.status == "confirmed"
         && row.service.is_some()
+        && (!matches!(row.method.as_str(), "http" | "https")
+            || row.http_headers.as_ref().is_some_and(|h| {
+                h.x_content_type_options_value != "ambiguous"
+                    && (row.method != "http" || h.redirect != "unknown")
+            }))
         && (row.method != "https"
             || row
                 .tls_details
@@ -248,6 +275,19 @@ mod tests {
                 } else {
                     None
                 },
+                http_headers: if *port == 443 {
+                    Some(crate::services::HeaderPresence {
+                        content_security_policy: true,
+                        x_content_type_options: true,
+                        x_content_type_options_value: "nosniff".into(),
+                        referrer_policy: false,
+                        strict_transport_security: true,
+                        response_status: 200,
+                        redirect: "none".into(),
+                    })
+                } else {
+                    None
+                },
                 observed_at: 100,
             })
             .collect();
@@ -297,6 +337,55 @@ mod tests {
         assert!(csv.contains("notAfter"));
         assert_eq!(csv.lines().count(), 3);
         assert!(c.baseline.as_ref().unwrap().1.comparison.rows.is_empty());
+    }
+    #[test]
+    fn http_evidence_changes_and_unknowns_are_not_misreported_as_unchanged() {
+        let p = plan();
+        let mut c = primed(&p);
+        c.begin(&p);
+        let mut s = complete(&p, 2);
+        s.rows[1]
+            .http_headers
+            .as_mut()
+            .unwrap()
+            .content_security_policy = false;
+        c.update(&p, &mut s);
+        assert_eq!(s.comparison.rows[1].kind, "changed");
+        assert_eq!(s.comparison.rows[1].fields, vec!["http_headers"]);
+        let csv = crate::services::csv(&s, 3, 7);
+        assert!(csv.contains("http_evidence_json,previous_http_evidence_json"));
+        assert!(csv.contains("contentSecurityPolicy"));
+        c.begin(&p);
+        let mut missing = complete(&p, 3);
+        missing.rows[1].http_headers = None;
+        c.update(&p, &mut missing);
+        assert_eq!(missing.comparison.rows[1].kind, "uncertain");
+        c.begin(&p);
+        let mut recovered = complete(&p, 4);
+        c.update(&p, &mut recovered);
+        assert_eq!(recovered.comparison.rows[1].kind, "uncertain");
+        let mut old = complete(&p, 5).rows.remove(1);
+        old.method = "http".into();
+        let mut new = old.clone();
+        new.http_headers.as_mut().unwrap().redirect = "https".into();
+        assert_eq!(fields(&old, &new), vec!["http_redirect"]);
+        let mut mime_changed = old.clone();
+        mime_changed
+            .http_headers
+            .as_mut()
+            .unwrap()
+            .x_content_type_options_value = "other".into();
+        assert_eq!(fields(&old, &mime_changed), vec!["http_headers"]);
+        mime_changed
+            .http_headers
+            .as_mut()
+            .unwrap()
+            .x_content_type_options_value = "ambiguous".into();
+        assert!(!confirmed(&mime_changed));
+
+        assert!(confirmed(&new));
+        new.http_headers.as_mut().unwrap().redirect = "unknown".into();
+        assert!(!confirmed(&new));
     }
     #[test]
     fn uncertain_responses_are_never_unchanged_or_health_proof() {

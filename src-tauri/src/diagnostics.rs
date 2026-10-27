@@ -17,12 +17,20 @@ pub struct Finding {
     pub disposition: Disposition,
     pub reason: String,
 }
+fn presence(value: bool) -> &'static str {
+    if value {
+        "present"
+    } else {
+        "not_observed"
+    }
+}
 fn source_for(category: &str) -> &'static str {
     match category {
         "service" | "management_reachability" => "service_observation",
         "tls" => "tls_verification",
         "certificate_expiry" => "certificate_metadata",
         "http_headers" => "headers_not_collected",
+        "http_redirect" | "mime_nosniff" => "headers_not_collected",
         _ => "unknown_source",
     }
 }
@@ -35,6 +43,11 @@ fn impact_for(category: &str, severity: &str, certainty: &str) -> &'static str {
         ("certificate_expiry", _, "not_performed") => "expiry_unknown",
         ("certificate_expiry", "warning", _) => "expiry_attention",
         ("certificate_expiry", _, _) => "expiry_observed",
+        ("mime_nosniff", _, "observed") => "mime_scope_limited",
+        ("mime_nosniff", _, _) => "mime_unverified",
+        ("http_redirect", _, "observed") => "redirect_scope_limited",
+        ("http_redirect", _, _) => "redirect_unverified",
+        ("http_headers", _, "observed") => "headers_presence_only",
         ("http_headers", _, _) => "headers_unknown",
         ("management_reachability", _, _) => "management_scope_review",
         _ => "impact_unknown",
@@ -170,7 +183,15 @@ impl Snapshot {
                     severity: severity.into(),
                     certainty: certainty.into(),
                     evidence,
-                    evidence_source: source_for(category).into(),
+                    evidence_source: if (category == "http_headers" && certainty == "observed")
+                        || (matches!(category, "http_redirect" | "mime_nosniff")
+                            && certainty != "not_performed")
+                    {
+                        "http_response_headers"
+                    } else {
+                        source_for(category)
+                    }
+                    .into(),
                     impact: impact_for(category, severity, certainty).into(),
                     recommendation: recommendation.into(),
                     observed_at: row.observed_at,
@@ -230,13 +251,77 @@ impl Snapshot {
                 }
             }
             if row.method == "http" || row.method == "https" {
-                add(
-                    "http_headers",
-                    "info",
-                    "not_performed",
-                    "service_observation_does_not_preserve_all_headers".into(),
-                    "collect_http_evidence",
-                );
+                if let Some(h) = &row.http_headers {
+                    add(
+                        "http_headers",
+                        "info",
+                        "observed",
+                        format!(
+                            "CSP={}; X-Content-Type-Options={}; Referrer-Policy={}; HSTS={}",
+                            presence(h.content_security_policy),
+                            presence(h.x_content_type_options),
+                            presence(h.referrer_policy),
+                            presence(h.strict_transport_security)
+                        ),
+                        "review_http_headers",
+                    );
+                } else {
+                    add(
+                        "http_headers",
+                        "info",
+                        "not_performed",
+                        "complete_final_http_headers_unavailable".into(),
+                        "collect_http_evidence",
+                    );
+                }
+            }
+            if matches!(row.method.as_str(), "http" | "https") {
+                if let Some(h) = &row.http_headers {
+                    let certainty = if h.x_content_type_options_value == "ambiguous" {
+                        "unverified"
+                    } else {
+                        "observed"
+                    };
+                    add(
+                        "mime_nosniff",
+                        "info",
+                        certainty,
+                        format!("value={}", h.x_content_type_options_value),
+                        "review_mime_nosniff",
+                    );
+                } else {
+                    add(
+                        "mime_nosniff",
+                        "info",
+                        "not_performed",
+                        "complete_final_http_headers_unavailable".into(),
+                        "review_mime_nosniff",
+                    );
+                }
+            }
+            if row.method == "http" {
+                if let Some(h) = &row.http_headers {
+                    let certainty = if h.redirect == "unknown" {
+                        "unverified"
+                    } else {
+                        "observed"
+                    };
+                    add(
+                        "http_redirect",
+                        "info",
+                        certainty,
+                        format!("status={};redirect={}", h.response_status, h.redirect),
+                        "review_http_redirect",
+                    );
+                } else {
+                    add(
+                        "http_redirect",
+                        "info",
+                        "not_performed",
+                        "complete_final_http_response_unavailable".into(),
+                        "review_http_redirect",
+                    );
+                }
             }
             if confirmed
                 && matches!(
@@ -472,6 +557,105 @@ mod tests {
         );
     }
     #[test]
+    fn observed_http_headers_are_reported_without_claiming_effectiveness() {
+        let mut state = Snapshot::default();
+        let mut job = crate::services::Snapshot {
+            operation: 1,
+            stage: "completed".into(),
+            rows: vec![crate::services::Row {
+                port: 80,
+                candidate: "HTTP".into(),
+                service: Some("HTTP".into()),
+                status: "confirmed".into(),
+                method: "http".into(),
+                product: None,
+                response: None,
+                tls: None,
+                tls_details: None,
+                http_headers: Some(crate::services::HeaderPresence {
+                    content_security_policy: true,
+                    x_content_type_options: false,
+                    x_content_type_options_value: "missing".into(),
+                    referrer_policy: false,
+                    strict_transport_security: false,
+                    response_status: 200,
+                    redirect: "none".into(),
+                }),
+                observed_at: 1,
+            }],
+            ..Default::default()
+        };
+        state.assess(&job, 10).unwrap();
+        let f = state.reports[0]
+            .findings
+            .iter()
+            .find(|f| f.category == "http_headers")
+            .unwrap();
+        assert_eq!(f.certainty, "observed");
+        assert_eq!(f.evidence_source, "http_response_headers");
+        assert_eq!(f.impact, "headers_presence_only");
+        let mime = state.reports[0]
+            .findings
+            .iter()
+            .find(|f| f.category == "mime_nosniff")
+            .unwrap();
+        assert_eq!(mime.certainty, "observed");
+        assert_eq!(mime.evidence, "value=missing");
+        assert_eq!(mime.impact, "mime_scope_limited");
+
+        assert!(f.evidence.contains("CSP=present"));
+        assert!(f.evidence.contains("HSTS=not_observed"));
+        assert!(export(&state.reports[0], "csv")
+            .unwrap()
+            .contains("http_response_headers"));
+        let redirect = state.reports[0]
+            .findings
+            .iter()
+            .find(|f| f.category == "http_redirect")
+            .unwrap();
+        assert_eq!(redirect.certainty, "observed");
+        assert_eq!(redirect.evidence, "status=200;redirect=none");
+        job.rows[0]
+            .http_headers
+            .as_mut()
+            .unwrap()
+            .x_content_type_options_value = "ambiguous".into();
+        job.rows[0].http_headers.as_mut().unwrap().redirect = "unknown".into();
+        job.operation = 2;
+        state.assess(&job, 11).unwrap();
+        let redirect = state.reports[0]
+            .findings
+            .iter()
+            .find(|f| f.category == "http_redirect")
+            .unwrap();
+        assert_eq!(redirect.certainty, "unverified");
+        assert_eq!(redirect.impact, "redirect_unverified");
+        let mime = state.reports[0]
+            .findings
+            .iter()
+            .find(|f| f.category == "mime_nosniff")
+            .unwrap();
+        assert_eq!(mime.certainty, "unverified");
+        assert_eq!(mime.evidence, "value=ambiguous");
+
+        job.rows[0].http_headers = None;
+        job.operation = 3;
+        state.assess(&job, 12).unwrap();
+        let redirect = state.reports[0]
+            .findings
+            .iter()
+            .find(|f| f.category == "http_redirect")
+            .unwrap();
+        assert_eq!(redirect.certainty, "not_performed");
+        assert_eq!(redirect.evidence_source, "headers_not_collected");
+        let mime = state.reports[0]
+            .findings
+            .iter()
+            .find(|f| f.category == "mime_nosniff")
+            .unwrap();
+        assert_eq!(mime.certainty, "not_performed");
+    }
+    #[test]
     fn comparison_requires_same_complete_scope_and_never_claims_unknown_unchanged() {
         let mut state = Snapshot::default();
         let mut job = crate::services::Snapshot {
@@ -497,6 +681,7 @@ mod tests {
                 response: None,
                 tls: None,
                 tls_details: None,
+                http_headers: None,
                 observed_at: 1,
             }],
             ..Default::default()
@@ -592,6 +777,7 @@ mod tests {
             response: None,
             tls: None,
             tls_details: None,
+            http_headers: None,
             observed_at: 1,
         });
         for _ in 0..25 {

@@ -20,7 +20,7 @@ export function ServiceChecks({snapshot,native,onSelect=selectService,onExport=s
  const [mode,setMode]=useState<ServiceMode>('auto'),[search,setSearch]=useState(''),[status,setStatus]=useState('all'),[descending,setDescending]=useState(false),[error,setError]=useState(false),[pending,setPending]=useState(false);
  const busy=['running','cancelling'].includes(job.stage),available=serviceAvailability(snapshot),canCompare=comparableServices(job)&&!staleServices(snapshot),rows=serviceRows(job,search,status,descending,changesOnly&&canCompare),detail=job.rows.find(r=>r.port===job.selectedPort);
  const changes=new Map(job.comparison?.rows.map(r=>[r.port,r]));
- const fieldLabels:Record<string,string>={status:w.status,method:w.mode,service:w.service,product:w.product,response:w.response,tls:w.tls,tls_details:tw.verification};
+ const fieldLabels:Record<string,string>={status:w.status,method:w.mode,service:w.service,product:w.product,response:w.response,tls:w.tls,tls_details:tw.verification,http_headers:cw.http_headers,http_redirect:cw.http_redirect};
  const label=(key:string)=>w[key as 'confirmed']??w.unknown;
  async function action(stop=false){setPending(true);setError(false);try{if(stop)await stopServices();else await startServices(snapshot.ports.operation,mode,mode==='auto'||mode==='https'?hostname:'');}catch{setError(true);}finally{setPending(false);}}
  async function select(port:number){try{await onSelect(job.operation,port);}catch{setError(true);}}

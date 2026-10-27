@@ -707,4 +707,82 @@ ROADMAPの「機器情報とサービス・診断結果の関連付け」を優�
 
 - 🟢 [Done] UI166件・production build・cargo fmt --check・git diff --check。対応状況の全件集計と未知値・空結果を検証。
 - 🟢 [Done] Browser skill不在につきPlaywright/Chrome、localhost:1421で実DiagnosticChecksに合成Snapshot／模擬IPC。3言語 × 1500／768／375／320pxの12ケースで各件数、絞り込み・解除、根拠状態との組み合わせ、Snapshot更新後の件数と一覧、空状態・横はみ出し・overlay／consoleを確認。desktopと320pxを目視。QA /tmp/flowguard-diagnostic-disposition-qa.cjs。
-- ⭕️ [Pending] 実Tauriの対応状況保存・複数ウインドウ同時更新・署名済み配布版。[詳細](diagnostic-dispositions.md)。
+- ⭕️ [Pending] 複数ウインドウ同時更新・署名済み配布版。[詳細](diagnostic-dispositions.md)。
+
+## 2026-10-27 — 診断対応状況の実Tauri確認
+
+- 🟢 [Done] 別IDの最新debug Tauri・実WebKit・日本語1440×960。このMac自身のen0 IPv4・TCP 51857の一時HTTPサービス（200 OK）から2事項を診断。サービス応答を「再確認待ち」、理由を「QA 確認」として記録し、未対応2→1、再確認待ち0→1、一覧の状態更新を確認。
+- 🟢 [Done] 再確認待ちと未対応の各カードでそれぞれ該当1／2件、再クリックで2／2件、再確認待ちと未実施の併用で0／2件を確認。フィルター中もカード件数は全体のまま。サービス画面へ移動して戻った後も記録と件数を確認。一時HTTP待受は終了。
+- ⭕️ [Pending] 実Tauriの複数ウインドウ同時更新・他言語／狭幅、署名済み配布版。対応状況はセッション内の記録であり、再起動後の永続化は対象外。
+
+## 2026-10-27 — 診断差分カード
+
+- 🟢 [Done] UI167件、production build。変化あり・新規・変化なし・比較不確定・比較なし・未知を別々に集計し、空結果も確認。
+- 🟢 [Done] Browser plugin不在のためPlaywright／Chromeと合成Snapshotで、日本語・英語・简体中文 × 1500／768／375／320pxのカード表示、差分と対応状況の複合絞り込み・解除、横はみ出しとconsoleを確認。画像は `/tmp/flowguard-diagnostic-change-{ja,en,zh-CN}-{1500,768,375,320}.png`。
+- ⭕️ [Pending] 複数ウインドウ・署名済み配布版。
+
+## 2026-10-27 — 診断差分カードの実Tauri確認
+
+- 🟢 [Done] 別IDの最新debug Tauri・実WebKit・日本語1440×960。このMacのen0 IPv4・TCP 51857の一時HTTPサービスから診断を2回作成。初回の比較なし2件、同条件再診断の変化なし1件・比較不確定1件を一覧と照合。
+- 🟢 [Done] サービス応答を再確認待ちとして記録し、変化なし＋再確認待ち＋観測済みで該当1／2件、根拠を未実施へ変更すると0／2件。比較不確定＋未対応＋未実施でHTTPヘッダー1／2件。解除で2／2件に戻り、絞り込み中もカード件数は全体を維持。一時HTTP待受は終了。
+- ⭕️ [Pending] 変化あり・新規が1件以上の実記録、他言語／狭幅、複数ウインドウ、署名済み配布版。
+
+## 2026-10-27 — WHOIS検索
+
+- 🟢 [Done] IANAのIPv4／IPv6／DNSブートストラップで登録機関を選び、HTTPS RDAPの登録データをRust共有状態に保持。入力検証・最長プレフィックスのRustテスト2件、UI167件、production build。取得は手動開始、応答サイズ・時間に上限、リダイレクトは追跡しない。
+- 🟢 [Done] Browser plugin不在のためPlaywright／Chromeで合成結果を使い、日本語・英語・简体中文 × 1500／375／320pxの画面・入力・横はみ出しとconsoleを確認。実debug Tauriで142.250.21.139のARIN応答（登録範囲・Google LLC）とexample.comのVerisign応答を確認。
+- ⭕️ [Pending] IPv6・他登録機関・他言語実Tauri・署名済み配布版。登録情報は位置情報や本人性の証明ではない。地図・従来WHOIS・リダイレクト追跡は未実装。
+
+## 2026-10-27 — HTTP応答ヘッダーの診断
+
+- 🟢 [Done] HTTP／HTTPSの完全な最終HEAD応答から4つのセキュリティヘッダーの非空値の有無を保存。値とCookieは保持せず、未取得・不正・暫定応答は未実施。Rust192件（24 ignored）、UI167件、production build。診断出力と不正・不完全な応答、秘匿値を保存しないことを試験。
+- 🟢 [Done] Browser plugin不在のためPlaywright／Chromeと合成Snapshotで3言語 × 1500／768／375／320pxの根拠ノードと検出／未検出表示、選択操作、横はみ出し・consoleを確認。
+- ⭕️ [Pending] 実TauriのHTTP／HTTPS応答と実証明書・他言語／狭幅、署名済み配布版。値の妥当性、HTTPS誘導と他ページは未確認。
+
+## 2026-10-27 — HTTPヘッダー診断の実Tauri確認
+
+- 🟢 [Done] 別IDの最新debug Tauri・実WebKit・日本語1440×960。このMac自身のen0 IPv4・TCP 51857で、CSPとX-Content-Type-Optionsを含み、Referrer-PolicyとHSTSを含まない一時HTTP応答を用意。TCPとHTTPの確認から診断を作り、HTTPヘッダーの詳細で前者2項目が検出、後者2項目が未検出と表示されることを目視とアクセシビリティ情報で確認。取得元「HTTP応答ヘッダー」、値・設定の有効性は未確認との説明を確認。
+- 🟢 [Done] テスト用Cookieが画面上に表示されないことを確認。一時HTTP待受は終了。保持しないこと自体はRust試験で検証済み。
+- ⭕️ [Pending] 実HTTPS応答・実証明書、他言語／狭幅の実Tauri、署名済み配布版。値の有効性・HTTPS誘導・他ページは検査対象外。
+
+## 2026-10-27 — HTTPからの誘導診断
+
+- 🟢 [Done] 既存のHTTP HEAD応答の応答コードとLocationの方式を分類し、HTTP→誘導先のノードと限界を表示。リダイレクトは追跡せず、URLやクエリは保存しない。複数Location、不正な参照、その他の3xxを判定不能とし、不完全な応答は未実施。Rust193件（24 ignored）・UI167件・production build。
+- 🟢 [Done] Browser plugin不在のためPlaywright／Chromeと合成Snapshotで3言語 × 1500／768／375／320pxのHTTPS・判定不能・未実施の表示、はみ出し・consoleを確認。
+- ⭕️ [Pending] 実Tauriの誘導応答・他言語／狭幅、署名済み配布版。HTTPS接続と証明書・他ページの動作は本機能の対象外。
+
+## 2026-10-27 — HTTPS誘導診断の実Tauri確認
+
+- 🟢 [Done] 別IDの最新debug Tauri・実WebKit・日本語1440×960。このMac自身のen0 IPv4・TCP 51857に、HTTPS Locationとテスト用クエリを持つHTTP 301応答を用意。TCP確認→HTTP HEAD確認→診断の詳細で「HTTP 301 → HTTPSへ誘導」、観測済み、接続先とTLSの安全性は未確認との説明を確認。
+- 🟢 [Done] テスト用URLとクエリが診断画面に表示されないことを確認。URLを共有状態に保存しないことはRust試験で検証済み。一時HTTP待受は終了。
+- ⭕️ [Pending] 実Tauriでの他のHTTP応答・他言語／狭幅・複数ウインドウ、署名済み配布版。実際のHTTPS接続と証明書・他ページの動作は対象外。
+
+## 2026-10-27 — サービスHTTP観測の差分
+
+- 🟢 [Done] 前回と今回のセキュリティヘッダー有無・HTTP誘導方式を比較対象に追加。未取得や判定不能を「不確定」とし、詳細で前後を整列表示。CSVは末尾に現在／前回のHTTP観測JSONを追加して47列とし、生のヘッダー値とURLは含めない。
+- 🟢 [Done] Rust194件（24 ignored）・UI167件、production build。差分・未取得・判定不能・復帰時の比較とCSVを確認。Browser plugin不在のためPlaywright／Chromeと合成Snapshotで3言語 × 1500／768／375／320pxの比較表と未取得を確認。
+- ⭕️ [Pending] 実Tauriでの再確認・CSV保存・HTTPS、複数ウインドウ、署名済み配布版。
+
+## 2026-10-27 — サービスHTTP差分の実Tauri確認
+
+- 🟢 [Done] 別IDの最新debug Tauri・日本語1440×960。このMacのen0 IPv4・TCP 51857の一時HTTPサービスで、同じ301応答のCSP未検出→検出・HTTP→HTTPS誘導に切り替え、同条件で再確認。サービス操作#3は基準#2との差分「HTTPヘッダー・HTTP誘導」を表示し、詳細の前回／今回の各値が応答と一致。
+- 🟢 [Done] その後、不正なヘッダーを返して再確認。操作#4は基準#3に対し比較不確定1件、前回の値と今回の未確認を表示。出力した各CSVは1行47列で、#3はchangedと両方のHTTP観測、#4はuncertain・今回空欄・前回の観測を確認。テスト用URLとクエリは両ファイルに含まれない。出力先は `~/Downloads/flowguard-services-3.csv` と `~/Downloads/flowguard-services-4.csv`。一時HTTP待受は終了。
+- ⭕️ [Pending] 実HTTPS、他言語／狭幅の実Tauri、複数ウインドウ、署名済み配布版。
+
+## 2026-10-27 — 診断履歴の時系列表示
+
+- 🟢 [Done] セッション内の診断を古い順のノードで表示し、選択中・最新・比較元を区別。ノードの操作は既存のRust共有状態の診断選択を利用し、比較の条件や履歴の保存期間を変更しない。
+- 🟢 [Done] UI167件・production build。Browser plugin不在のためPlaywright／Chromeと合成Snapshotで3言語 × 1500／768／375／320pxのノード順・比較元・クリック／キーボード選択・選択ノードの可視化・長いIPv6・横はみ出しとconsoleを確認。
+- ⭕️ [Pending] 実Tauriでの複数履歴切替、複数ウインドウ、署名済み配布版。
+
+## 2026-10-27 — 診断履歴ノードの実Tauri確認
+
+- 🟢 [Done] 別IDの最新debug Tauri・実WebKit・日本語1440×960。このMac自身のen0 IPv4・TCP 51857の一時HTTPサービスから記録を取得し、同じ記録を3回診断。ノードが#1→#2→#3の順に並び、#3が最新として表示されることを目視・アクセシビリティ情報で確認。
+- 🟢 [Done] ノードで#3→#2→#1→#3と切り替え、#3の比較元#2、#2の比較元#1、#1に比較元なし、選択欄と概要が同期することを確認。一時HTTP待受は終了。
+- ⭕️ [Pending] 複数ウインドウ・署名済み配布版。実Tauriでのキーボード切替は操作ツールの状態変化で未確認（ブラウザの合成Snapshotでは確認済み）。
+
+## 2026-10-27 — nosniff値の診断
+
+- 🟢 [Done] 単一の `nosniff`・ヘッダーなし・空／別の値・複数値を分類。複数値は判定不能、不完全応答は未実施。生の値とCookieを保存せず、診断と前回／今回の差分へ分類コードを反映。Rust195件（24 ignored）・UI167件・production build。
+- 🟢 [Done] Browser plugin不在のためPlaywright／Chromeと合成Snapshotで3言語 × 1500／768／375／320pxの診断詳細・サービス差分・未確認の表示、横はみ出しとconsoleを確認。
+- ⭕️ [Pending] 実TauriでのHTTP／HTTPS応答・CSV・複数ウインドウ・署名済み配布版。Content-Type、ブラウザ動作と他ページの評価は未実装。

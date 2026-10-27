@@ -171,6 +171,7 @@ pub struct Snapshot {
     pub flow_names: crate::flow_names::Snapshot,
     pub gpu_filter: crate::gpu_filter::Filter,
     pub diagnostics: crate::diagnostics::Snapshot,
+    pub rdap: crate::rdap::Snapshot,
     pub destination_names: crate::destination_names::Snapshot,
     pub firewall_control: crate::firewall_control::Snapshot,
     pub syslog: crate::syslog::Snapshot,

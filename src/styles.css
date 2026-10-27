@@ -141,3 +141,14 @@
 .map-graph-switch{display:flex;align-items:center;gap:var(--space-sm);margin-bottom:var(--space-md)}
 .map-graph-switch button{display:flex;align-items:center;gap:var(--space-sm);padding:var(--space-sm) var(--space-md);border:1px solid var(--color-rule);border-radius:var(--radius-sm);font-size:var(--text-sm);background:var(--color-surface)}
 .map-graph-switch button[aria-pressed=true]{color:var(--color-accent);border-color:var(--color-accent);background:var(--color-accent-soft)}
+/* Align control rows independently of the length of their captions. */
+:is(.lan-controls,.port-controls,.port-filters,.syslog-controls,.lan-scan-fields) > label:has(> :is(input:not([type=checkbox]):not([type=radio]),select)):not(:has(>.sr-only)){align-self:stretch;grid-template-rows:minmax(0,1fr) 44px;align-items:end;min-width:0}
+:is(.lan-controls,.port-controls,.port-filters,.syslog-controls,.lan-scan-fields) > label:has(>.sr-only){align-self:end}
+:is(.lan-controls,.port-controls,.port-filters,.syslog-controls,.lan-scan-fields) > label > :is(input:not([type=checkbox]):not([type=radio]),select),:is(.port-controls,.port-filters) > :is(input:not([type=checkbox]):not([type=radio]),select,button),.lan-controls > .button-row > button{height:44px;min-height:44px;max-width:100%}
+.port-scan-fields > label{grid-template-rows:minmax(0,1fr) 44px;align-items:end}.port-scan-fields > label > input{height:44px;min-height:44px}
+.lan-sheet-head :is(input:not([type=checkbox]),select,button),.lan-sheet-filters > select{height:44px;min-height:44px}
+.connection-toolbar select,.connection-toolbar .search-field{height:44px;min-height:44px}.connection-toolbar .search-field input{height:42px;min-height:0}
+/* WebKit's native menulist paints a shorter control even with an explicit height. */
+select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23546a7b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:32px}
+.sidebar-footer .language-picker select{padding-right:26px;background-position:right 5px center}
+.port-layout-fields select,.lan-columns select{padding-right:25px;background-position:right 5px center}

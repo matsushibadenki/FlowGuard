@@ -4,7 +4,7 @@ import type {Snapshot,View,Locale} from '../core/types';
 import {dispatch} from '../core/store';
 import {extensionLabel} from '../core/enforcement';
 import {Brand,type T} from './ui';
-const groups=[{label:'firewallCategory',items:[['map',Network],['apps',LayoutGrid],['rules',FileSliders],['history',Clock3]]},{label:'networkCategory',items:[['network',Waypoints]]},{label:'serverCategory',items:[['servers',Server]]},{label:'securityCategory',items:[['diagnostics',ShieldCheck]]},{label:'commonCategory',items:[['settings',Settings2]]}] as const;
+const groups=[{label:'firewallCategory',items:[['map',Network],['apps',LayoutGrid],['rules',FileSliders],['history',Clock3]]},{label:'networkCategory',items:[['network',Waypoints],['whois',Globe]]},{label:'serverCategory',items:[['servers',Server]]},{label:'securityCategory',items:[['diagnostics',ShieldCheck]]},{label:'commonCategory',items:[['settings',Settings2]]}] as const;
 export function Sidebar({snapshot,t,navigate,onError}:{snapshot:Snapshot;t:T;navigate:(view:View)=>void;onError:(error:unknown)=>void}){
  const [menuOpen,setMenuOpen]=useState(true);
  const enabled=snapshot.firewall.enabled;

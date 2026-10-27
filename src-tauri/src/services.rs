@@ -31,6 +31,17 @@ pub struct Snapshot {
     pub error: Option<String>,
     pub selected_port: Option<u16>,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeaderPresence {
+    pub content_security_policy: bool,
+    pub x_content_type_options: bool,
+    pub x_content_type_options_value: String,
+    pub referrer_policy: bool,
+    pub strict_transport_security: bool,
+    pub response_status: u16,
+    pub redirect: String,
+}
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Row {
@@ -43,6 +54,7 @@ pub struct Row {
     pub response: Option<String>,
     pub tls: Option<String>,
     pub tls_details: Option<crate::tls_details::Details>,
+    pub http_headers: Option<HeaderPresence>,
     pub observed_at: u64,
 }
 #[derive(Clone)]
@@ -227,6 +239,96 @@ fn read_bounded(
         "incomplete_response",
     ))
 }
+// Only record names with nonempty values from a complete, syntactically valid final response.
+// Values, including cookies and credentials, never enter the shared snapshot.
+fn header_presence(text: &str, code: u16) -> Option<HeaderPresence> {
+    if code < 200 {
+        return None;
+    }
+    let head = text.split_once("\r\n\r\n")?.0;
+    let mut presence = HeaderPresence {
+        content_security_policy: false,
+        x_content_type_options: false,
+        x_content_type_options_value: "missing".into(),
+        referrer_policy: false,
+        strict_transport_security: false,
+        response_status: code,
+        redirect: "unknown".into(),
+    };
+    let mut locations = Vec::new();
+    let mut mime_options = Vec::new();
+    for line in head.split("\r\n").skip(1) {
+        let (name, value) = line.split_once(':')?;
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+            || value.bytes().any(|b| b < 32 && b != b'\t' || b == 127)
+        {
+            return None;
+        }
+        if name.eq_ignore_ascii_case("location") {
+            locations.push(value.trim());
+        }
+        if name.eq_ignore_ascii_case("x-content-type-options") {
+            mime_options.push(value.trim());
+        }
+        if value.trim().is_empty() {
+            continue;
+        }
+        if name.eq_ignore_ascii_case("content-security-policy") {
+            presence.content_security_policy = true;
+        }
+        if name.eq_ignore_ascii_case("x-content-type-options") {
+            presence.x_content_type_options = true;
+        }
+        if name.eq_ignore_ascii_case("referrer-policy") {
+            presence.referrer_policy = true;
+        }
+        if name.eq_ignore_ascii_case("strict-transport-security") {
+            presence.strict_transport_security = true;
+        }
+    }
+    presence.x_content_type_options_value = match mime_options.as_slice() {
+        [] => "missing",
+        [v] if v.eq_ignore_ascii_case("nosniff") => "nosniff",
+        [v] if v.contains(',') => "ambiguous",
+        [_] => "other",
+        _ => "ambiguous",
+    }
+    .into();
+    presence.redirect = if [301, 302, 303, 307, 308].contains(&code) {
+        if locations.len() != 1
+            || locations[0].is_empty()
+            || locations[0]
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace() || c == '\\')
+        {
+            "unknown"
+        } else if let Ok(url) = reqwest::Url::parse(locations[0]) {
+            match url.scheme() {
+                "https" if url.host_str().is_some() => "https",
+                "http" if url.host_str().is_some() => "http",
+                "https" | "http" => "unknown",
+                _ => "other",
+            }
+        } else if reqwest::Url::parse("http://example.invalid/")
+            .unwrap()
+            .join(locations[0])
+            .is_ok()
+        {
+            "relative"
+        } else {
+            "unknown"
+        }
+    } else if (300..400).contains(&code) {
+        "unknown"
+    } else {
+        "none"
+    }
+    .into();
+    Some(presence)
+}
 fn parse(r: &mut Row, b: &[u8], mode: &str) {
     let Ok(text) = std::str::from_utf8(b) else {
         r.status = "unrecognized".into();
@@ -245,6 +347,7 @@ fn parse(r: &mut Row, b: &[u8], mode: &str) {
             r.service = Some(if mode == "https" { "HTTPS" } else { "HTTP" }.into());
             r.status = "confirmed".into();
             r.response = Some(clean(line));
+            r.http_headers = header_presence(text, code.parse().unwrap_or(0));
             r.product = text
                 .split("\r\n")
                 .skip(1)
@@ -294,6 +397,7 @@ fn probe(p: &Plan, port: u16, config: Option<Arc<rustls::ClientConfig>>) -> Row 
         response: None,
         tls: None,
         tls_details: None,
+        http_headers: None,
         observed_at: now(),
     };
     if mode == "unsupported" {
@@ -473,7 +577,7 @@ pub fn run(p: Plan, mut publish: impl FnMut(Snapshot), cancelled: impl Fn() -> b
     publish(result);
 }
 pub fn csv(s: &Snapshot, generation: u64, ports: u64) -> String {
-    let mut out=String::from("\u{feff}operation,port_operation,generation,stale,stage,error,mode,target,source,interface,family,port,candidate,service,status,method,product_reported,response,tls,observed_at_unix,requested_hostname,tls_server_name,tls_verification,tls_reason,certificate_issuer,certificate_not_before_unix,certificate_not_after_unix,requested_ports,source_netmask,comparison_status,baseline_operation,baseline_port_operation,change,changed_fields,previous_status,previous_method,previous_service,previous_product_reported,previous_response,previous_tls,previous_tls_details_json,previous_observed_at_unix,user_display_name,user_comment,user_note_updated_at_unix\r\n");
+    let mut out=String::from("\u{feff}operation,port_operation,generation,stale,stage,error,mode,target,source,interface,family,port,candidate,service,status,method,product_reported,response,tls,observed_at_unix,requested_hostname,tls_server_name,tls_verification,tls_reason,certificate_issuer,certificate_not_before_unix,certificate_not_after_unix,requested_ports,source_netmask,comparison_status,baseline_operation,baseline_port_operation,change,changed_fields,previous_status,previous_method,previous_service,previous_product_reported,previous_response,previous_tls,previous_tls_details_json,previous_observed_at_unix,user_display_name,user_comment,user_note_updated_at_unix,http_evidence_json,previous_http_evidence_json\r\n");
     for r in &s.rows {
         let mut cells = vec![
             s.operation.to_string(),
@@ -570,6 +674,14 @@ pub fn csv(s: &Snapshot, generation: u64, ports: u64) -> String {
             note.map(|n| n.label.clone()).unwrap_or_default(),
             note.map(|n| n.comment.clone()).unwrap_or_default(),
             note.map(|n| n.updated_at.to_string()).unwrap_or_default(),
+            r.http_headers
+                .as_ref()
+                .map(|h| serde_json::to_string(h).unwrap_or_default())
+                .unwrap_or_default(),
+            previous
+                .and_then(|r| r.http_headers.as_ref())
+                .map(|h| serde_json::to_string(h).unwrap_or_default())
+                .unwrap_or_default(),
         ]);
         out.push_str(
             &cells
@@ -603,11 +715,11 @@ mod tests {
         )
         .unwrap();
         let exported = csv(&snapshot, 0, 0);
-        assert_eq!(exported.lines().next().unwrap().split(',').count(), 45);
+        assert_eq!(exported.lines().next().unwrap().split(',').count(), 47);
         assert!(exported.contains("user_display_name,user_comment,user_note_updated_at_unix"));
         assert!(exported.contains("'=SUM(1)"));
         assert!(exported.contains("\"manual,\"\"note\"\"\""));
-        assert!(exported.ends_with("\"123\"\r\n"));
+        assert!(exported.contains("\"123\",\"\",\"\"\r\n"));
     }
     fn row() -> Row {
         Row {
@@ -620,6 +732,7 @@ mod tests {
             response: None,
             tls: None,
             tls_details: None,
+            http_headers: None,
             observed_at: 0,
         }
     }
@@ -641,6 +754,96 @@ mod tests {
         let mut r = row();
         parse(&mut r, b"SSH-2.0-TestSSH_1\r\n", "ssh");
         assert_eq!(r.service.as_deref(), Some("SSH"));
+    }
+    #[test]
+    fn security_header_presence_requires_a_complete_valid_final_response() {
+        let mut r = row();
+        parse(&mut r, b"HTTP/1.1 200 OK\r\ncontent-security-policy: default-src 'self'\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: \r\nSet-Cookie: private=secret\r\n\r\n", "http");
+        let h = r.http_headers.as_ref().unwrap();
+        assert!(h.content_security_policy && h.x_content_type_options);
+        assert!(!h.referrer_policy && !h.strict_transport_security);
+        assert!(!serde_json::to_string(&r)
+            .unwrap()
+            .contains("private=secret"));
+        for response in [
+            "HTTP/1.1 100 Continue\r\nContent-Security-Policy: x\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nBad Header: x\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Security-Policy: x\r\n",
+            "HTTP/1.1 200 OK\r\n Content-Security-Policy: x\r\n\r\n",
+        ] {
+            let mut r = row();
+            parse(&mut r, response.as_bytes(), "http");
+            assert!(r.http_headers.is_none(), "{response:?}");
+        }
+    }
+    #[test]
+    fn nosniff_classification_is_bounded_and_preserves_no_raw_values() {
+        for (headers, expected) in [
+            ("X-Content-Type-Options: NoSnIfF\r\n", "nosniff"),
+            ("", "missing"),
+            ("X-Content-Type-Options: \r\n", "other"),
+            ("X-Content-Type-Options: secret-value\r\n", "other"),
+            (
+                "X-Content-Type-Options: nosniff\r\nX-Content-Type-Options: nosniff\r\n",
+                "ambiguous",
+            ),
+            ("X-Content-Type-Options: nosniff, other\r\n", "ambiguous"),
+        ] {
+            let response =
+                format!("HTTP/1.1 200 OK\r\n{headers}Set-Cookie: private=secret-cookie\r\n\r\n");
+            let mut r = row();
+            parse(&mut r, response.as_bytes(), "http");
+            assert_eq!(
+                r.http_headers
+                    .as_ref()
+                    .unwrap()
+                    .x_content_type_options_value,
+                expected
+            );
+            let serialized = serde_json::to_string(&r).unwrap();
+            assert!(!serialized.contains("secret-value"));
+            assert!(!serialized.contains("secret-cookie"));
+        }
+        let mut incomplete = row();
+        parse(
+            &mut incomplete,
+            b"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\n",
+            "http",
+        );
+        assert!(incomplete.http_headers.is_none());
+    }
+    #[test]
+    fn redirect_classification_does_not_keep_location_values() {
+        for (status, location, expected) in [
+            (
+                301,
+                "Location: https://private.example/path?token=secret\r\n",
+                "https",
+            ),
+            (308, "Location: http://example.test/\r\n", "http"),
+            (302, "Location: /login\r\n", "relative"),
+            (303, "Location: //example.test/path\r\n", "relative"),
+            (307, "Location: mailto:someone@example.test\r\n", "other"),
+            (301, "", "unknown"),
+            (
+                301,
+                "Location: https://a.example/\r\nLocation: https://b.example/\r\n",
+                "unknown",
+            ),
+            (301, "Location: https://a.example/bad path\r\n", "unknown"),
+            (304, "", "unknown"),
+            (200, "Location: https://a.example/\r\n", "none"),
+        ] {
+            let response = format!("HTTP/1.1 {status} OK\r\n{location}\r\n");
+            let mut r = row();
+            parse(&mut r, response.as_bytes(), "http");
+            let result = r.http_headers.as_ref().unwrap();
+            assert_eq!(result.redirect, expected, "{status} {location}");
+            assert_eq!(result.response_status, status);
+            let serialized = serde_json::to_string(&r).unwrap();
+            assert!(!serialized.contains("secret"));
+            assert!(!serialized.contains("private.example"));
+        }
     }
     #[test]
     fn bounded_responses() {

@@ -4,9 +4,9 @@ import {Activity, AppWindow, Check, ChevronLeft, ChevronRight, CircleHelp, Globe
 import type {AppRow, DestinationRow} from '../core/mapModel';
 import type {Snapshot} from '../core/types';
 import {destinationReceipt, pageWindow, trafficGraphWords} from '../core/traffic-graph';
-import {destinationName} from '../core/destination-names';
+import {destinationName, destinationNameWords} from '../core/destination-names';
+import {flowNamesFor, flowNameWords} from '../core/flow-names';
 import {DestinationNameEvidence} from './DestinationNames';
-import {FlowNameEvidence} from './FlowNames';
 import {ActionIcon, AppIcon, DirectionIcon, type T} from './ui';
 import './TrafficGraph.css';
 const classLabels = {public:'classPublic',local:'classLocal',other:'classOther',loopback:'classLoopback'} as const;
@@ -82,14 +82,14 @@ function AppBranch({row,snapshot,t,selectApp,selectDestination}:{row:AppRow}&Omi
         <span className="tg-source-port" aria-hidden="true"/>
       </button>
       <div className="tg-destinations">{window.rows.map(d=>{
-        const Icon=classIcons[d.klass],receipt=destinationReceipt(d,snapshot),selected=d.connectionIds.includes(snapshot.selectedId??'');
+        const Icon=classIcons[d.klass],receipt=destinationReceipt(d,snapshot),selected=d.connectionIds.includes(snapshot.selectedId??''),name=destinationName(snapshot,d.destination),flowNames=flowNamesFor(snapshot,d.connectionIds).slice(0,8),locale=snapshot.document.preferences.locale,nw=destinationNameWords[locale],fw=flowNameWords[locale];
         return <div key={d.key} className="tg-route-row"><button className={`tg-route-summary ${selected?'selected':''}`} onClick={()=>selectDestination(d)} aria-pressed={selected} aria-label={`${t(d.direction==='inbound'?'inbound':d.direction==='outbound'?'outbound':'unknownDirection')} · ${d.protocol} · ${d.port} · ${d.connectionIds.length} ${w.connections}`} title={`${t(d.direction==='inbound'?'inbound':d.direction==='outbound'?'outbound':'unknownDirection')} · ${d.connectionIds.length} ${w.connections}`}>
           <span><DirectionIcon direction={d.direction}/><strong>{d.protocol}</strong><span>:{d.port}</span></span><span className="tg-route-count"><b>{d.connectionIds.length}</b><small>{w.connections}</small></span>
           </button><button className={`tg-endpoint ${selected?'selected':''}`} data-intent={d.intent} data-receipt={receipt} aria-pressed={selected} onClick={()=>selectDestination(d)}>
           <span className="tg-target-port" aria-hidden="true"/>
-          <span className="tg-target-top"><span className="tg-scope-icon" data-scope={d.klass} title={t(classLabels[d.klass])}><Icon size={22} aria-hidden="true"/></span><span className="tg-address" title={d.destination}>{d.destination}</span><strong className="tg-port">{d.port}</strong></span>
+          <span className="tg-target-top"><span className="tg-scope-icon" data-scope={d.klass} title={t(classLabels[d.klass])}><Icon size={22} aria-hidden="true"/></span><span className="tg-address-stack"><span className="tg-address" title={d.destination}>{d.destination}</span>{name?.value&&<span className="tg-domain" title={`${nw.resolver} · ${nw.unverified}${name.stale?` · ${nw.stale}`:''} · ${nw.time}: ${new Date(name.observedAt*1000).toLocaleString(locale)}`}><span aria-hidden="true">↳ </span>{name.value}<span className="sr-only"> · {nw.resolver} · {nw.unverified}{name.stale?` · ${nw.stale}`:''}</span></span>}{flowNames.map((flow,i)=><span className="tg-domain" key={`${flow.value}-${i}`} title={`${fw.source} · ${fw.unverified} · ${fw.time}: ${new Date(flow.observedAt*1000).toLocaleString(locale)}`}><span aria-hidden="true">↳ </span>{flow.value}<span className="sr-only"> · {fw.source} · {fw.unverified}</span></span>)}</span><strong className="tg-port">{d.port}</strong></span>
           <span className="tg-protocol"><span>{d.protocol}</span><DirectionIcon direction={d.direction}/><span>{t(d.direction==='inbound'?'inbound':d.direction==='outbound'?'outbound':'unknownDirection')}</span><span className="tg-scope-label" data-scope={d.klass} title={w.scope}>{t(classLabels[d.klass])}</span><span className="tg-socket-count">×{d.connectionIds.length}</span></span>
-          <DestinationNameEvidence row={destinationName(snapshot,d.destination)} locale={snapshot.document.preferences.locale}/><FlowNameEvidence snapshot={snapshot} ids={d.connectionIds}/>
+          <DestinationNameEvidence row={name&&!name.value?name:undefined} locale={locale}/>
           <span className="tg-status-row"><span className="tg-intent-status"><small>{w.intent}</small><strong className={`tg-intent-${d.intent}`}>{d.intent==='none'?<Minus size={20}/>:<ActionIcon action={d.intent} size={20}/>} {d.intent==='none'?w.noRule:t(d.intent)}</strong></span><span className="tg-receipt-status"><small>{w.receipt}</small><span>{receipt==='confirmed'?<Check size={15}/>:receipt==='protected'?<ShieldCheck size={15}/>:<CircleHelp size={15}/>} {w[receipt]}</span></span></span>
         </button></div>;
       })}

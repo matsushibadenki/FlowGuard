@@ -30,6 +30,7 @@ mod observer;
 mod port_layout;
 mod ports;
 mod public_network;
+mod rdap;
 mod renderer;
 pub mod routers;
 mod security;
@@ -827,6 +828,45 @@ async fn query_lan_public(app: tauri::AppHandle, expected: u64) -> Result<Snapsh
     Ok(snapshot)
 }
 #[tauri::command]
+async fn query_rdap(app: tauri::AppHandle, query: String) -> Result<Snapshot, String> {
+    let query = rdap::validate(&query)?.0;
+    let state = app.state::<SharedState>();
+    let op = {
+        let mut s = state.inner.lock().map_err(|_| "state_lock")?;
+        if s.rdap.busy {
+            return Err("query_busy".into());
+        }
+        s.rdap.operation += 1;
+        s.rdap.busy = true;
+        s.rdap.query = query.clone();
+        s.rdap.fields.clear();
+        s.rdap.source.clear();
+        s.rdap.error = None;
+        s.revision += 1;
+        s.rdap.operation
+    };
+    let initial = app.state::<SharedState>().snapshot()?;
+    let _ = app.emit("state-changed", initial);
+    let result = rdap::fetch(&query).await;
+    {
+        let mut s = state.inner.lock().map_err(|_| "state_lock")?;
+        if s.rdap.operation == op {
+            s.rdap.busy = false;
+            match result {
+                Ok((source, fields)) => {
+                    s.rdap.source = source;
+                    s.rdap.fields = fields
+                }
+                Err(e) => s.rdap.error = Some(e),
+            }
+            s.revision += 1;
+        }
+    }
+    let snapshot = app.state::<SharedState>().snapshot()?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
+#[tauri::command]
 fn stop_lan_discovery(app: tauri::AppHandle) -> Result<Snapshot, String> {
     let snapshot = app.state::<SharedState>().stop_discovery()?;
     let _ = app.emit("state-changed", &snapshot);
@@ -1464,6 +1504,7 @@ pub fn run() {
             configure_lan_public,
             get_lan_archive,
             query_lan_public,
+            query_rdap,
             stop_lan_discovery,
             extension_package_status,
             extension_bridge_status,

@@ -15,6 +15,7 @@ pub struct Session {
     pub flow_names: crate::flow_names::Machine,
     pub gpu_filter: crate::gpu_filter::Filter,
     diagnostics: crate::diagnostics::Snapshot,
+    pub rdap: crate::rdap::Snapshot,
     destination_names: crate::destination_names::Machine,
     firewall_control: crate::firewall_control::Machine,
     syslog: crate::syslog::Machine,
@@ -332,6 +333,7 @@ impl SharedState {
                 "network",
                 "servers",
                 "diagnostics",
+                "whois",
             ]
             .contains(&p.view.as_str())
             || !["demo", "live"].contains(&p.mode.as_str())
@@ -357,6 +359,7 @@ impl SharedState {
                 flow_names: Default::default(),
                 gpu_filter: Default::default(),
                 diagnostics: Default::default(),
+                rdap: Default::default(),
                 destination_names: Default::default(),
                 firewall_control: Default::default(),
                 syslog: Default::default(),
@@ -528,6 +531,7 @@ impl SharedState {
                     "network",
                     "servers",
                     "diagnostics",
+                    "whois",
                 ]
                 .contains(&view.as_str())
                 {
@@ -1853,6 +1857,7 @@ impl Session {
             flow_names: self.flow_name_snapshot(),
             gpu_filter: self.gpu_filter.clone(),
             diagnostics: self.diagnostics.for_ui(),
+            rdap: self.rdap.clone(),
             destination_names: self.destination_names.snapshot(),
             firewall_control: self.firewall_control.snapshot.clone(),
             syslog: self.syslog.snapshot.clone(),
@@ -2934,6 +2939,7 @@ mod tests {
             response: None,
             tls: None,
             tls_details: None,
+            http_headers: None,
             observed_at: 0,
         });
         assert!(state
@@ -2956,6 +2962,7 @@ mod tests {
             response: None,
             tls: None,
             tls_details: None,
+            http_headers: None,
             observed_at: 0,
         });
         complete.completed = 1;
@@ -3116,6 +3123,7 @@ mod tests {
                 response: None,
                 tls: None,
                 tls_details: None,
+                http_headers: None,
                 observed_at: 1,
             }];
         }
