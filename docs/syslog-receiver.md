@@ -44,3 +44,15 @@ IPv6、TLSによる相手認証、octet-counting、暗号化保存／保持期�
 ## 参照
 
 [Syslog形式のRFC 5424](https://www.rfc-editor.org/rfc/rfc5424.html)と[TCPフレーミングのRFC 6587](https://www.rfc-editor.org/rfc/rfc6587.html)を参照。標準が定義する全機能と、この実装の限定した受信範囲は区別する。
+
+## 2026-10-27 — CSVと申告レベル分布
+
+🟢 [Done] 停止後の全保持記録をCSV出力する。検索・レベル絞り込みとは独立し、保持上限で既に破棄された本文は含めない。Rustの共有状態をロックして同じ操作番号・停止／期限／上限／失敗／ネットワーク変更の終了状態・非空を確認し、整合したSnapshotから生成する。読取りのみで結果や文書を変更しない。UIの保存は既存downloadEvidenceを利用する。
+
+26列: operation, stage, error, bound_endpoint, configured_sender, transport, id, received_at_unix, observed_peer, priority_reported, facility_reported, severity_reported, trust, sanitized, message, accepted, evicted, rejected_source, invalid, oversized, rate_dropped, incomplete, bytes_read_lower_bound, frames, connections, network_loss。最後は常にunknown。時刻は送信側時刻ではなくMacの受信時刻。件数はセッション全体、本文は保持中のみ。BOM・CRLF・全セル引用符・引用符二重化・数式開始文字の無害化を適用する。送信元や本文の認証を意味しない。
+
+保持中の全記録のpriority % 8を8本の棒で表示する。棒のクリックでレベル絞り込み、同じ棒の再クリックで解除。検索条件によって分布は変えない。各棒にレベルと件数を表示し、ARIAラベル・押下状態・キーボードフォーカスを備える。狭幅は4列、通常は8列、reduced motionで高さの遷移を停止する。診断上の危険度やネットワーク全体のログ量として扱わない。
+
+🟢 [Done] 別IDのdebug Tauri・日本語1440×960で127.0.0.1:5514のUDP受信を手動開始し、ループバックから5件を送信。レベル5の棒で2／5件に絞り込み、再クリックで5／5へ復帰。受信中はCSV無効、停止後に絞り込み中の全保持記録CSVを保存。保存ファイルの5件・26列・BOM／CRLF・未検証状態・数式／引用符処理を照合。受信は停止済み。
+
+⭕️ [Pending] 署名済み配布版、管理対象の実LAN機器、OSの保存拒否、実Tauriの他言語・画面幅。

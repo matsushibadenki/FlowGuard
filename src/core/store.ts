@@ -176,3 +176,7 @@ export async function positionPortDetails(panel:import('./port-panel').PortPanel
 export async function editServiceNote(operation:number,command:import('./service-notes').ServiceNoteEdit){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('edit_service_note',{operation,command}));}
 
 export async function positionServiceDetails(panel:import('./port-panel').PortPanel){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('position_service_details',{panel}));}
+
+export async function resizeEvidencePanel(kind:import('./evidence-docking').EvidenceKind,width:number,expected:number){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('resize_evidence_panel',{kind,width,expected}));}
+
+export async function syslogCsv(operation:number):Promise<string>{if(!native)throw Error("desktop_required");return invoke<string>("syslog_csv",{operation});}

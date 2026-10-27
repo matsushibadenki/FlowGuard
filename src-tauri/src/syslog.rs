@@ -61,6 +61,62 @@ pub struct Snapshot {
     pub selected_id: Option<u64>,
     pub error: Option<String>,
 }
+/// Export one immutable, completed receiver snapshot; filters never remove evidence.
+pub fn csv(s: &Snapshot, operation: u64) -> Result<String, String> {
+    if operation == 0
+        || operation != s.operation
+        || !["stopped", "expired", "limit", "failed", "network_changed"].contains(&s.stage.as_str())
+        || s.rows.is_empty()
+    {
+        return Err("stale_or_unfinished_syslog".into());
+    }
+    let mut out = String::from("\u{feff}operation,stage,error,bound_endpoint,configured_sender,transport,id,received_at_unix,observed_peer,priority_reported,facility_reported,severity_reported,trust,sanitized,message,accepted,evicted,rejected_source,invalid,oversized,rate_dropped,incomplete,bytes_read_lower_bound,frames,connections,network_loss\r\n");
+    for row in &s.rows {
+        let cells = vec![
+            s.operation.to_string(),
+            s.stage.clone(),
+            s.error.clone().unwrap_or_default(),
+            s.bound_endpoint.clone().unwrap_or_default(),
+            s.config
+                .as_ref()
+                .map(|c| c.source_address.to_string())
+                .unwrap_or_default(),
+            s.config
+                .as_ref()
+                .map(|c| c.transport.clone())
+                .unwrap_or_default(),
+            row.id.to_string(),
+            row.received_at.to_string(),
+            row.peer.clone(),
+            row.priority.to_string(),
+            (row.priority / 8).to_string(),
+            (row.priority % 8).to_string(),
+            row.trust.clone(),
+            row.sanitized.to_string(),
+            row.text.clone(),
+            s.counts.accepted.to_string(),
+            s.counts.evicted.to_string(),
+            s.counts.rejected_source.to_string(),
+            s.counts.invalid.to_string(),
+            s.counts.oversized.to_string(),
+            s.counts.rate_dropped.to_string(),
+            s.counts.incomplete.to_string(),
+            s.counts.bytes_read.to_string(),
+            s.counts.frames.to_string(),
+            s.counts.connections.to_string(),
+            "unknown".into(),
+        ];
+        out.push_str(
+            &cells
+                .iter()
+                .map(|v| crate::inventory::cell(v))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        out.push_str("\r\n");
+    }
+    Ok(out)
+}
 #[derive(Clone)]
 pub struct Ticket {
     pub operation: u64,
@@ -511,6 +567,38 @@ pub fn run(ticket: Ticket, mut publish: impl FnMut(Snapshot)) {
 }
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn csv_is_completed_generation_bound_and_preserves_untrusted_context() {
+        let mut s = super::Snapshot {
+            operation: 7,
+            stage: "stopped".into(),
+            rows: vec![super::Row {
+                id: 1,
+                received_at: 123,
+                peer: "127.0.0.1:12".into(),
+                priority: 13,
+                text: " =SUM(1),\"外部\"\nnext".into(),
+                sanitized: true,
+                trust: "unverified_source_and_content".into(),
+            }],
+            ..Default::default()
+        };
+        s.counts.evicted = 3;
+        let out = super::csv(&s, 7).unwrap();
+        assert!(out.starts_with('\u{feff}'));
+        assert!(out.contains("\"' =SUM(1),\"\"外部\"\"\nnext\""));
+        assert!(out.contains("\"13\",\"1\",\"5\",\"unverified_source_and_content\",\"true\""));
+        assert!(out.ends_with("\"unknown\"\r\n"));
+        assert!(super::csv(&s, 6).is_err());
+        for stage in ["", "starting", "listening", "stopping"] {
+            s.stage = stage.into();
+            assert!(super::csv(&s, 7).is_err());
+        }
+        s.stage = "stopped".into();
+        s.rows.clear();
+        assert!(super::csv(&s, 7).is_err());
+    }
+
     use super::*;
     pub fn config() -> Config {
         Config {

@@ -9,11 +9,36 @@ pub struct Finding {
     pub severity: String,
     pub certainty: String,
     pub evidence: String,
+    pub evidence_source: String,
+    pub impact: String,
     pub recommendation: String,
     pub observed_at: u64,
     pub change: String,
     pub disposition: Disposition,
     pub reason: String,
+}
+fn source_for(category: &str) -> &'static str {
+    match category {
+        "service" | "management_reachability" => "service_observation",
+        "tls" => "tls_verification",
+        "certificate_expiry" => "certificate_metadata",
+        "http_headers" => "headers_not_collected",
+        _ => "unknown_source",
+    }
+}
+fn impact_for(category: &str, severity: &str, certainty: &str) -> &'static str {
+    match (category, severity, certainty) {
+        ("service", _, "observed") => "service_scope_review",
+        ("service", _, _) => "service_unverified",
+        ("tls", _, "observed") => "tls_scope_limited",
+        ("tls", _, _) => "tls_unverified_impact",
+        ("certificate_expiry", _, "not_performed") => "expiry_unknown",
+        ("certificate_expiry", "warning", _) => "expiry_attention",
+        ("certificate_expiry", _, _) => "expiry_observed",
+        ("http_headers", _, _) => "headers_unknown",
+        ("management_reachability", _, _) => "management_scope_review",
+        _ => "impact_unknown",
+    }
 }
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -24,6 +49,56 @@ pub enum Disposition {
     Recheck,
     OutOfScope,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComparisonScope {
+    target: String,
+    source: String,
+    interface: String,
+    netmask: String,
+    family: String,
+    generation: u64,
+    ports: Vec<u16>,
+    mode: String,
+    hostname: Option<String>,
+}
+impl ComparisonScope {
+    fn from_job(s: &crate::services::Snapshot) -> Option<Self> {
+        if s.target.is_empty()
+            || s.source_address.is_empty()
+            || s.interface.is_empty()
+            || s.source_netmask.is_empty()
+            || s.family.is_empty()
+            || s.generation == 0
+            || !["auto", "http", "https", "ssh", "smtp"].contains(&s.mode.as_str())
+            || s.total == 0
+            || s.total != s.completed
+            || s.total != s.rows.len()
+            || s.requested_ports.len() != s.total
+        {
+            return None;
+        }
+        let mut ports = s.requested_ports.clone();
+        ports.sort_unstable();
+        if ports.windows(2).any(|w| w[0] == w[1])
+            || ports
+                .iter()
+                .any(|port| s.rows.iter().filter(|r| r.port == *port).count() != 1)
+        {
+            return None;
+        }
+        Some(Self {
+            target: s.target.clone(),
+            source: s.source_address.clone(),
+            interface: s.interface.clone(),
+            netmask: s.source_netmask.clone(),
+            family: s.family.clone(),
+            generation: s.generation,
+            ports,
+            mode: s.mode.clone(),
+            hostname: s.hostname.clone(),
+        })
+    }
+}
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
@@ -33,6 +108,9 @@ pub struct Report {
     pub target: String,
     pub interface: String,
     pub created_at: u64,
+    pub baseline_report: Option<u64>,
+    #[serde(skip)]
+    pub comparison_scope: Option<ComparisonScope>,
     pub findings: Vec<Finding>,
 }
 #[derive(Clone, Default, Debug, Serialize)]
@@ -55,6 +133,8 @@ impl Snapshot {
                     target: r.target.clone(),
                     interface: r.interface.clone(),
                     created_at: r.created_at,
+                    baseline_report: r.baseline_report,
+                    comparison_scope: None,
                     findings: if Some(r.id) == self.selected_report {
                         r.findings.clone()
                     } else {
@@ -90,6 +170,8 @@ impl Snapshot {
                     severity: severity.into(),
                     certainty: certainty.into(),
                     evidence,
+                    evidence_source: source_for(category).into(),
+                    impact: impact_for(category, severity, certainty).into(),
                     recommendation: recommendation.into(),
                     observed_at: row.observed_at,
                     change: "uncompared".into(),
@@ -176,14 +258,30 @@ impl Snapshot {
                 );
             }
         }
-        if let Some(previous) = self.reports.iter().find(|r| {
-            r.target == s.target && r.interface == s.interface && r.generation == s.generation
-        }) {
+        let comparison_scope = ComparisonScope::from_job(s);
+        let previous = comparison_scope.as_ref().and_then(|scope| {
+            self.reports
+                .iter()
+                .find(|r| r.comparison_scope.as_ref() == Some(scope))
+        });
+        let baseline_report = previous.map(|r| r.id);
+        if let Some(previous) = previous {
             for f in &mut findings {
                 f.change = match previous.findings.iter().find(|p| p.id == f.id) {
-                    Some(p) if p.evidence == f.evidence => "unchanged",
+                    Some(p) if p.certainty != "observed" || f.certainty != "observed" => {
+                        "uncertain"
+                    }
+                    Some(p)
+                        if p.evidence == f.evidence
+                            && p.severity == f.severity
+                            && p.impact == f.impact
+                            && p.evidence_source == f.evidence_source =>
+                    {
+                        "unchanged"
+                    }
                     Some(_) => "changed",
-                    None => "new",
+                    None if f.certainty == "observed" => "new",
+                    None => "uncertain",
                 }
                 .into();
             }
@@ -197,6 +295,8 @@ impl Snapshot {
                 target: s.target.clone(),
                 interface: s.interface.clone(),
                 created_at: now,
+                baseline_report,
+                comparison_scope,
                 findings,
             },
         );
@@ -252,12 +352,7 @@ impl Snapshot {
     }
 }
 fn csv_cell(s: &str) -> String {
-    let protected = if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
-        format!("'{s}")
-    } else {
-        s.into()
-    };
-    format!("\"{}\"", protected.replace('"', "\"\""))
+    crate::inventory::cell(s)
 }
 fn html(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -286,6 +381,9 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
         "change",
         "disposition",
         "reason",
+        "evidence_source",
+        "impact",
+        "baseline_report",
     ];
     let rows: Vec<Vec<String>> = r
         .findings
@@ -310,6 +408,11 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
                     .unwrap()
                     .into(),
                 f.reason.clone(),
+                f.evidence_source.clone(),
+                f.impact.clone(),
+                r.baseline_report
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
             ]
         })
         .collect();
@@ -334,8 +437,8 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
         return Err("invalid_report_format".into());
     }
     let (lang,title,help,labels) = match locale {
-        "ja" => ("ja","FlowGuard 観測レポート","既存の観測根拠を読み取り専用で評価。未検証・未実施は安全の証明ではありません。セッション内最大20件、ポリシーの自動変更なし。CSVは共通の機械可読コードを使用します。",["対象","インターフェース","レポート","サービス操作","ポート","分類","重要度","確かさ","観測根拠","推奨対応コード","確認時刻（Unix秒）","差分","対応状況","理由"]),
-        "zh-CN" => ("zh-CN","FlowGuard 观测报告","只读评估已有观测依据。未验证或未执行不代表安全。会话最多20条，不自动更改策略。CSV使用通用机器可读代码。",["目标","接口","报告","服务操作","端口","分类","严重程度","确定性","观测依据","建议代码","确认时间（Unix秒）","差异","处理状态","原因"]),
+        "ja" => ("ja","FlowGuard 観測レポート","既存の観測根拠を読み取り専用で評価。未検証・未実施は安全の証明ではありません。セッション内最大20件、ポリシーの自動変更なし。CSVは共通の機械可読コードを使用します。",["対象","インターフェース","レポート","サービス操作","ポート","分類","重要度","確かさ","観測根拠","推奨対応コード","確認時刻（Unix秒）","差分","対応状況","理由","根拠の取得元コード","影響コード","比較元レポート"]),
+        "zh-CN" => ("zh-CN","FlowGuard 观测报告","只读评估已有观测依据。未验证或未执行不代表安全。会话最多20条，不自动更改策略。CSV使用通用机器可读代码。",["目标","接口","报告","服务操作","端口","分类","严重程度","确定性","观测依据","建议代码","确认时间（Unix秒）","差异","处理状态","原因","证据来源代码","影响代码","基准报告"]),
         _ => ("en","FlowGuard observations","Read-only evidence assessment. Unverified and not-performed checks are not proof of safety. Maximum 20 session reports; no automatic policy changes. CSV uses stable machine-readable codes.",headers),
     };
     Ok(format!("<!doctype html><html lang=\"{lang}\"><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>{title}</title><style>body{{font:14px system-ui;padding:16px}}td,th{{border:1px solid #888;padding:8px;overflow-wrap:anywhere}}table{{border-collapse:collapse}}</style><h1>{title}</h1><p>{help}</p><table><thead><tr>{}</tr></thead><tbody>{}</tbody></table></html>",labels.iter().map(|h|format!("<th>{}</th>",html(h))).collect::<String>(),rows.iter().map(|row|format!("<tr>{}</tr>",row.iter().map(|s|format!("<td>{}</td>",html(s))).collect::<String>())).collect::<String>()))
@@ -343,6 +446,133 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn source_and_impact_keep_unperformed_and_unverified_distinct() {
+        assert_eq!(source_for("http_headers"), "headers_not_collected");
+        assert_eq!(
+            impact_for("http_headers", "info", "not_performed"),
+            "headers_unknown"
+        );
+        assert_eq!(
+            impact_for("tls", "warning", "unverified"),
+            "tls_unverified_impact"
+        );
+        assert_eq!(impact_for("tls", "info", "observed"), "tls_scope_limited");
+        assert_eq!(
+            impact_for("certificate_expiry", "info", "not_performed"),
+            "expiry_unknown"
+        );
+        assert_eq!(
+            impact_for("certificate_expiry", "warning", "observed"),
+            "expiry_attention"
+        );
+        assert_eq!(
+            impact_for("future", "warning", "observed"),
+            "impact_unknown"
+        );
+    }
+    #[test]
+    fn comparison_requires_same_complete_scope_and_never_claims_unknown_unchanged() {
+        let mut state = Snapshot::default();
+        let mut job = crate::services::Snapshot {
+            operation: 1,
+            stage: "completed".into(),
+            target: "192.168.1.1".into(),
+            source_address: "192.168.1.2".into(),
+            source_netmask: "255.255.255.0".into(),
+            interface: "en0".into(),
+            family: "IPv4".into(),
+            generation: 1,
+            mode: "http".into(),
+            requested_ports: vec![80],
+            total: 1,
+            completed: 1,
+            rows: vec![crate::services::Row {
+                port: 80,
+                candidate: "http".into(),
+                service: Some("HTTP".into()),
+                status: "confirmed".into(),
+                method: "http".into(),
+                product: None,
+                response: None,
+                tls: None,
+                tls_details: None,
+                observed_at: 1,
+            }],
+            ..Default::default()
+        };
+        state.assess(&job, 10).unwrap();
+        job.operation = 2;
+        state.assess(&job, 11).unwrap();
+        let r = &state.reports[0];
+        assert_eq!(r.baseline_report, Some(1));
+        assert!(export(r, "csv").unwrap().contains("baseline_report"));
+        assert!(export_locale(r, "html", "ja")
+            .unwrap()
+            .contains("比較元レポート"));
+        assert_eq!(
+            r.findings
+                .iter()
+                .find(|f| f.category == "service")
+                .unwrap()
+                .change,
+            "unchanged"
+        );
+        assert_eq!(
+            r.findings
+                .iter()
+                .find(|f| f.category == "http_headers")
+                .unwrap()
+                .change,
+            "uncertain"
+        );
+        for mutate in [0, 1, 2, 3, 4, 5, 6, 7, 8] {
+            let mut changed = job.clone();
+            match mutate {
+                0 => changed.mode = "https".into(),
+                1 => changed.source_address = "192.168.1.3".into(),
+                2 => changed.source_netmask = "255.255.0.0".into(),
+                3 => changed.interface = "en1".into(),
+                4 => changed.generation = 2,
+                5 => changed.hostname = Some("example.com".into()),
+                6 => changed.target = "192.168.1.4".into(),
+                7 => changed.family = "IPv6".into(),
+                _ => {
+                    changed.requested_ports = vec![81];
+                    changed.rows[0].port = 81;
+                }
+            }
+            let scope = ComparisonScope::from_job(&changed).unwrap();
+            assert_ne!(Some(scope), state.reports[0].comparison_scope);
+        }
+        let mut different = job.clone();
+        different.mode = "https".into();
+        state.assess(&different, 12).unwrap();
+        assert_eq!(state.reports[0].baseline_report, None);
+        assert!(state.reports[0]
+            .findings
+            .iter()
+            .all(|f| f.change == "uncompared"));
+        job.rows[0].status = "timeout".into();
+        job.rows[0].service = None;
+        state.assess(&job, 13).unwrap();
+        assert_eq!(
+            state.reports[0]
+                .findings
+                .iter()
+                .find(|f| f.category == "service")
+                .unwrap()
+                .change,
+            "uncertain"
+        );
+        job.completed = 0;
+        state.assess(&job, 14).unwrap();
+        assert_eq!(state.reports[0].baseline_report, None);
+        assert!(state.reports[0]
+            .findings
+            .iter()
+            .all(|f| f.change == "uncompared"));
+    }
     #[test]
     fn unperformed_is_never_safe_and_reports_are_bounded() {
         let mut s = Snapshot::default();
@@ -371,7 +601,7 @@ mod tests {
         let r = &s.reports[0];
         assert!(r.findings.iter().all(|f| f.certainty != "safe"));
         assert!(r.findings.iter().any(|f| f.certainty == "not_performed"));
-        assert!(r.findings.iter().all(|f| f.change == "unchanged"));
+        assert!(r.findings.iter().all(|f| f.change == "uncompared"));
         job.stage = "cancelled".into();
         assert!(s.assess(&job, 2).is_err());
     }
@@ -385,12 +615,16 @@ mod tests {
             target: "<script>x</script>".into(),
             interface: "en0".into(),
             created_at: 0,
+            baseline_report: None,
+            comparison_scope: None,
             findings: vec![Finding {
                 id: "f".into(),
                 port: 1,
                 category: "service".into(),
                 severity: "info".into(),
                 certainty: "unverified".into(),
+                evidence_source: "service_observation".into(),
+                impact: "service_unverified".into(),
                 evidence: "=SUM(1)".into(),
                 recommendation: "review".into(),
                 observed_at: 0,
@@ -405,7 +639,12 @@ mod tests {
         assert!(export(&s.reports[0], "html")
             .unwrap()
             .contains("&lt;script&gt;"));
-        assert!(export(&s.reports[0], "csv").unwrap().contains("'=SUM"));
+        let csv = export(&s.reports[0], "csv").unwrap();
+        assert!(csv.contains("'=SUM"));
+        assert!(csv.contains("evidence_source"));
+        assert!(csv.contains("service_observation"));
+        assert!(csv.contains("service_unverified"));
+        assert_eq!(csv_cell("  =SUM(1)"), "\"'  =SUM(1)\"");
         for (locale, title) in [
             ("ja", "観測レポート"),
             ("en", "observations"),

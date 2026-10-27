@@ -1,14 +1,17 @@
 import {useMemo,useState} from 'react';
-import {Info,Play,Square,Trash2} from 'lucide-react';
+import {Info,Play,Square,Trash2,Download} from 'lucide-react';
 import type {Snapshot,SyslogConfig} from '../core/types';
-import {startSyslog,stopSyslog,clearSyslog,selectSyslog} from '../core/store';
-import {emptySyslog,syslogBusy,syslogRows,validSyslogConfig,privateIPv4} from '../core/syslog';
+import {startSyslog,stopSyslog,clearSyslog,selectSyslog,syslogCsv} from '../core/store';
+import {emptySyslog,syslogBusy,syslogRows,validSyslogConfig,privateIPv4,syslogLevels} from '../core/syslog';
+import {downloadEvidence} from '../core/evidence-sheet';
+import './SyslogReceiver.css';
 import {syslogWords} from '../core/syslog-i18n';
 export function SyslogReceiver({snapshot,native}:{snapshot:Snapshot;native:boolean}){
  const w=syslogWords[snapshot.document.preferences.locale],job=snapshot.syslog??emptySyslog;
  const [bind,setBind]=useState(''),[source,setSource]=useState(''),[port,setPort]=useState('5514'),[transport,setTransport]=useState<SyslogConfig['transport']>('udp'),[duration,setDuration]=useState('300'),[ack,setAck]=useState(false),[search,setSearch]=useState(''),[severity,setSeverity]=useState('all'),[limit,setLimit]=useState(50),[pending,setPending]=useState(false),[error,setError]=useState(false);
  const addresses=snapshot.network.addresses.filter(a=>a.up&&a.family==='IPv4'&&privateIPv4(a.address));
  const busy=syslogBusy(job.stage);
+ const levels=useMemo(()=>syslogLevels(job),[job.rows]),peak=Math.max(1,...levels);
  const draft:SyslogConfig={bindAddress:bind||addresses[0]?.address||'',port:Number(port),sourceAddress:source,transport,durationSeconds:Number(duration),acknowledgeUnverified:ack};
  const config=busy&&job.config?job.config:draft;
  const installing=snapshot.updates.stage==='installing',valid=validSyslogConfig(config);
@@ -24,7 +27,8 @@ export function SyslogReceiver({snapshot,native}:{snapshot:Snapshot;native:boole
  <div className="button-row"><button className="secondary-button" disabled={!native||!valid||busy||pending||installing} onClick={()=>void action(()=>startSyslog(config))}><Play size={16}/>{w.start}</button><button className="secondary-button" disabled={!native||!busy||job.stage==='stopping'||pending} onClick={()=>void action(()=>stopSyslog(job.operation))}><Square size={16}/>{w.stop}</button><button className="icon-button" aria-label={w.clear} title={w.clear} disabled={!native||busy||pending||!job.rows.length} onClick={()=>void action(()=>clearSyslog(job.operation))}><Trash2 size={17}/></button><strong role="status">{stage}</strong></div>
  {error&&<p role="alert">{w.error}</p>}{job.error&&<p role="alert">{w[job.error as 'bind_failed']??w.error}</p>}{source&&ack&&!valid&&!busy&&<p role="alert">{w.invalid}</p>}<p className="port-request">{w.operation}: #{job.operation} · {job.boundEndpoint??'—'}{job.config&&<> ← {job.config.sourceAddress} · {job.config.transport==='udp'?'UDP':w.tcp}</>}</p>
  <dl className="syslog-counts">{(['accepted','rejectedSource','invalid','oversized','rateDropped','evicted','incomplete','bytesRead'] as const).map(key=><div key={key}><dt>{w[key==='invalid'?'invalidCount':key]}</dt><dd>{job.counts[key]}</dd></div>)}</dl><p className="helper">{w.loss}</p>
- <div className="port-filters"><label><span className="sr-only">{w.search}</span><input placeholder={w.search} value={search} onChange={e=>{setSearch(e.target.value);setLimit(50);}}/></label><label>{w.severity}<select value={severity} onChange={e=>{setSeverity(e.target.value);setLimit(50);}}><option value="all">{w.all}</option>{[0,1,2,3,4,5,6,7].map(n=><option key={n} value={n}>{n}</option>)}</select></label><span>{rows.length} / {job.rows.length}</span></div>
+ <div className="port-filters"><label><span className="sr-only">{w.search}</span><input placeholder={w.search} value={search} onChange={e=>{setSearch(e.target.value);setLimit(50);}}/></label><label>{w.severity}<select value={severity} onChange={e=>{setSeverity(e.target.value);setLimit(50);}}><option value="all">{w.all}</option>{[0,1,2,3,4,5,6,7].map(n=><option key={n} value={n}>{n}</option>)}</select></label><button className="secondary-button" title={w.exportHelp} disabled={!native||busy||pending||!job.rows.length||!job.operation} onClick={()=>void action(async()=>downloadEvidence(await syslogCsv(job.operation),`flowguard-syslog-${job.operation}.csv`))}><Download size={16}/>{w.export}</button><span>{rows.length} / {job.rows.length}</span></div>
+ <p className="syslog-distribution-label">{w.distribution}</p><div className="syslog-levels" role="group" aria-label={w.distribution}>{levels.map((count,n)=><button key={n} className="syslog-level" aria-pressed={severity===String(n)} aria-label={`${w.severity} ${n}: ${count}`} title={`${w.severity} ${n}: ${count}`} onClick={()=>{setSeverity(current=>current===String(n)?'all':String(n));setLimit(50);}}><span className="syslog-level-track" aria-hidden="true"><span style={{height:`${count/peak*100}%`}}/></span><span>{n}</span><strong>{count}</strong></button>)}</div>
  {!rows.length?<p>{w.empty}</p>:<div className="table-scroll"><table><thead><tr>{[w.time,w.peer,w.severity,w.message,w.select].map(label=><th key={label}>{label}</th>)}</tr></thead><tbody>{rows.slice(0,limit).map(row=><tr key={row.id} aria-selected={row.id===job.selectedId}><td>{new Date(row.receivedAt*1000).toLocaleString(snapshot.document.preferences.locale)}</td><td>{row.peer}</td><td>{row.priority%8} · PRI {row.priority}</td><td className="syslog-preview">{row.text.slice(0,160)}{row.text.length>160?'…':''}</td><td><button className="secondary-button" disabled={!native||pending} aria-label={`${w.select}: ${row.id}`} onClick={()=>void action(()=>selectSyslog(job.operation,row.id))}>{w.select}</button></td></tr>)}</tbody></table></div>}
  {rows.length>limit&&<button className="text-button" onClick={()=>setLimit(n=>n+50)}>{w.more}</button>}
  {detail&&<section className="syslog-detail"><h3>{w.message} · #{detail.id}</h3><p>{w.untrusted}{detail.sanitized&&` · ${w.sanitized}`}</p><pre>{detail.text}</pre></section>}

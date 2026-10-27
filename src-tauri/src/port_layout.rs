@@ -11,6 +11,34 @@ pub enum Panel {
     Floating,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EvidenceKind {
+    Ports,
+    Services,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Geometry {
+    pub width: u16,
+}
+impl Default for Geometry {
+    fn default() -> Self {
+        Self { width: 380 }
+    }
+}
+impl Geometry {
+    pub fn resize(&mut self, width: u16, expected: u16) -> Result<(), String> {
+        if !(280..=600).contains(&width) {
+            return Err("invalid_evidence_width".into());
+        }
+        if self.width != expected {
+            return Err("evidence_width_conflict".into());
+        }
+        self.width = width;
+        Ok(())
+    }
+}
+
 pub const COLUMNS: [&str; 8] = [
     "target", "port", "change", "status", "previous", "duration", "time", "inspect",
 ];
@@ -72,6 +100,23 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn evidence_width_is_bounded_and_stale_edits_never_overwrite() {
+        let mut value = Geometry::default();
+        assert_eq!(value.width, 380);
+        for width in [0, 279, 601, u16::MAX] {
+            assert!(value.resize(width, 380).is_err());
+            assert_eq!(value.width, 380);
+        }
+        value.resize(600, 380).unwrap();
+        assert_eq!(
+            value.resize(280, 380).unwrap_err(),
+            "evidence_width_conflict"
+        );
+        assert_eq!(value.width, 600);
+        value.resize(280, 600).unwrap();
+        assert!(serde_json::from_str::<EvidenceKind>("\"other\"").is_err());
+    }
     #[test]
     fn bounded_canonical_columns_keep_result_and_selection_available() {
         let layout = Layout::default();

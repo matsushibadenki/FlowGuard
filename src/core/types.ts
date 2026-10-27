@@ -17,7 +17,7 @@ export interface DiscoverySnapshot {metadata?:Record<string,import('./lan-sheet'
 export type PortPreset = 'common' | 'web' | 'admin' | 'range';
 export interface PortRow {port:number;status:string;elapsedMs:number;observedAt:number}
 export interface PortComparison {status:string;baselineOperation:number|null;rows:{port:number;kind:string;previous:PortRow|null}[]}
-export interface PortSnapshot {panel?:import('./port-panel').PortPanel;layout?:import('./port-layout').PortLayout;settings?:import('./port-settings').PortScanSettings;budgetMs?:number;selectedPort?:number|null;family:string;sourceNetmask:string;comparison:PortComparison;operation:number;sourceAddress:string;requestedPorts:number[];selection:PortPreset|'';stage:string;target:string;interface:string;generation:number;completed:number;total:number;rows:PortRow[];error:string|null}
+export interface PortSnapshot {panelGeometry?:{width:number};panel?:import('./port-panel').PortPanel;layout?:import('./port-layout').PortLayout;settings?:import('./port-settings').PortScanSettings;budgetMs?:number;selectedPort?:number|null;family:string;sourceNetmask:string;comparison:PortComparison;operation:number;sourceAddress:string;requestedPorts:number[];selection:PortPreset|'';stage:string;target:string;interface:string;generation:number;completed:number;total:number;rows:PortRow[];error:string|null}
 export interface FirewallControlSnapshot {operation:number;busy:boolean;service:string;enabled:boolean|null;error:string|null}
 export interface DestinationNameRow {address:string;value:string|null;source:'system_resolver';observedAt:number;status:string;stale:boolean;trust:'unverified_name'}
 export interface DestinationNamesSnapshot {enabled:boolean;operation:number;busy:boolean;cancelling:boolean;activeAddress:string|null;cooldownSeconds:number;rows:DestinationNameRow[]}
@@ -31,7 +31,7 @@ export interface TlsDetails {serverName:string;verification:string;reason:string
 export interface ServiceRow {tlsDetails?:TlsDetails|null;port:number;candidate:string;service:string|null;status:string;method:string;product:string|null;response:string|null;tls:string|null;observedAt:number}
 export interface ServiceChange {port:number;kind:'changed'|'unchanged'|'uncertain'|'uncompared';fields:string[];previous:ServiceRow|null}
 export interface ServiceComparison {status:string;baselineOperation:number|null;baselinePortOperation:number|null;rows:ServiceChange[]}
-export interface ServiceSnapshot {panel?:import('./port-panel').PortPanel;notes?:Record<string,import('./service-notes').ServiceNote>;comparison?:ServiceComparison;requestedPorts?:number[];sourceNetmask?:string;hostname?:string|null;operation:number;portOperation:number;generation:number;target:string;sourceAddress:string;interface:string;family:string;mode:string;stage:string;total:number;completed:number;rows:ServiceRow[];error:string|null;selectedPort:number|null}
+export interface ServiceSnapshot {panelGeometry?:{width:number};panel?:import('./port-panel').PortPanel;notes?:Record<string,import('./service-notes').ServiceNote>;comparison?:ServiceComparison;requestedPorts?:number[];sourceNetmask?:string;hostname?:string|null;operation:number;portOperation:number;generation:number;target:string;sourceAddress:string;interface:string;family:string;mode:string;stage:string;total:number;completed:number;rows:ServiceRow[];error:string|null;selectedPort:number|null}
 
 export interface UpdateSnapshot {channel?:'stable'|'beta';history?:{at:number;status:string;from:string;to:string|null}[];historyPersistent?:boolean;stage:string;operation:number;currentVersion:string;version:string|null;notes:string|null;checkedAt:number|null;downloaded:number;total:number|null;error:string|null;development:boolean}
 
@@ -55,8 +55,8 @@ export interface SyslogRow {id:number;receivedAt:number;peer:string;priority:num
 export interface SyslogSnapshot {operation:number;config:SyslogConfig|null;stage:string;boundEndpoint:string|null;counts:SyslogCounts;rows:SyslogRow[];selectedId:number|null;error:string|null}
 
 export type DiagnosticDisposition='open'|'resolved'|'recheck'|'out_of_scope';
-export interface DiagnosticFinding{id:string;port:number;category:string;severity:string;certainty:string;evidence:string;recommendation:string;observedAt:number;change:string;disposition:DiagnosticDisposition;reason:string}
-export interface DiagnosticReport{id:number;serviceOperation:number;generation:number;target:string;interface:string;createdAt:number;findings:DiagnosticFinding[]}
+export interface DiagnosticFinding{id:string;port:number;category:string;severity:string;certainty:string;evidence:string;evidenceSource?:string;impact?:string;recommendation:string;observedAt:number;change:string;disposition:DiagnosticDisposition;reason:string}
+export interface DiagnosticReport{id:number;serviceOperation:number;generation:number;target:string;interface:string;createdAt:number;baselineReport?:number|null;findings:DiagnosticFinding[]}
 export interface DiagnosticSnapshot{reports:DiagnosticReport[];selectedReport:number|null;selectedFinding:string|null}
 
 export interface FlowNamesSnapshot{enabled:boolean;operation:number;busy:boolean;searchEnabled:boolean;rows:{connectionId:string;values:{value:string;observedAt:number;source:'network_extension_remote_hostname';trust:'unverified_tuple_time_candidate'}[]}[];error:string|null}

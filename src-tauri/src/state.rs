@@ -207,6 +207,10 @@ impl SharedState {
         s.revision += 1;
         Ok(s.snapshot())
     }
+    pub fn syslog_csv(&self, operation: u64) -> Result<String, String> {
+        let s = self.inner.lock().map_err(|_| "state_lock")?;
+        crate::syslog::csv(&s.syslog.snapshot, operation)
+    }
     pub fn select_syslog(&self, operation: u64, id: u64) -> Result<Snapshot, String> {
         let mut s = self.inner.lock().map_err(|_| "state_lock")?;
         s.syslog.select(operation, id)?;
@@ -957,7 +961,9 @@ impl SharedState {
         s.services_operation += 1;
         s.services_cancel = false;
         let panel = s.services.panel;
+        let geometry = s.services.panel_geometry.clone();
         s.services = plan.snapshot();
+        s.services.panel_geometry = geometry;
         s.services.panel = panel;
         s.services.comparison = s.services_comparator.begin(plan);
         s.services.operation = s.services_operation;
@@ -1012,6 +1018,7 @@ impl SharedState {
                 result.error = Some("network_changed".into());
             }
         }
+        result.panel_geometry = s.services.panel_geometry.clone();
         result.panel = s.services.panel;
         result.notes = s.services.notes.clone();
         result.operation = op;
@@ -1375,6 +1382,27 @@ impl SharedState {
         s.revision += 1;
         Ok(s.snapshot())
     }
+    pub fn resize_evidence_panel(
+        &self,
+        kind: crate::port_layout::EvidenceKind,
+        width: u16,
+        expected: u16,
+    ) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.updates.snapshot.stage == "installing" {
+            return Err("update_installing".into());
+        }
+        match kind {
+            crate::port_layout::EvidenceKind::Ports => {
+                s.ports.panel_geometry.resize(width, expected)?
+            }
+            crate::port_layout::EvidenceKind::Services => {
+                s.services.panel_geometry.resize(width, expected)?
+            }
+        };
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
     pub fn service_panel(&self, panel: crate::port_layout::Panel) -> Result<Snapshot, String> {
         let mut s = self.inner.lock().map_err(|_| "state_lock")?;
         s.services.panel = panel;
@@ -1474,7 +1502,9 @@ impl SharedState {
         s.ports_cancel = false;
         let layout = s.ports.layout.clone();
         let panel = s.ports.panel;
+        let geometry = s.ports.panel_geometry.clone();
         s.ports = plan.snapshot();
+        s.ports.panel_geometry = geometry;
         s.ports.panel = panel;
         s.ports.layout = layout;
         s.ports.comparison = s.ports_comparator.begin(plan);
@@ -1518,6 +1548,7 @@ impl SharedState {
             result = s.ports.clone();
             result.stage = "cancelled".into();
         }
+        result.panel_geometry = s.ports.panel_geometry.clone();
         result.panel = s.ports.panel;
         result.layout = s.ports.layout.clone();
         result.operation = op;
@@ -1943,12 +1974,16 @@ mod tests {
                 target: "192.0.2.1".into(),
                 interface: "en0".into(),
                 created_at: 1,
+                baseline_report: None,
+                comparison_scope: None,
                 findings: vec![crate::diagnostics::Finding {
                     id: "443:tls".into(),
                     port: 443,
                     category: "tls".into(),
                     severity: "warning".into(),
                     certainty: "unverified".into(),
+                    evidence_source: "tls_verification".into(),
+                    impact: "tls_unverified_impact".into(),
                     evidence: "test".into(),
                     recommendation: "review_tls".into(),
                     observed_at: 1,
@@ -2871,7 +2906,11 @@ mod tests {
         state
             .service_panel(crate::port_layout::Panel::Floating)
             .unwrap();
+        state
+            .resize_evidence_panel(crate::port_layout::EvidenceKind::Services, 520, 380)
+            .unwrap();
         let (job, started) = state.begin_services(&plan).unwrap();
+        assert_eq!(started.services.panel_geometry.width, 520);
         assert_eq!(started.services.panel, crate::port_layout::Panel::Floating);
         assert_eq!(started.document.preferences.view, "servers");
         assert!(state.begin_services(&plan).is_err());
@@ -2921,6 +2960,7 @@ mod tests {
         });
         complete.completed = 1;
         let first = state.update_services(next, complete).unwrap();
+        assert_eq!(first.services.panel_geometry.width, 520);
         assert_eq!(first.services.panel, crate::port_layout::Panel::Floating);
         assert_eq!(first.services.comparison.status, "first");
         let note = |port, expected_revision| crate::service_notes::Edit {
@@ -2997,6 +3037,41 @@ mod tests {
             Some("network_changed")
         );
         assert!(state.begin_services(&plan).is_err());
+    }
+    #[test]
+    fn evidence_width_edits_are_independent_and_do_not_change_results() {
+        use crate::port_layout::EvidenceKind;
+        let state = state();
+        let before = state.snapshot().unwrap();
+        let after = state
+            .resize_evidence_panel(EvidenceKind::Ports, 500, 380)
+            .unwrap();
+        assert_eq!(after.ports.panel_geometry.width, 500);
+        assert_eq!(after.services.panel_geometry.width, 380);
+        assert!(state
+            .resize_evidence_panel(EvidenceKind::Ports, 400, 380)
+            .is_err());
+        assert_eq!(
+            state
+                .resize_evidence_panel(EvidenceKind::Services, 280, 380)
+                .unwrap()
+                .services
+                .panel_geometry
+                .width,
+            280
+        );
+        let current = state.snapshot().unwrap();
+        assert_eq!(
+            serde_json::to_value(&current.document).unwrap(),
+            serde_json::to_value(&before.document).unwrap()
+        );
+        assert_eq!(current.ports.operation, before.ports.operation);
+        assert_eq!(current.services.operation, before.services.operation);
+        state.inner.lock().unwrap().updates.snapshot.stage = "installing".into();
+        assert!(state
+            .resize_evidence_panel(EvidenceKind::Ports, 400, 500)
+            .is_err());
+        assert_eq!(state.snapshot().unwrap().ports.panel_geometry.width, 500);
     }
     #[test]
     fn service_panels_are_independent_and_close_does_not_reset_new_dock_choices() {
@@ -3188,7 +3263,11 @@ mod tests {
         state
             .port_panel(crate::port_layout::Panel::Floating)
             .unwrap();
+        state
+            .resize_evidence_panel(crate::port_layout::EvidenceKind::Ports, 520, 380)
+            .unwrap();
         let (job, started) = state.begin_ports(&plan).unwrap();
+        assert_eq!(started.ports.panel_geometry.width, 520);
         assert_eq!(started.ports.panel, crate::port_layout::Panel::Floating);
         assert_eq!(started.ports.layout, compact_layout);
         let mut resized_layout = compact_layout.clone();
@@ -3230,6 +3309,7 @@ mod tests {
         }];
         finished.layout = Default::default(); // A worker does not own presentation settings.
         let updated = state.update_ports(next, finished).unwrap();
+        assert_eq!(updated.ports.panel_geometry.width, 520);
         assert_eq!(updated.ports.layout, resized_layout);
         assert_eq!(updated.ports.panel, crate::port_layout::Panel::Floating);
         assert!(state.ports_csv(job).is_err());

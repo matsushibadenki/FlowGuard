@@ -641,3 +641,70 @@ ROADMAPの「機器情報とサービス・診断結果の関連付け」を優�
 - 🟢 [Done] 別IDの最新debug Tauri・実WebKit、日本語メイン1440×960／独立560×800。このMac自身のIPv6リンクローカルのHTTP51857／51858（200 OK／503 Service Unavailable）で、双方向の選択同期・保存メモ表示・独立→右配置での未保存メモ保持、再表示時の同一ウインドウ再利用・閉じる→下部復帰・左右配置を確認。一時HTTP待受は終了。他LAN機器の検査・外部名前照会・OS保護設定変更なし。
 - 🟢 [Done] 日本語desktop／375pxと実ネイティブ画面を目視。独立詳細は遅延読込し、初期JS約484.7kBで500kB警告なし。
 - ⭕️ [Pending] 署名済み配布版、実Tauriの他言語／画面幅・Retina／複数画面、実TLS更新／前回TLS表示、OSウインドウ生成／フォーカス拒否・終了競合。ドラッグ式任意ドッキング／サイズ調整・複数エンドポイントは未実装。[詳細](service-detail-panels.md)。
+
+## 2026-10-27 — ポート／サービス詳細のドラッグ配置と幅調整
+
+- 🟢 [Done] Rust185件（24ignored）・UI162件、production build、cargo fmt --check、リリースゲート3件成功。幅の範囲・競合・種類別の独立性・更新中拒否・ジョブ更新時保持・文書不変を確認。
+- 🟢 [Done] 既存Playwright/Chromeで2パネル × 3言語 × 4画面幅の24ケース成功。実ドラッグ・取消・キーボード・初期化・リリース時の単一IPC・競合復帰・選択／未保存メモ保持・横はみ出し／consoleを確認。desktop／320pxの配置ガイドを目視確認。
+- 🟢 [Done] 別IDの最新debug Tauri・実WebKit、日本語1440×960でサービスの右へのドラッグ確定、幅の実ドラッグ・キー操作・初期化、ポート左配置の独立した初期幅とキー変更を確認。空の結果を使用し、今回は能動的なネットワーク確認を開始していない。
+- ⭕️ [Pending] 配布版、実Tauriの他言語／狭幅・Retina／複数画面・同時幅変更。任意グリッド・高さ調整・OSウインドウ跨ぎドラッグは未実装。[実装と範囲](evidence-docking.md)。
+- 🟢 [Done] 更新処理のCI用3試験（使い捨てアプリ・ループバック）と最終git diff --checkも成功。
+
+## 2026-10-27 — Syslog CSVと申告レベル分布
+
+- 🟢 [Done] Rust186件（24ignored）・UI163件、production build、cargo fmt --check、更新処理3件・リリースゲート3件成功。CSVの旧操作／実行中／空拒否、外部入力の引用符・改行・数式対策、PRI分解と未検証状態を確認。
+- 🟢 [Done] frontend-testing-debuggingスキルを使用。Browser skill不在（Browser plugin not available）のため既存Playwright/Chromeでlocalhost:1421、3言語 × 1500／768／375／320pxの12ケース。実SyslogReceiverへ合成記録・模擬IPCを供給し、棒クリックの絞り込みと解除、全記録CSV操作番号・ファイル名、受信中／空の無効化、失敗表示と再試行、非空・ページ識別・overlay／console・ページ横はみ出しを検証。QA /tmp/flowguard-syslog-export-qa.cjs、画像 /tmp/flowguard-syslog-export-{ja,en,zh-CN}-{1500,768,375,320}.png。
+- ⭕️ [Pending] 実Tauri保存・実LAN受信・OS保存拒否。今回はソケット待受・能動的ネットワーク確認なし。画面のCSVダウンロードは模擬文字列、実際のCSV内容はRust試験で検証。[仕様](syslog-receiver.md)。
+
+## 2026-10-27 — SyslogグラフとCSVの実Tauri確認
+
+- 🟢 [Done] 最新debug Tauri（別ID FlowGuard Syslog QA）・実WebKit・日本語1440×960。lo0 127.0.0.1:5514にUDP受信を開始し、同一Macから5件（PRI 8、13×2、15、12）を送信。レベル分布0=1、4=1、5=2、7=1を確認し、レベル5をクリックして2／5件、再クリックして5／5件へ復帰。受信中はCSV無効、停止後に出力可能。
+- 🟢 [Done] レベル5で絞り込み中に保存されたDownloads/flowguard-syslog-1.csvを実ファイルとして検査。全5行・26列・UTF-8 BOM・CRLF、操作番号・実受信元・未検証状態・受信／破棄件数・network_loss=unknownを確認。数式と引用符を含む本文は先頭アポストロフィとCSV引用で保持。受信停止済み。
+- ⭕️ [Pending] 署名済み配布版・実LAN機器、OS保存拒否、実Tauri他言語／画面幅。
+
+## 2026-10-27 — 診断概要と視覚的な絞り込み
+
+- 🟢 [Done] UI 165試験・production build・cargo fmt --check・git diff --check。根拠状態と重要度の独立集計、未知値、重複ポート、空結果を検証。
+- 🟢 [Done] Browser skill不在のためPlaywright/Chrome、localhost:1421で実DiagnosticChecksに合成Snapshotを供給。3言語 × 1500／768／375／320pxの12ケースで、カードの組み合わせ・解除、絞り込みに依存しない件数、未知値・キーボード・空状態・横はみ出し・consoleを確認。desktopと320pxを目視し、狭幅のカードとラベルの改行を修正。QA /tmp/flowguard-diagnostic-overview-qa.cjs。
+- ⭕️ [Pending] 実Tauriの診断記録・署名済み配布版・他言語／複数ウインドウ。[詳細](diagnostic-overview.md)。
+
+## 2026-10-27 — 診断概要の実Tauri確認
+
+- 🟢 [Done] 最新debug Tauri（別ID FlowGuard Diagnostic QA）・実WebKit・日本語1440×960。近隣キャッシュを読み取り、このMac自身のen0 IPv4の51857／51858だけに一時HTTP待受を設けてTCPとHTTP HEADを確認。両方200 OKのサービス記録から診断を作成。対象2ポート・4事項、観測済み2／要確認0／未実施2、注意0／参考4と実一覧を照合。
+- 🟢 [Done] 未実施で2／4、注意を追加して0／4、注意を解除して2／4、参考を追加して2／4、未実施を解除して4／4、参考も解除して全件表示を確認。絞り込み中も概要の全件数は変わらない。表示を目視し、一時HTTP待受は終了。他LAN機器への探索・ポート確認、外部名前照会、OS保護設定変更なし。
+- ⭕️ [Pending] 実Tauriで注意が1件以上ある記録、他言語／狭幅・複数ウインドウ、署名済み配布版。
+
+## 2026-10-27 — 診断の根拠と影響
+
+- 🟢 [Done] Rust187件（24 ignored）・UI165件、production build、cargo fmt --check、更新処理3件・リリースゲート3件・git diff --check。取得元と影響の状態別コード、未実施／未検証の区別、CSV追加列・数式対策・HTMLエスケープを確認。
+- 🟢 [Done] Browser skill不在のため既存Playwright/Chrome、localhost:1421の実DiagnosticChecksに合成Snapshot・模擬IPCを供給。3言語 × 1500／768／375／320pxの12ケースでTLS／未収集HTTP／旧Snapshotの選択、3ノード表示、外部文字列の非実行、横はみ出し・console・overlayを検証。desktop・320pxを目視。QA /tmp/flowguard-diagnostic-detail-qa.cjs。
+- ⭕️ [Pending] 実Tauriの診断詳細・CSV／HTML保存、署名済み配布版、実証明書。[詳細](diagnostic-evidence.md)。
+
+## 2026-10-27 — 診断詳細と出力の実Tauri確認
+
+- 🟢 [Done] 最新debug Tauri（別ID FlowGuard Evidence QA）・実WebKit・日本語1440×960。近隣キャッシュからこのMacのen0 IPv4を選択し、同じMacの51857番に一時HTTP待受を設け、TCP確認とHTTP HEAD 200 OKから診断を作成。HTTPヘッダー未実施の詳細に「HTTPヘッダー未収集」→観測根拠→「設定の有無を判断できません」の3ノードと推奨対応が表示されることを目視・AXで確認。
+- 🟢 [Done] 実アプリからCSV／HTMLをDownloadsへ保存して解析。双方2行・16列、全セル値が一致。サービス行のservice_observation／service_scope_review、ヘッダー行のheaders_not_collected／headers_unknown、日本語HTMLの追加列見出しを確認。一時HTTP待受は終了。他LAN機器への能動探索・ポート確認、外部名前照会、OS保護設定変更なし。
+- ⭕️ [Pending] 実TauriのTLS検証失敗／証明書メタデータ、他言語・狭幅、署名済み配布版。
+
+## 2026-10-27 — 診断履歴の比較条件
+
+- 🟢 [Done] Rust188件（24 ignored）・UI165件、production build、cargo fmt --check、リリースゲート3件。対象・送信元・マスク・インターフェース・アドレス種別・世代・ポート・方式・HTTPS名の変更、不完全な記録、未確認／未実施の比較不確定、観測済みの一致、比較元付きCSV／HTML見出しを確認。
+- 🟢 [Done] Browser skill不在のためPlaywright/Chromeと合成Snapshot／模擬IPCで3言語 × 1500／768／375／320pxの比較元表示・フィルター・空状態・横はみ出し／consoleを確認。320pxを目視。QA /tmp/flowguard-diagnostic-comparison-qa.cjs。
+- ⭕️ [Pending] 実Tauriの再診断と条件変更・出力、署名済み配布版・実ネットワーク変更。[詳細](diagnostic-comparison.md)。
+
+## 2026-10-27 — 診断比較の実Tauri確認（一部）
+
+- 🟢 [Done] 最新debug Tauri・実WebKit・日本語。近隣キャッシュからこのMac自身のen0 IPv4を選び、自己宛て51857番の一時HTTPサービスでTCP確認、HTTP HEAD 200 OK、診断 #1 を作成。同条件でHTTPを再確認し診断 #2 を作成。比較元 #1、サービス応答「変化なし」、未実施のHTTPヘッダー「比較不確定」を確認。待受は停止。他のLAN機器への探索・確認は実施せず。
+- ⭕️ [Pending] 出力操作の際にComputer UseがnoWindowsAvailableを返し、再取得もtimeoutReached。比較元を含むCSV／HTMLの実ファイルと条件変更後の画面は確認できなかった。原因は未確定。
+
+## 2026-10-27 — 診断比較の実Tauri再確認
+
+- 🟢 [Done] 別ID FlowGuard Compare QA・実WebKit・日本語。前回セッションの診断 #2（同条件HTTP再確認、比較元 #1）をCSV／HTMLで保存。各17列・2行、全セル一致。サービス応答はunchanged、未実施ヘッダーはuncertain、両行baseline_report=1を確認。
+- 🟢 [Done] このMac自身のen0 IPv4・51857番に一時HTTP待受を設け、HTTPS方式へ変更してサービス確認。TLS接続失敗後の診断 #3 は4件すべて比較なし、比較元の表示なし。CSV／HTML各17列・4行、全セル一致・baseline_report空欄。待受は終了。他LAN機器への検査・OS保護設定変更は行っていない。
+- ⭕️ [Pending] 署名済み配布版、実TLSサーバー・実ネットワーク切替、他言語／狭幅。
+
+## 2026-10-27 — 診断の対応状況カード
+
+- 🟢 [Done] UI166件・production build・cargo fmt --check・git diff --check。対応状況の全件集計と未知値・空結果を検証。
+- 🟢 [Done] Browser skill不在につきPlaywright/Chrome、localhost:1421で実DiagnosticChecksに合成Snapshot／模擬IPC。3言語 × 1500／768／375／320pxの12ケースで各件数、絞り込み・解除、根拠状態との組み合わせ、Snapshot更新後の件数と一覧、空状態・横はみ出し・overlay／consoleを確認。desktopと320pxを目視。QA /tmp/flowguard-diagnostic-disposition-qa.cjs。
+- ⭕️ [Pending] 実Tauriの対応状況保存・複数ウインドウ同時更新・署名済み配布版。[詳細](diagnostic-dispositions.md)。

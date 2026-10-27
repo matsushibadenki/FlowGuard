@@ -360,6 +360,10 @@ fn clear_syslog(app: tauri::AppHandle, operation: u64) -> Result<Snapshot, Strin
     Ok(snapshot)
 }
 #[tauri::command]
+fn syslog_csv(app: tauri::AppHandle, operation: u64) -> Result<String, String> {
+    app.state::<SharedState>().syslog_csv(operation)
+}
+#[tauri::command]
 fn select_syslog(app: tauri::AppHandle, operation: u64, id: u64) -> Result<Snapshot, String> {
     let snapshot = app.state::<SharedState>().select_syslog(operation, id)?;
     let _ = app.emit("state-changed", &snapshot);
@@ -433,6 +437,21 @@ fn diagnostic_export(app: tauri::AppHandle, report: u64, format: String) -> Resu
 #[tauri::command]
 fn services_csv(app: tauri::AppHandle, operation: u64) -> Result<String, String> {
     app.state::<SharedState>().services_csv(operation)
+}
+#[tauri::command]
+fn resize_evidence_panel(
+    app: tauri::AppHandle,
+    kind: port_layout::EvidenceKind,
+    width: u16,
+    expected: u16,
+) -> Result<Snapshot, String> {
+    let result = app
+        .state::<SharedState>()
+        .resize_evidence_panel(kind, width, expected);
+    if let Ok(snapshot) = app.state::<SharedState>().snapshot() {
+        let _ = app.emit("state-changed", snapshot);
+    }
+    result
 }
 #[tauri::command]
 fn position_port_details(
@@ -1413,6 +1432,7 @@ pub fn run() {
             stop_syslog,
             clear_syslog,
             select_syslog,
+            syslog_csv,
             stop_services,
             services_csv,
             diagnostic_action,
@@ -1425,6 +1445,7 @@ pub fn run() {
             select_port,
             set_port_layout,
             position_port_details,
+            resize_evidence_panel,
             position_service_details,
             start_lan_ports,
             open_lan_ports,

@@ -1,0 +1,7 @@
+import {describe,it,expect} from 'vitest';
+import {evidenceTarget,evidenceMaximum,clampEvidenceWidth,evidenceDockWords} from './evidence-docking';
+describe('evidence panel docking',()=>{
+ it('accepts only the intended panel kind and supported destination',()=>{for(const kind of ['ports','services'] as const){for(const target of ['left','right','bottom','floating'] as const)expect(evidenceTarget(kind,kind,target)).toBe(target);for(const value of ['other','float','',undefined])expect(evidenceTarget(kind,kind,value)).toBeNull();}expect(evidenceTarget('ports','services','left')).toBeNull();expect(evidenceTarget('services','ports','right')).toBeNull();expect(evidenceTarget('ports',undefined,'left')).toBeNull();});
+ it('keeps the results usable when limiting a preferred width to its window',()=>{expect(evidenceMaximum(1200)).toBe(540);expect(evidenceMaximum(2000)).toBe(600);expect(evidenceMaximum(800)).toBe(360);expect(evidenceMaximum(320)).toBe(280);expect(clampEvidenceWidth(279)).toBe(280);expect(clampEvidenceWidth(601)).toBe(600);expect(clampEvidenceWidth(420.4)).toBe(420);expect(clampEvidenceWidth(600,400)).toBe(400);expect(clampEvidenceWidth(NaN)).toBe(380);});
+ it('localizes drag instructions, keyboard resizing and error recovery',()=>{for(const locale of ['en','zh-CN'] as const){expect(Object.keys(evidenceDockWords[locale])).toEqual(Object.keys(evidenceDockWords.ja));expect(Object.values(evidenceDockWords[locale]).every(Boolean)).toBe(true);}});
+});
