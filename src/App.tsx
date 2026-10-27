@@ -14,7 +14,7 @@ import {legacyRule} from './core/identity';
 import {usePortSheetFocus} from './components/usePortSheetFocus';
 import {LanDetails} from './components/LanDetails';
 import {PortDetailPanel} from './components/PortDetailPanel';
-import {useEffect,useMemo,useState} from 'react';
+import {lazy,Suspense,useEffect,useMemo,useState} from 'react';
 import {BookOpen,Search,Eye,Info,X,ExternalLink} from 'lucide-react';
 import {dispatch,floatPanel,useStartupError,native,useSnapshot} from './core/store';
 import {translator} from './core/i18n';
@@ -32,6 +32,7 @@ import {RuleList} from './components/RuleList';
 import {WorkspaceTools} from './components/WorkspaceTools';
 import {Settings} from './components/Settings';
 import {Brand} from './components/ui';
+const FloatingServiceDetails=lazy(()=>import('./components/ServiceDetailPanel').then(m=>({default:m.ServiceDetailPanel})));
 const panelType=new URLSearchParams(location.search).get('panel');
 const floating=panelType==='inspector';
 export function App(){
@@ -61,6 +62,7 @@ function Workspace(){
  const category=p.view==='network'?'networkCategory':p.view==='servers'?'serverCategory':p.view==='diagnostics'?'securityCategory':p.view==='settings'?'commonCategory':'firewallCategory';
  const errorBanner=error?<div className="error-banner" role="alert"><Info size={18}/><span>{error}</span><button className="icon-button" aria-label={t('close')} onClick={()=>setError(null)}><X size={18}/></button></div>:null;
  if(panelType==='gpu')return <main className="floating-workspace">{errorBanner}<EmergencyRecovery snapshot={snapshot} t={t} onError={onError}/><GpuMap snapshot={snapshot} filter={{...(snapshot.gpuFilter??{search:'',intent:'all',hideLoopback:true}),source:p.mode}} standalone/><button className="secondary-button" onClick={()=>void invoke('dock_gpu_panel').catch(onError)}>{locale==='ja'?'閉じて通常マップへ':locale==='en'?'Close and return to map':'关闭并返回地图'}</button></main>;
+ if(panelType==='service-details')return <main className="floating-workspace">{errorBanner}<Suspense fallback={<span role="status">…</span>}><FloatingServiceDetails snapshot={snapshot} native={native} standalone/></Suspense></main>;
  if(panelType==='port-details')return <main className="floating-workspace">{errorBanner}<PortDetailPanel snapshot={snapshot} native={native} standalone/></main>;
  if(panelType==='lan-details')return <main className="floating-workspace">{errorBanner}<LanDetails snapshot={snapshot} t={t} native={native} standalone/></main>;
  if(floating)return <main className="floating-workspace">{errorBanner}<EmergencyRecovery snapshot={snapshot} t={t} onError={onError}/><AskRequests snapshot={snapshot} t={t} onError={onError}/><Inspector key={`${selected?.id}-${p.mode}`} snapshot={snapshot} connection={selected} t={t} onError={onError} isFloating mapEditor={p.view==='map'}/></main>;

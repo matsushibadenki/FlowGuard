@@ -483,6 +483,54 @@ fn position_port_details(
     Ok(snapshot)
 }
 #[tauri::command]
+fn position_service_details(
+    app: tauri::AppHandle,
+    panel: port_layout::Panel,
+) -> Result<Snapshot, String> {
+    use port_layout::Panel;
+    if panel == Panel::Floating {
+        let locale = app
+            .state::<SharedState>()
+            .snapshot()?
+            .document
+            .preferences
+            .locale;
+        let title = match locale.as_str() {
+            "ja" => "FlowGuard · サービス詳細",
+            "zh-CN" => "FlowGuard · 服务详情",
+            _ => "FlowGuard · Service details",
+        };
+        let window = if let Some(window) = app.get_webview_window("service-details") {
+            window
+        } else {
+            tauri::WebviewWindowBuilder::new(
+                &app,
+                "service-details",
+                tauri::WebviewUrl::App("index.html?panel=service-details".into()),
+            )
+            .title(title)
+            .inner_size(560.0, 800.0)
+            .min_inner_size(320.0, 420.0)
+            .visible(false)
+            .build()
+            .map_err(|e| e.to_string())?
+        };
+        window.set_title(title).map_err(|e| e.to_string())?;
+        if let Err(error) = window.show().and_then(|_| window.set_focus()) {
+            let _ = window.hide();
+            if let Ok(snapshot) = app.state::<SharedState>().service_panel_closed() {
+                let _ = app.emit("state-changed", snapshot);
+            }
+            return Err(error.to_string());
+        }
+    } else if let Some(window) = app.get_webview_window("service-details") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    let snapshot = app.state::<SharedState>().service_panel(panel)?;
+    let _ = app.emit("state-changed", &snapshot);
+    Ok(snapshot)
+}
+#[tauri::command]
 fn set_port_layout(
     app: tauri::AppHandle,
     expected: port_layout::Layout,
@@ -1301,6 +1349,27 @@ pub fn run() {
                     _ => {}
                 }
             }
+            if window.label() == "service-details" {
+                match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        if window.hide().is_ok() {
+                            api.prevent_close();
+                            let app = window.app_handle();
+                            if let Ok(snapshot) = app.state::<SharedState>().service_panel_closed()
+                            {
+                                let _ = app.emit("state-changed", snapshot);
+                            }
+                        }
+                    }
+                    tauri::WindowEvent::Destroyed => {
+                        let app = window.app_handle();
+                        if let Ok(snapshot) = app.state::<SharedState>().service_panel_closed() {
+                            let _ = app.emit("state-changed", snapshot);
+                        }
+                    }
+                    _ => {}
+                }
+            }
             if window.label() == "lan-details" && matches!(event, tauri::WindowEvent::Destroyed) {
                 let app = window.app_handle();
                 if let Ok(snapshot) = app.state::<SharedState>().lan_panel("docked") {
@@ -1356,6 +1425,7 @@ pub fn run() {
             select_port,
             set_port_layout,
             position_port_details,
+            position_service_details,
             start_lan_ports,
             open_lan_ports,
             lan_ports_csv,

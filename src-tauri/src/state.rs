@@ -956,7 +956,9 @@ impl SharedState {
         }
         s.services_operation += 1;
         s.services_cancel = false;
+        let panel = s.services.panel;
         s.services = plan.snapshot();
+        s.services.panel = panel;
         s.services.comparison = s.services_comparator.begin(plan);
         s.services.operation = s.services_operation;
         s.services_plan = Some(plan.clone());
@@ -1010,6 +1012,7 @@ impl SharedState {
                 result.error = Some("network_changed".into());
             }
         }
+        result.panel = s.services.panel;
         result.notes = s.services.notes.clone();
         result.operation = op;
         result.selected_port = s.services.selected_port;
@@ -1370,6 +1373,20 @@ impl SharedState {
         }
         s.ports.selected_port = Some(port);
         s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn service_panel(&self, panel: crate::port_layout::Panel) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        s.services.panel = panel;
+        s.revision += 1;
+        Ok(s.snapshot())
+    }
+    pub fn service_panel_closed(&self) -> Result<Snapshot, String> {
+        let mut s = self.inner.lock().map_err(|_| "state_lock")?;
+        if s.services.panel == crate::port_layout::Panel::Floating {
+            s.services.panel = crate::port_layout::Panel::Bottom;
+            s.revision += 1;
+        }
         Ok(s.snapshot())
     }
     pub fn edit_service_note(
@@ -2851,7 +2868,11 @@ mod tests {
             })
             .collect();
         assert!(crate::services::Plan::new(&stale, &network, op, "auto").is_err());
+        state
+            .service_panel(crate::port_layout::Panel::Floating)
+            .unwrap();
         let (job, started) = state.begin_services(&plan).unwrap();
+        assert_eq!(started.services.panel, crate::port_layout::Panel::Floating);
         assert_eq!(started.document.preferences.view, "servers");
         assert!(state.begin_services(&plan).is_err());
         assert!(state.begin_ports(&tcp).is_err());
@@ -2900,6 +2921,7 @@ mod tests {
         });
         complete.completed = 1;
         let first = state.update_services(next, complete).unwrap();
+        assert_eq!(first.services.panel, crate::port_layout::Panel::Floating);
         assert_eq!(first.services.comparison.status, "first");
         let note = |port, expected_revision| crate::service_notes::Edit {
             port,
@@ -2938,6 +2960,7 @@ mod tests {
         let mut late = first.services.clone();
         late.operation = again;
         let stopped = state.update_services(again, late).unwrap();
+        assert_eq!(stopped.services.panel, crate::port_layout::Panel::Floating);
         assert_eq!(stopped.services.comparison.status, "incomplete");
         let (final_op, _) = state.begin_services(&plan).unwrap();
         let mut repeated = first.services;
@@ -2974,6 +2997,32 @@ mod tests {
             Some("network_changed")
         );
         assert!(state.begin_services(&plan).is_err());
+    }
+    #[test]
+    fn service_panels_are_independent_and_close_does_not_reset_new_dock_choices() {
+        use crate::port_layout::Panel;
+        let state = state();
+        let before = state.snapshot().unwrap();
+        assert_eq!(before.services.panel, Panel::Bottom);
+        state.port_panel(Panel::Floating).unwrap();
+        for panel in [Panel::Left, Panel::Bottom, Panel::Right] {
+            state.service_panel(panel).unwrap();
+            let current = state.service_panel_closed().unwrap();
+            assert_eq!(current.services.panel, panel);
+            assert_eq!(current.ports.panel, Panel::Floating);
+        }
+        state.service_panel(Panel::Floating).unwrap();
+        let closed = state.service_panel_closed().unwrap();
+        assert_eq!(closed.services.panel, Panel::Bottom);
+        assert_eq!(closed.ports.panel, Panel::Floating);
+        assert_eq!(closed.services.operation, before.services.operation);
+        assert_eq!(closed.services.selected_port, before.services.selected_port);
+        assert!(closed.services.rows.is_empty());
+        assert!(closed.services.notes.is_empty());
+        assert_eq!(
+            serde_json::to_value(&closed.document).unwrap(),
+            serde_json::to_value(&before.document).unwrap()
+        );
     }
     #[test]
     fn service_notes_are_blocked_while_running_or_installing_and_scope_by_operation() {

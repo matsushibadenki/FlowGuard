@@ -9,6 +9,7 @@ use std::{
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub panel: crate::port_layout::Panel,
     pub notes: std::collections::BTreeMap<u16, crate::service_notes::Note>,
     pub comparison: crate::service_comparison::Comparison,
     pub requested_ports: Vec<u16>,

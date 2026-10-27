@@ -633,3 +633,11 @@ ROADMAPの「機器情報とサービス・診断結果の関連付け」を優�
 - 🟢 [Done] 別IDの最新debug Tauri／実WebKit・日本語1440×960。自身のIPv6リンクローカル・TCP50728でHTTP HEAD /の固定応答を取得し、表示名と複数行メモを実保存。コメント検索、画面往復後の保持と観測応答不変を確認。初回の日本語コメント列の細かい折り返しを修正し、再ビルド後の実保存・表示でも意図した改行を目視確認。一時HTTP待受は終了。他LAN機器への検査・外部DNS照会・OS保護設定変更は行わない。
 - ⭕️ [Pending] 実Tauri複数ウインドウの競合編集、他言語／画面幅、ネイティブCSV保存・署名済み配布版。長期保存・再確認への自動継承は未実装。[詳細](service-notes.md)。
 - 🟢 [Done] 更新処理のCI用3試験（`updates::tests -- --ignored`）も、使い捨てアプリとループバックで成功。
+
+## 2026-10-27 — サービス詳細の独立ウインドウとドッキング
+
+- 🟢 [Done] Rust183件（24ignored）・UI159件、production build、cargo fmt --check、更新処理3件・リリースゲート3件、git diff --check成功。サービス配置の独立性・閉じる復帰・遅いcloseの無効化、文書／結果／選択不変、ジョブ開始・停止・更新時の配置保持を検証。
+- 🟢 [Done] Browser plugin/skill不在につき既存Playwright/Chrome、localhost:1421で実ServiceChecks／独立詳細へ合成Snapshot・模擬IPCを供給。3言語 × 1500／768／375／320pxで左右／下／独立、エラー時維持、未保存メモ保持、保存メモ・TLS発行者・前回比較、選択・新ジョブの消去、未確認無効化、横はみ出し・overlay・consoleを確認。QA `/tmp/flowguard-service-panels-qa.cjs`、画像 `/tmp/flowguard-service-panels-{docked,floating}-{ja,en,zh-CN}-{1500,768,375,320}.png`。
+- 🟢 [Done] 別IDの最新debug Tauri・実WebKit、日本語メイン1440×960／独立560×800。このMac自身のIPv6リンクローカルのHTTP51857／51858（200 OK／503 Service Unavailable）で、双方向の選択同期・保存メモ表示・独立→右配置での未保存メモ保持、再表示時の同一ウインドウ再利用・閉じる→下部復帰・左右配置を確認。一時HTTP待受は終了。他LAN機器の検査・外部名前照会・OS保護設定変更なし。
+- 🟢 [Done] 日本語desktop／375pxと実ネイティブ画面を目視。独立詳細は遅延読込し、初期JS約484.7kBで500kB警告なし。
+- ⭕️ [Pending] 署名済み配布版、実Tauriの他言語／画面幅・Retina／複数画面、実TLS更新／前回TLS表示、OSウインドウ生成／フォーカス拒否・終了競合。ドラッグ式任意ドッキング／サイズ調整・複数エンドポイントは未実装。[詳細](service-detail-panels.md)。
