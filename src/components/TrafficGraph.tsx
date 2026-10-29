@@ -1,5 +1,5 @@
 // パス: src/components/TrafficGraph.tsx
-import {useId, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import {useEffect, useId, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {Activity, AppWindow, Check, ChevronLeft, ChevronRight, CircleHelp, Globe2, Info, Laptop, Network, Minus, ShieldCheck} from 'lucide-react';
 import type {AppRow, DestinationRow} from '../core/mapModel';
 import type {Snapshot} from '../core/types';
@@ -27,6 +27,7 @@ export function TrafficGraph({snapshot, rows, t, selectApp, selectDestination}: 
       <div className="tg-total secondary"><Globe2 size={19} aria-hidden="true"/><strong>{totals.destinations}</strong><span>{w.destinations}</span></div>
       <span className="info-tip" tabIndex={0} title={w.help} aria-label={w.help}><Info size={19}/></span>
     </header>
+    <ScopeMap rows={rows} locale={snapshot.document.preferences.locale} t={t} selectDestination={(destination,index)=>{setPage(Math.floor(index/appPageSize));selectDestination(destination);}}/>
     <div className="tg-caption">{w.summary}{snapshot.document.preferences.mode==='demo'&&<span>{w.preview}</span>}</div>
     <div className="tg-legend" aria-label={w.intent}>
       <strong>{w.intent}</strong>{(['allow','block','ask','none'] as const).map(intent=><span key={intent} className={`tg-intent-${intent}`}><i/>{intent==='none'?w.noRule:t(intent)}</span>)}
@@ -39,6 +40,12 @@ export function TrafficGraph({snapshot, rows, t, selectApp, selectDestination}: 
     </nav>
     <div className="tg-branches">{window.rows.map(row=><AppBranch key={row.id} row={row} snapshot={snapshot} t={t} selectApp={selectApp} selectDestination={selectDestination}/>)}</div>
   </section>;
+}
+function ScopeMap({rows,locale,t,selectDestination}:{rows:AppRow[];locale:Snapshot['document']['preferences']['locale'];t:T;selectDestination:(row:DestinationRow,index:number)=>void}) {
+  const words={ja:{title:'接続の広がり',help:'アドレス範囲に基づく模式図です。国や実際の経路、通信量は示しません。各領域を選択すると最初の接続先を表示します。',empty:'接続記録なし',center:'このMac'},en:{title:'Connection landscape',help:'A schematic based on address ranges. It does not show countries, actual routes or traffic volume. Select an area to show its first destination.',empty:'No connection records',center:'This Mac'},'zh-CN':{title:'连接范围',help:'按地址范围绘制的示意图，不表示国家、实际路径或流量。选择区域以显示首个连接目标。',empty:'无连接记录',center:'此Mac'}}[locale];
+  const scopes=['public','local','loopback','other'] as const;
+  const categories=scopes.map(kind=>{const targets=rows.flatMap((row,index)=>row.destinations.filter(d=>d.klass===kind).map(destination=>({destination,index})));return {kind,targets,count:targets.reduce((sum,d)=>sum+d.destination.connectionIds.length,0)};});
+  return <section className="tg-landscape" aria-label={words.title}><header><span><Globe2 size={17} aria-hidden="true"/><strong>{words.title}</strong></span><span className="info-tip" tabIndex={0} title={words.help} aria-label={words.help}><Info size={16}/></span></header><div className="tg-landscape-body"><div className="tg-landscape-origin"><Laptop size={22} aria-hidden="true"/><span>{words.center}</span></div><div className="tg-landscape-branches">{categories.map(({kind,targets,count})=>{const Icon=classIcons[kind];return <button key={kind} type="button" className="tg-landscape-node" data-scope={kind} disabled={!targets.length} onClick={()=>targets[0]&&selectDestination(targets[0].destination,targets[0].index)} aria-label={`${t(classLabels[kind])}: ${count}`}><Icon size={19} aria-hidden="true"/><span>{t(classLabels[kind])}</span><b>{count.toLocaleString(locale)}</b><i aria-hidden="true"/></button>})}</div></div>{!rows.length&&<small>{words.empty}</small>}</section>;
 }
 function PageButtons({current,pages,change,locale}:{current:number;pages:number;change:(value:number)=>void;locale:Snapshot['document']['preferences']['locale']}) {
   const w=trafficGraphWords[locale];
@@ -53,6 +60,7 @@ function AppBranch({row,snapshot,t,selectApp,selectDestination}:{row:AppRow}&Omi
   const scopeLabel=(['public','local','loopback','other'] as const).map(klass=>`${t(classLabels[klass])}: ${row.destinations.filter(d=>d.klass===klass).reduce((sum,d)=>sum+d.connectionIds.length,0)}`).join(' · ');
   const signature=JSON.stringify(window.rows.map(d=>d.key));
   const selectedIndex=row.destinations.findIndex(d=>d.connectionIds.includes(snapshot.selectedId??''));
+  useEffect(()=>{if(selectedIndex>=0)setPage(Math.floor(selectedIndex/destinationPageSize));},[snapshot.selectedId]);
   useLayoutEffect(()=>{
     const el=root.current;if(!el)return;
     function measure(){

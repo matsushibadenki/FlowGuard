@@ -1234,6 +1234,9 @@ impl SharedState {
                 s.diagnostics.assess(&job, now())?;
             }
             "select" => s.diagnostics.select(report, finding)?,
+            "manual_check" => s
+                .diagnostics
+                .save_manual_check(report, reason.as_deref().ok_or("manual_check_required")?)?,
             "disposition" => s.diagnostics.disposition(
                 report,
                 finding.as_deref().ok_or("finding_required")?,
@@ -1978,9 +1981,12 @@ mod tests {
                 generation: 7,
                 target: "192.0.2.1".into(),
                 interface: "en0".into(),
+                source_address: "192.0.2.2".into(),
+                family: "IPv4".into(),
                 created_at: 1,
                 baseline_report: None,
                 comparison_scope: None,
+                manual_checks: vec![],
                 findings: vec![crate::diagnostics::Finding {
                     id: "443:tls".into(),
                     port: 443,

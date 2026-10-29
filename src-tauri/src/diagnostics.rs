@@ -112,6 +112,17 @@ impl ComparisonScope {
         })
     }
 }
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManualCheck {
+    pub item: String,
+    pub status: String,
+    pub evidence: String,
+    pub owner: String,
+    pub checked_at: String,
+    pub next_at: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
@@ -120,11 +131,14 @@ pub struct Report {
     pub generation: u64,
     pub target: String,
     pub interface: String,
+    pub source_address: String,
+    pub family: String,
     pub created_at: u64,
     pub baseline_report: Option<u64>,
     #[serde(skip)]
     pub comparison_scope: Option<ComparisonScope>,
     pub findings: Vec<Finding>,
+    pub manual_checks: Vec<ManualCheck>,
 }
 #[derive(Clone, Default, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,9 +159,12 @@ impl Snapshot {
                     generation: r.generation,
                     target: r.target.clone(),
                     interface: r.interface.clone(),
+                    source_address: r.source_address.clone(),
+                    family: r.family.clone(),
                     created_at: r.created_at,
                     baseline_report: r.baseline_report,
                     comparison_scope: None,
+                    manual_checks: r.manual_checks.clone(),
                     findings: if Some(r.id) == self.selected_report {
                         r.findings.clone()
                     } else {
@@ -379,9 +396,12 @@ impl Snapshot {
                 generation: s.generation,
                 target: s.target.clone(),
                 interface: s.interface.clone(),
+                source_address: s.source_address.clone(),
+                family: s.family.clone(),
                 created_at: now,
                 baseline_report,
                 comparison_scope,
+                manual_checks: vec![],
                 findings,
             },
         );
@@ -429,6 +449,59 @@ impl Snapshot {
         f.reason = reason.into();
         Ok(())
     }
+    pub fn save_manual_check(&mut self, report: u64, raw: &str) -> Result<(), String> {
+        if raw.len() > 4096 {
+            return Err("manual_check_invalid".into());
+        }
+        let entry: ManualCheck = serde_json::from_str(raw).map_err(|_| "manual_check_invalid")?;
+        if !["mfa", "backup", "restore", "incident"].contains(&entry.item.as_str())
+            || !["unknown", "confirmed", "needs_work", "out_of_scope"]
+                .contains(&entry.status.as_str())
+            || entry.evidence.len() > 512
+            || entry.owner.len() > 128
+            || entry.checked_at.len() > 10
+            || entry.next_at.len() > 10
+            || [
+                &entry.evidence,
+                &entry.owner,
+                &entry.checked_at,
+                &entry.next_at,
+            ]
+            .iter()
+            .any(|v| v.chars().any(char::is_control))
+            || [entry.checked_at.as_str(), entry.next_at.as_str()]
+                .iter()
+                .any(|v| {
+                    !v.is_empty()
+                        && (v.len() != 10
+                            || !v.bytes().enumerate().all(|(i, b)| {
+                                if i == 4 || i == 7 {
+                                    b == b'-'
+                                } else {
+                                    b.is_ascii_digit()
+                                }
+                            }))
+                })
+            || (entry.status != "unknown" && entry.evidence.trim().is_empty())
+        {
+            return Err("manual_check_invalid".into());
+        }
+        let target = self
+            .reports
+            .iter_mut()
+            .find(|r| r.id == report)
+            .ok_or("stale_report")?;
+        if let Some(existing) = target
+            .manual_checks
+            .iter_mut()
+            .find(|v| v.item == entry.item)
+        {
+            *existing = entry;
+        } else {
+            target.manual_checks.push(entry);
+        }
+        Ok(())
+    }
     pub fn report(&self, id: u64) -> Result<&Report, String> {
         self.reports
             .iter()
@@ -469,6 +542,9 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
         "evidence_source",
         "impact",
         "baseline_report",
+        "source_address",
+        "address_family",
+        "manual_checks_json",
     ];
     let rows: Vec<Vec<String>> = r
         .findings
@@ -498,6 +574,9 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
                 r.baseline_report
                     .map(|id| id.to_string())
                     .unwrap_or_default(),
+                r.source_address.clone(),
+                r.family.clone(),
+                serde_json::to_string(&r.manual_checks).unwrap_or_default(),
             ]
         })
         .collect();
@@ -522,11 +601,11 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
         return Err("invalid_report_format".into());
     }
     let (lang,title,help,labels) = match locale {
-        "ja" => ("ja","FlowGuard 観測レポート","既存の観測根拠を読み取り専用で評価。未検証・未実施は安全の証明ではありません。セッション内最大20件、ポリシーの自動変更なし。CSVは共通の機械可読コードを使用します。",["対象","インターフェース","レポート","サービス操作","ポート","分類","重要度","確かさ","観測根拠","推奨対応コード","確認時刻（Unix秒）","差分","対応状況","理由","根拠の取得元コード","影響コード","比較元レポート"]),
-        "zh-CN" => ("zh-CN","FlowGuard 观测报告","只读评估已有观测依据。未验证或未执行不代表安全。会话最多20条，不自动更改策略。CSV使用通用机器可读代码。",["目标","接口","报告","服务操作","端口","分类","严重程度","确定性","观测依据","建议代码","确认时间（Unix秒）","差异","处理状态","原因","证据来源代码","影响代码","基准报告"]),
+        "ja" => ("ja","FlowGuard 観測レポート","既存の観測根拠を読み取り専用で評価。未検証・未実施は安全の証明ではありません。セッション内最大20件、ポリシーの自動変更なし。CSVは共通の機械可読コードを使用します。",["対象","インターフェース","レポート","サービス操作","ポート","分類","重要度","確かさ","観測根拠","推奨対応コード","確認時刻（Unix秒）","差分","対応状況","理由","根拠の取得元コード","影響コード","比較元レポート","観測元IP","アドレス種別","手動確認（利用者の申告・JSON）"]),
+        "zh-CN" => ("zh-CN","FlowGuard 观测报告","只读评估已有观测依据。未验证或未执行不代表安全。会话最多20条，不自动更改策略。CSV使用通用机器可读代码。",["目标","接口","报告","服务操作","端口","分类","严重程度","确定性","观测依据","建议代码","确认时间（Unix秒）","差异","处理状态","原因","证据来源代码","影响代码","基准报告","观测来源IP","地址类型","手动检查（用户申报・JSON）"]),
         _ => ("en","FlowGuard observations","Read-only evidence assessment. Unverified and not-performed checks are not proof of safety. Maximum 20 session reports; no automatic policy changes. CSV uses stable machine-readable codes.",headers),
     };
-    Ok(format!("<!doctype html><html lang=\"{lang}\"><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>{title}</title><style>body{{font:14px system-ui;padding:16px}}td,th{{border:1px solid #888;padding:8px;overflow-wrap:anywhere}}table{{border-collapse:collapse}}</style><h1>{title}</h1><p>{help}</p><table><thead><tr>{}</tr></thead><tbody>{}</tbody></table></html>",labels.iter().map(|h|format!("<th>{}</th>",html(h))).collect::<String>(),rows.iter().map(|row|format!("<tr>{}</tr>",row.iter().map(|s|format!("<td>{}</td>",html(s))).collect::<String>())).collect::<String>()))
+    Ok(format!("<!doctype html><html lang=\"{lang}\"><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>{title}</title><style>body{{font:14px system-ui;line-height:1.5;margin:0;padding:24px;color:#1e3542;background:#f4f8fa}}h1{{margin:0 0 8px;font-size:22px}}p{{color:#4d6572;margin:0 0 18px}}.table-wrap{{overflow-x:auto;border:1px solid #cbdde3;border-radius:12px;background:#fff}}td,th{{border-bottom:1px solid #dbe7eb;padding:10px 12px;overflow-wrap:anywhere;text-align:left;vertical-align:top}}th{{background:#edf5f7;color:#31586a;white-space:nowrap}}tbody tr:last-child td{{border-bottom:0}}table{{border-collapse:collapse;width:100%}}</style><h1>{title}</h1><p>{help}</p><div class=\"table-wrap\"><table><thead><tr>{}</tr></thead><tbody>{}</tbody></table></div></html>",labels.iter().map(|h|format!("<th>{}</th>",html(h))).collect::<String>(),rows.iter().map(|row|format!("<tr>{}</tr>",row.iter().map(|s|format!("<td>{}</td>",html(s))).collect::<String>())).collect::<String>()))
 }
 #[cfg(test)]
 mod tests {
@@ -765,6 +844,8 @@ mod tests {
             operation: 1,
             stage: "completed".into(),
             target: "192.0.2.1".into(),
+            source_address: "192.0.2.2".into(),
+            family: "IPv4".into(),
             ..Default::default()
         };
         job.rows.push(crate::services::Row {
@@ -785,11 +866,66 @@ mod tests {
         }
         assert_eq!(s.reports.len(), 20);
         let r = &s.reports[0];
+        assert_eq!(r.source_address, "192.0.2.2");
+        assert_eq!(r.family, "IPv4");
+        let ui = s.for_ui();
+        assert_eq!(ui.reports[0].source_address, "192.0.2.2");
+        assert_eq!(ui.reports[0].family, "IPv4");
         assert!(r.findings.iter().all(|f| f.certainty != "safe"));
         assert!(r.findings.iter().any(|f| f.certainty == "not_performed"));
         assert!(r.findings.iter().all(|f| f.change == "uncompared"));
         job.stage = "cancelled".into();
         assert!(s.assess(&job, 2).is_err());
+    }
+    #[test]
+    fn manual_checks_validate_and_remain_separate_per_report() {
+        let mut state = Snapshot::default();
+        let mut job = crate::services::Snapshot {
+            operation: 1,
+            stage: "completed".into(),
+            target: "192.0.2.1".into(),
+            ..Default::default()
+        };
+        job.rows.push(crate::services::Row {
+            port: 80,
+            candidate: "http".into(),
+            service: None,
+            status: "timeout".into(),
+            method: "http".into(),
+            product: None,
+            response: None,
+            tls: None,
+            tls_details: None,
+            http_headers: None,
+            observed_at: 1,
+        });
+        state.assess(&job, 2).unwrap();
+        let valid = r#"{"item":"mfa","status":"confirmed","evidence":"Reviewed settings","owner":"Alex","checkedAt":"2026-10-29","nextAt":"2027-01-29"}"#;
+        state.save_manual_check(1, valid).unwrap();
+        assert_eq!(
+            state.for_ui().reports[0].manual_checks[0].status,
+            "confirmed"
+        );
+        assert!(state
+            .save_manual_check(1, &valid.replace("Reviewed settings", ""))
+            .is_err());
+        assert!(state
+            .save_manual_check(1, &valid.replace("mfa", "unrecognized"))
+            .is_err());
+        assert!(state.save_manual_check(2, valid).is_err());
+        assert_eq!(state.reports[0].manual_checks.len(), 1);
+        let csv = export(&state.reports[0], "csv").unwrap();
+        assert!(csv.contains("manual_checks_json"));
+        assert!(csv.contains("Reviewed settings"));
+        let html = export_locale(&state.reports[0], "html", "ja").unwrap();
+        assert!(html.contains("手動確認（利用者の申告・JSON）"));
+        assert!(html.contains("Reviewed settings"));
+        state.assess(&job, 3).unwrap();
+        assert!(state.reports[0].manual_checks.is_empty());
+        assert_eq!(
+            state.reports[1].manual_checks[0].evidence,
+            "Reviewed settings"
+        );
     }
     #[test]
     fn export_escapes_untrusted_evidence_and_edits_are_checked() {
@@ -800,9 +936,12 @@ mod tests {
             generation: 1,
             target: "<script>x</script>".into(),
             interface: "en0".into(),
+            source_address: "192.168.1.1".into(),
+            family: "IPv4".into(),
             created_at: 0,
             baseline_report: None,
             comparison_scope: None,
+            manual_checks: vec![],
             findings: vec![Finding {
                 id: "f".into(),
                 port: 1,
@@ -830,6 +969,16 @@ mod tests {
         assert!(csv.contains("evidence_source"));
         assert!(csv.contains("service_observation"));
         assert!(csv.contains("service_unverified"));
+        assert!(csv
+            .lines()
+            .next()
+            .unwrap()
+            .ends_with("\"source_address\",\"address_family\",\"manual_checks_json\""));
+        assert!(csv
+            .lines()
+            .nth(1)
+            .unwrap()
+            .contains("\"192.168.1.1\",\"IPv4\",\"[]\""));
         assert_eq!(csv_cell("  =SUM(1)"), "\"'  =SUM(1)\"");
         for (locale, title) in [
             ("ja", "観測レポート"),
@@ -837,8 +986,21 @@ mod tests {
             ("zh-CN", "观测报告"),
         ] {
             let report = export_locale(&s.reports[0], "html", locale).unwrap();
+            assert!(report.contains("<td>192.168.1.1</td><td>IPv4</td><td>[]</td>"));
             assert!(report.contains(title));
             assert!(report.contains("&lt;script&gt;"));
+        }
+        s.reports[0].source_address = "fe80::1%en0".into();
+        s.reports[0].family = "IPv6".into();
+        let csv6 = export(&s.reports[0], "csv").unwrap();
+        assert!(csv6
+            .lines()
+            .nth(1)
+            .unwrap()
+            .contains("\"fe80::1%en0\",\"IPv6\",\"[]\""));
+        for locale in ["ja", "en", "zh-CN"] {
+            let html6 = export_locale(&s.reports[0], "html", locale).unwrap();
+            assert!(html6.contains("<td>fe80::1%en0</td><td>IPv6</td><td>[]</td>"));
         }
         assert!(s.select(2, None).is_err());
     }
