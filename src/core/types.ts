@@ -59,7 +59,8 @@ export interface SyslogSnapshot {operation:number;config:SyslogConfig|null;stage
 export type DiagnosticDisposition='open'|'resolved'|'recheck'|'out_of_scope';
 export interface DiagnosticFinding{id:string;port:number;category:string;severity:string;certainty:string;evidence:string;evidenceSource?:string;impact?:string;recommendation:string;observedAt:number;change:string;disposition:DiagnosticDisposition;reason:string}
 export interface ManualCheck{item:string;status:string;evidence:string;owner:string;checkedAt:string;nextAt:string}
-export interface DiagnosticReport{id:number;serviceOperation:number;generation:number;target:string;interface:string;sourceAddress?:string;family?:string;createdAt:number;baselineReport?:number|null;manualChecks?:ManualCheck[];findings:DiagnosticFinding[]}
+export interface DeclaredScope{revision:number;purpose:string;environment:string;owner:string;exposure:string}
+export interface DiagnosticReport{id:number;serviceOperation:number;generation:number;target:string;interface:string;sourceAddress?:string;family?:string;createdAt:number;baselineReport?:number|null;manualChecks?:ManualCheck[];declaredScope?:DeclaredScope;findings:DiagnosticFinding[]}
 export interface DiagnosticSnapshot{reports:DiagnosticReport[];selectedReport:number|null;selectedFinding:string|null}
 
 export interface FlowNamesSnapshot{enabled:boolean;operation:number;busy:boolean;searchEnabled:boolean;rows:{connectionId:string;values:{value:string;observedAt:number;source:'network_extension_remote_hostname';trust:'unverified_tuple_time_candidate'}[]}[];error:string|null}

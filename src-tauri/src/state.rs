@@ -1234,6 +1234,9 @@ impl SharedState {
                 s.diagnostics.assess(&job, now())?;
             }
             "select" => s.diagnostics.select(report, finding)?,
+            "declared_scope" => s
+                .diagnostics
+                .save_declared_scope(report, reason.as_deref().ok_or("scope_required")?)?,
             "manual_check" => s
                 .diagnostics
                 .save_manual_check(report, reason.as_deref().ok_or("manual_check_required")?)?,
@@ -1987,6 +1990,7 @@ mod tests {
                 baseline_report: None,
                 comparison_scope: None,
                 manual_checks: vec![],
+                declared_scope: crate::diagnostics::DeclaredScope::default(),
                 findings: vec![crate::diagnostics::Finding {
                     id: "443:tls".into(),
                     port: 443,

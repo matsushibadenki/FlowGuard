@@ -12,7 +12,8 @@ const words={
 const ids=['mfa','backup','restore','incident'] as const;
 const icons=[ShieldCheck,DatabaseBackup,RotateCcw,Siren];
 export function ManualChecks({report,locale,native}:{report:DiagnosticReport;locale:keyof typeof words;native:boolean}){
- const w=words[locale], [item,setItem]=useState<(typeof ids)[number]>('mfa'), [status,setStatus]=useState('unknown'), [evidence,setEvidence]=useState(''), [owner,setOwner]=useState(''), [checkedAt,setCheckedAt]=useState(''), [nextAt,setNextAt]=useState(''), [busy,setBusy]=useState(false), [error,setError]=useState(false);
+ const initial=report.manualChecks?.find(entry=>entry.item==='mfa');
+ const w=words[locale], [item,setItem]=useState<(typeof ids)[number]>('mfa'), [status,setStatus]=useState(initial?.status??'unknown'), [evidence,setEvidence]=useState(initial?.evidence??''), [owner,setOwner]=useState(initial?.owner??''), [checkedAt,setCheckedAt]=useState(initial?.checkedAt??''), [nextAt,setNextAt]=useState(initial?.nextAt??''), [busy,setBusy]=useState(false), [error,setError]=useState(false);
  const entries=report.manualChecks??[], remaining=ids.filter(id=>!entries.some(e=>e.item===id&&e.status!=='unknown')).length;
  function select(id:(typeof ids)[number]){const saved=entries.find(e=>e.item===id);setItem(id);setStatus(saved?.status??'unknown');setEvidence(saved?.evidence??'');setOwner(saved?.owner??'');setCheckedAt(saved?.checkedAt??'');setNextAt(saved?.nextAt??'');setError(false);}
  async function save(){setBusy(true);setError(false);try{const entry:ManualCheck={item,status,evidence,owner,checkedAt,nextAt};await diagnosticAction('manual_check',report.id,null,0,null,JSON.stringify(entry));}catch{setError(true);}finally{setBusy(false);}}

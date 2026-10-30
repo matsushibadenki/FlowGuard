@@ -123,6 +123,16 @@ pub struct ManualCheck {
     pub next_at: String,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeclaredScope {
+    pub revision: u64,
+    pub purpose: String,
+    pub environment: String,
+    pub owner: String,
+    pub exposure: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
@@ -139,6 +149,7 @@ pub struct Report {
     pub comparison_scope: Option<ComparisonScope>,
     pub findings: Vec<Finding>,
     pub manual_checks: Vec<ManualCheck>,
+    pub declared_scope: DeclaredScope,
 }
 #[derive(Clone, Default, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -165,6 +176,7 @@ impl Snapshot {
                     baseline_report: r.baseline_report,
                     comparison_scope: None,
                     manual_checks: r.manual_checks.clone(),
+                    declared_scope: r.declared_scope.clone(),
                     findings: if Some(r.id) == self.selected_report {
                         r.findings.clone()
                     } else {
@@ -402,6 +414,7 @@ impl Snapshot {
                 baseline_report,
                 comparison_scope,
                 manual_checks: vec![],
+                declared_scope: DeclaredScope::default(),
                 findings,
             },
         );
@@ -502,6 +515,34 @@ impl Snapshot {
         }
         Ok(())
     }
+    pub fn save_declared_scope(&mut self, report: u64, raw: &str) -> Result<(), String> {
+        if raw.len() > 4096 {
+            return Err("scope_invalid".into());
+        }
+        let mut entry: DeclaredScope = serde_json::from_str(raw).map_err(|_| "scope_invalid")?;
+        if [
+            &entry.purpose,
+            &entry.environment,
+            &entry.owner,
+            &entry.exposure,
+        ]
+        .iter()
+        .any(|v| v.len() > 256 || v.chars().any(char::is_control))
+        {
+            return Err("scope_invalid".into());
+        }
+        let target = self
+            .reports
+            .iter_mut()
+            .find(|r| r.id == report)
+            .ok_or("stale_report")?;
+        if target.declared_scope.revision != entry.revision {
+            return Err("scope_conflict".into());
+        }
+        entry.revision = entry.revision.checked_add(1).ok_or("scope_invalid")?;
+        target.declared_scope = entry;
+        Ok(())
+    }
     pub fn report(&self, id: u64) -> Result<&Report, String> {
         self.reports
             .iter()
@@ -545,6 +586,7 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
         "source_address",
         "address_family",
         "manual_checks_json",
+        "declared_scope_json",
     ];
     let rows: Vec<Vec<String>> = r
         .findings
@@ -577,6 +619,7 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
                 r.source_address.clone(),
                 r.family.clone(),
                 serde_json::to_string(&r.manual_checks).unwrap_or_default(),
+                serde_json::to_string(&r.declared_scope).unwrap_or_default(),
             ]
         })
         .collect();
@@ -601,11 +644,135 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
         return Err("invalid_report_format".into());
     }
     let (lang,title,help,labels) = match locale {
-        "ja" => ("ja","FlowGuard 観測レポート","既存の観測根拠を読み取り専用で評価。未検証・未実施は安全の証明ではありません。セッション内最大20件、ポリシーの自動変更なし。CSVは共通の機械可読コードを使用します。",["対象","インターフェース","レポート","サービス操作","ポート","分類","重要度","確かさ","観測根拠","推奨対応コード","確認時刻（Unix秒）","差分","対応状況","理由","根拠の取得元コード","影響コード","比較元レポート","観測元IP","アドレス種別","手動確認（利用者の申告・JSON）"]),
-        "zh-CN" => ("zh-CN","FlowGuard 观测报告","只读评估已有观测依据。未验证或未执行不代表安全。会话最多20条，不自动更改策略。CSV使用通用机器可读代码。",["目标","接口","报告","服务操作","端口","分类","严重程度","确定性","观测依据","建议代码","确认时间（Unix秒）","差异","处理状态","原因","证据来源代码","影响代码","基准报告","观测来源IP","地址类型","手动检查（用户申报・JSON）"]),
+        "ja" => ("ja","FlowGuard 観測レポート","既存の観測根拠を読み取り専用で評価。未検証・未実施は安全の証明ではありません。セッション内最大20件、ポリシーの自動変更なし。CSVは共通の機械可読コードを使用します。",["対象","インターフェース","レポート","サービス操作","ポート","分類","重要度","確かさ","観測根拠","推奨対応コード","確認時刻（Unix秒）","差分","対応状況","理由","根拠の取得元コード","影響コード","比較元レポート","観測元IP","アドレス種別","手動確認（利用者の申告・JSON）","診断範囲（利用者の申告・JSON）"]),
+        "zh-CN" => ("zh-CN","FlowGuard 观测报告","只读评估已有观测依据。未验证或未执行不代表安全。会话最多20条，不自动更改策略。CSV使用通用机器可读代码。",["目标","接口","报告","服务操作","端口","分类","严重程度","确定性","观测依据","建议代码","确认时间（Unix秒）","差异","处理状态","原因","证据来源代码","影响代码","基准报告","观测来源IP","地址类型","手动检查（用户申报・JSON）","诊断范围（用户申报・JSON）"]),
         _ => ("en","FlowGuard observations","Read-only evidence assessment. Unverified and not-performed checks are not proof of safety. Maximum 20 session reports; no automatic policy changes. CSV uses stable machine-readable codes.",headers),
     };
-    Ok(format!("<!doctype html><html lang=\"{lang}\"><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>{title}</title><style>body{{font:14px system-ui;line-height:1.5;margin:0;padding:24px;color:#1e3542;background:#f4f8fa}}h1{{margin:0 0 8px;font-size:22px}}p{{color:#4d6572;margin:0 0 18px}}.table-wrap{{overflow-x:auto;border:1px solid #cbdde3;border-radius:12px;background:#fff}}td,th{{border-bottom:1px solid #dbe7eb;padding:10px 12px;overflow-wrap:anywhere;text-align:left;vertical-align:top}}th{{background:#edf5f7;color:#31586a;white-space:nowrap}}tbody tr:last-child td{{border-bottom:0}}table{{border-collapse:collapse;width:100%}}</style><h1>{title}</h1><p>{help}</p><div class=\"table-wrap\"><table><thead><tr>{}</tr></thead><tbody>{}</tbody></table></div></html>",labels.iter().map(|h|format!("<th>{}</th>",html(h))).collect::<String>(),rows.iter().map(|row|format!("<tr>{}</tr>",row.iter().map(|s|format!("<td>{}</td>",html(s))).collect::<String>())).collect::<String>()))
+    // Manual checks are user declarations, separate from observed findings.
+    let (manual_title, manual_help, columns, items, statuses) = match locale {
+        "ja" => (
+            "手動確認",
+            "利用者の申告。実測や安全性の証明ではありません。",
+            [
+                "項目",
+                "状態",
+                "確認した根拠",
+                "確認者",
+                "確認日",
+                "次回確認日",
+            ],
+            [
+                "管理アカウントのMFA",
+                "別環境へのバックアップ",
+                "復元テスト",
+                "インシデント対応手順",
+            ],
+            ["未確認", "確認済み", "要対応", "対象外"],
+        ),
+        "zh-CN" => (
+            "手动检查",
+            "用户申报，并非实测或安全证明。",
+            ["项目", "状态", "确认依据", "确认人", "确认日期", "下次确认"],
+            ["管理账户多因素认证", "异地备份", "恢复测试", "事件响应流程"],
+            ["未确认", "已确认", "需处理", "不适用"],
+        ),
+        _ => (
+            "Manual checks",
+            "User-reported; not proof of observation or safety.",
+            [
+                "Item",
+                "Status",
+                "Evidence reviewed",
+                "Reviewer",
+                "Reviewed on",
+                "Next review",
+            ],
+            [
+                "Management account MFA",
+                "Off-site backup",
+                "Restore test",
+                "Incident response plan",
+            ],
+            ["Unconfirmed", "Confirmed", "Needs action", "Out of scope"],
+        ),
+    };
+    let (scope_title, scope_fields) = match locale {
+        "ja" => ("診断範囲", ["用途", "環境", "管理責任者", "想定公開範囲"]),
+        "zh-CN" => ("诊断范围", ["用途", "环境", "负责人", "预期公开范围"]),
+        _ => (
+            "Assessment scope",
+            [
+                "Purpose",
+                "Environment",
+                "Responsible person",
+                "Intended exposure",
+            ],
+        ),
+    };
+    let scope_values = [
+        &r.declared_scope.purpose,
+        &r.declared_scope.environment,
+        &r.declared_scope.owner,
+        &r.declared_scope.exposure,
+    ];
+    let scope_rows = scope_fields
+        .iter()
+        .zip(scope_values)
+        .map(|(name, value)| {
+            format!(
+                "<tr><th scope=\"row\">{}</th><td>{}</td></tr>",
+                html(name),
+                html(value)
+            )
+        })
+        .collect::<String>();
+    let manual_rows = ["mfa", "backup", "restore", "incident"]
+        .iter()
+        .enumerate()
+        .map(|(i, id)| {
+            let entry = r.manual_checks.iter().find(|entry| entry.item == *id);
+            let status = match entry.map(|e| e.status.as_str()) {
+                Some("confirmed") => 1,
+                Some("needs_work") => 2,
+                Some("out_of_scope") => 3,
+                _ => 0,
+            };
+            let fields = [
+                items[i],
+                statuses[status],
+                entry.map_or("", |e| e.evidence.as_str()),
+                entry.map_or("", |e| e.owner.as_str()),
+                entry.map_or("", |e| e.checked_at.as_str()),
+                entry.map_or("", |e| e.next_at.as_str()),
+            ];
+            format!(
+                "<tr>{}</tr>",
+                fields
+                    .iter()
+                    .map(|s| format!("<td>{}</td>", html(s)))
+                    .collect::<String>()
+            )
+        })
+        .collect::<String>();
+    let headings = |labels: &[&str]| {
+        labels
+            .iter()
+            .map(|h| format!("<th scope=\"col\">{}</th>", html(h)))
+            .collect::<String>()
+    };
+    let finding_rows = rows
+        .iter()
+        .map(|row| {
+            format!(
+                "<tr>{}</tr>",
+                row[..row.len() - 2]
+                    .iter()
+                    .map(|s| format!("<td>{}</td>", html(s)))
+                    .collect::<String>()
+            )
+        })
+        .collect::<String>();
+    Ok(format!("<!doctype html><html lang=\"{lang}\"><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>{title}</title><style>body{{font:14px system-ui;line-height:1.5;margin:0;padding:24px;color:#1e3542;background:#f4f8fa}}h1{{margin:0 0 8px;font-size:22px}}h2{{margin:28px 0 4px;font-size:18px}}p{{color:#4d6572;margin:0 0 18px}}.table-wrap{{overflow-x:auto;border:1px solid #cbdde3;border-radius:12px;background:#fff}}td,th{{border-bottom:1px solid #dbe7eb;padding:10px 12px;overflow-wrap:anywhere;text-align:left;vertical-align:top}}th{{background:#edf5f7;color:#31586a;white-space:nowrap}}tbody tr:last-child td{{border-bottom:0}}table{{border-collapse:collapse;width:100%}}</style><h1>{title}</h1><p>{help}</p><div class=\"table-wrap\"><table><thead><tr>{}</tr></thead><tbody>{finding_rows}</tbody></table></div><section><h2>{scope_title}</h2><p>{manual_help}</p><div class=\"table-wrap\"><table><tbody>{scope_rows}</tbody></table></div></section><section><h2>{manual_title}</h2><p>{manual_help}</p><div class=\"table-wrap\"><table><thead><tr>{}</tr></thead><tbody>{manual_rows}</tbody></table></div></section></html>", headings(&labels[..labels.len()-2]), headings(&columns)))
 }
 #[cfg(test)]
 mod tests {
@@ -914,14 +1081,36 @@ mod tests {
             .is_err());
         assert!(state.save_manual_check(2, valid).is_err());
         assert_eq!(state.reports[0].manual_checks.len(), 1);
+        let scope = r#"{"revision":0,"purpose":"<web>","environment":"production","owner":"Alex","exposure":"internal"}"#;
+        state.save_declared_scope(1, scope).unwrap();
+        assert_eq!(state.for_ui().reports[0].declared_scope.revision, 1);
+        assert!(state.save_declared_scope(1, scope).is_err());
+        assert!(state.save_declared_scope(2, scope).is_err());
+        let rendered = export_locale(&state.reports[0], "html", "ja").unwrap();
+        assert!(rendered.contains("診断範囲"));
+        assert!(rendered.contains("&lt;web&gt;"));
+        assert!(!rendered.contains("<web>"));
         let csv = export(&state.reports[0], "csv").unwrap();
         assert!(csv.contains("manual_checks_json"));
+        assert!(csv.contains("declared_scope_json"));
+        assert!(csv.contains("production"));
         assert!(csv.contains("Reviewed settings"));
         let html = export_locale(&state.reports[0], "html", "ja").unwrap();
-        assert!(html.contains("手動確認（利用者の申告・JSON）"));
+        assert!(html.contains("手動確認"));
+        assert!(html.contains("管理アカウントのMFA"));
+        assert!(html.contains("未確認"));
+        assert!(!html.contains("manual_checks_json"));
         assert!(html.contains("Reviewed settings"));
+        state.reports[0].manual_checks[0].evidence = "<script>&\"".into();
+        for locale in ["ja", "en", "zh-CN"] {
+            let output = export_locale(&state.reports[0], "html", locale).unwrap();
+            assert!(output.contains("&lt;script&gt;&amp;&quot;"));
+            assert!(!output.contains("<script>"));
+        }
+        state.reports[0].manual_checks[0].evidence = "Reviewed settings".into();
         state.assess(&job, 3).unwrap();
         assert!(state.reports[0].manual_checks.is_empty());
+        assert_eq!(state.reports[0].declared_scope.revision, 0);
         assert_eq!(
             state.reports[1].manual_checks[0].evidence,
             "Reviewed settings"
@@ -942,6 +1131,7 @@ mod tests {
             baseline_report: None,
             comparison_scope: None,
             manual_checks: vec![],
+            declared_scope: DeclaredScope::default(),
             findings: vec![Finding {
                 id: "f".into(),
                 port: 1,
@@ -969,11 +1159,9 @@ mod tests {
         assert!(csv.contains("evidence_source"));
         assert!(csv.contains("service_observation"));
         assert!(csv.contains("service_unverified"));
-        assert!(csv
-            .lines()
-            .next()
-            .unwrap()
-            .ends_with("\"source_address\",\"address_family\",\"manual_checks_json\""));
+        assert!(csv.lines().next().unwrap().ends_with(
+            "\"source_address\",\"address_family\",\"manual_checks_json\",\"declared_scope_json\""
+        ));
         assert!(csv
             .lines()
             .nth(1)
@@ -986,7 +1174,7 @@ mod tests {
             ("zh-CN", "观测报告"),
         ] {
             let report = export_locale(&s.reports[0], "html", locale).unwrap();
-            assert!(report.contains("<td>192.168.1.1</td><td>IPv4</td><td>[]</td>"));
+            assert!(report.contains("<td>192.168.1.1</td><td>IPv4</td>"));
             assert!(report.contains(title));
             assert!(report.contains("&lt;script&gt;"));
         }
@@ -1000,7 +1188,7 @@ mod tests {
             .contains("\"fe80::1%en0\",\"IPv6\",\"[]\""));
         for locale in ["ja", "en", "zh-CN"] {
             let html6 = export_locale(&s.reports[0], "html", locale).unwrap();
-            assert!(html6.contains("<td>fe80::1%en0</td><td>IPv6</td><td>[]</td>"));
+            assert!(html6.contains("<td>fe80::1%en0</td><td>IPv6</td>"));
         }
         assert!(s.select(2, None).is_err());
     }
