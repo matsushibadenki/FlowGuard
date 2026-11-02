@@ -115,6 +115,8 @@ impl ComparisonScope {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ManualCheck {
+    #[serde(default)]
+    pub revision: u64,
     pub item: String,
     pub status: String,
     pub evidence: String,
@@ -466,7 +468,8 @@ impl Snapshot {
         if raw.len() > 4096 {
             return Err("manual_check_invalid".into());
         }
-        let entry: ManualCheck = serde_json::from_str(raw).map_err(|_| "manual_check_invalid")?;
+        let mut entry: ManualCheck =
+            serde_json::from_str(raw).map_err(|_| "manual_check_invalid")?;
         if !["mfa", "backup", "restore", "incident"].contains(&entry.item.as_str())
             || !["unknown", "confirmed", "needs_work", "out_of_scope"]
                 .contains(&entry.status.as_str())
@@ -509,8 +512,19 @@ impl Snapshot {
             .iter_mut()
             .find(|v| v.item == entry.item)
         {
+            if existing.revision != entry.revision {
+                return Err("manual_check_conflict".into());
+            }
+            entry.revision = entry
+                .revision
+                .checked_add(1)
+                .ok_or("manual_check_invalid")?;
             *existing = entry;
         } else {
+            if entry.revision != 0 {
+                return Err("manual_check_conflict".into());
+            }
+            entry.revision = 1;
             target.manual_checks.push(entry);
         }
         Ok(())
@@ -1080,7 +1094,28 @@ mod tests {
             .save_manual_check(1, &valid.replace("mfa", "unrecognized"))
             .is_err());
         assert!(state.save_manual_check(2, valid).is_err());
+        assert_eq!(state.reports[0].manual_checks[0].revision, 1);
+        assert_eq!(
+            state.save_manual_check(1, valid).unwrap_err(),
+            "manual_check_conflict"
+        );
+        let updated = valid
+            .replacen("{", "{\"revision\":1,", 1)
+            .replace("Reviewed settings", "New evidence");
+        state.save_manual_check(1, &updated).unwrap();
+        assert_eq!(state.reports[0].manual_checks[0].revision, 2);
+        assert_eq!(
+            state.save_manual_check(1, &updated).unwrap_err(),
+            "manual_check_conflict"
+        );
+        assert_eq!(state.reports[0].manual_checks[0].evidence, "New evidence");
+        state.reports[0].manual_checks[0].evidence = "Reviewed settings".into();
+
         assert_eq!(state.reports[0].manual_checks.len(), 1);
+        let backup = valid.replace("mfa", "backup");
+        state.save_manual_check(1, &backup).unwrap();
+        assert_eq!(state.reports[0].manual_checks[1].revision, 1);
+        assert_eq!(state.reports[0].manual_checks[0].revision, 2);
         let scope = r#"{"revision":0,"purpose":"<web>","environment":"production","owner":"Alex","exposure":"internal"}"#;
         state.save_declared_scope(1, scope).unwrap();
         assert_eq!(state.for_ui().reports[0].declared_scope.revision, 1);

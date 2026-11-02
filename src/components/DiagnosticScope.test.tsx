@@ -11,6 +11,9 @@ describe('exposure review',()=>{
   expect(html).toContain('192.0.2.2');
   expect(html).toContain('応答を確認 1');
   expect(html).toContain('応答未確認 1');
+  expect(html).toContain('番号からの候補');
+  expect(html).toContain('HTTPS');
+  expect(html).toContain('SSH');
   expect(html).toContain('aria-pressed="true"');
   expect(html).toContain('aria-label="診断詳細を開く: 443');
   expect(html).toContain('aria-pressed="false"');

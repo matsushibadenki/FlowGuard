@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {ManualChecks} from './ManualChecks';
 import type {DiagnosticReport} from '../core/types';
@@ -16,6 +16,16 @@ describe('manual checks',()=>{
   expect(markup).toContain('value="2026-10-29"');
   expect(markup).toContain('value="2027-01-29"');
   expect(markup).toContain('value="confirmed" selected');
+ });
+ it('shows saved review deadlines without changing the unconfirmed count',()=>{
+  vi.useFakeTimers();
+  try{
+   vi.setSystemTime(new Date(2027,0,30,12));
+   const markup=renderToStaticMarkup(<ManualChecks report={report} locale="ja" native={true}/>);
+   expect(markup).toContain('期限超過');
+   expect(markup).toContain('2027-01-29');
+   expect(markup).toContain('未確認 3');
+  }finally{vi.useRealTimers();}
  });
  it('starts unconfirmed when the report has no saved MFA entry',()=>{
   const markup=renderToStaticMarkup(<ManualChecks report={{...report, manualChecks:[]}} locale="en" native={true}/>);

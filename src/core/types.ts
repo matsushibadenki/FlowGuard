@@ -58,7 +58,7 @@ export interface SyslogSnapshot {operation:number;config:SyslogConfig|null;stage
 
 export type DiagnosticDisposition='open'|'resolved'|'recheck'|'out_of_scope';
 export interface DiagnosticFinding{id:string;port:number;category:string;severity:string;certainty:string;evidence:string;evidenceSource?:string;impact?:string;recommendation:string;observedAt:number;change:string;disposition:DiagnosticDisposition;reason:string}
-export interface ManualCheck{item:string;status:string;evidence:string;owner:string;checkedAt:string;nextAt:string}
+export interface ManualCheck{revision?:number;item:string;status:string;evidence:string;owner:string;checkedAt:string;nextAt:string}
 export interface DeclaredScope{revision:number;purpose:string;environment:string;owner:string;exposure:string}
 export interface DiagnosticReport{id:number;serviceOperation:number;generation:number;target:string;interface:string;sourceAddress?:string;family?:string;createdAt:number;baselineReport?:number|null;manualChecks?:ManualCheck[];declaredScope?:DeclaredScope;findings:DiagnosticFinding[]}
 export interface DiagnosticSnapshot{reports:DiagnosticReport[];selectedReport:number|null;selectedFinding:string|null}

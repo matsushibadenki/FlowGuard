@@ -152,6 +152,7 @@ export async function setDestinationNames(enabled:boolean,operation:number){if(!
 export async function lookupDestinationName(connectionId:string,address:string,operation:number){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('lookup_destination_name',{connectionId,address,operation}));}
 export async function clearDestinationNames(operation:number){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('clear_destination_names',{operation}));}
 
+export async function refreshDiagnosticSnapshot(){if(!native)throw Error('desktop_required');const latest=await invoke<Snapshot>('get_snapshot');emit(latest);return latest;}
 export async function diagnosticAction(action:string,report=0,finding:string|null=null,serviceOperation=0,disposition:import('./types').DiagnosticDisposition|null=null,reason:string|null=null){if(!native)throw Error('desktop_required');emit(await invoke<Snapshot>('diagnostic_action',{action,report,finding,serviceOperation,disposition,reason}));}
 export async function diagnosticExport(report:number,format:'csv'|'html'){if(!native)throw Error('desktop_required');return invoke<string>('diagnostic_export',{report,format});}
 

@@ -3,3 +3,5 @@
 .scope-ports{grid-column:2;display:flex;gap:4px;flex-wrap:wrap}.scope-ports button{display:inline-block;padding:2px 5px;border:1px solid #d7e3e7;border-radius:5px;font-variant-numeric:tabular-nums}.scope-ports button[data-observed=true]{color:#28715c;background:#eef8f3;border-color:#c5e1d4}
 
 .scope-ports button{cursor:pointer;color:#526978;background:#fff;font-size:11px;line-height:1.4}.scope-ports button[aria-pressed=true]{outline:2px solid #16889e;outline-offset:1px}.scope-ports button:focus-visible{outline:2px solid #176e89;outline-offset:2px}.scope-ports button:disabled{cursor:default;opacity:.7}
+
+.scope-node .scope-candidate-label{grid-column:2;display:flex;align-items:center;gap:4px;font-size:10px;color:#617987}.scope-ports button{display:inline-flex;align-items:baseline;gap:5px}.scope-ports button span{font-size:10px;color:inherit}.scope-ports button b{font-weight:650}
