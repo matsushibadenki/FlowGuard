@@ -1119,7 +1119,12 @@ mod tests {
         let scope = r#"{"revision":0,"purpose":"<web>","environment":"production","owner":"Alex","exposure":"internal"}"#;
         state.save_declared_scope(1, scope).unwrap();
         assert_eq!(state.for_ui().reports[0].declared_scope.revision, 1);
-        assert!(state.save_declared_scope(1, scope).is_err());
+        let stale = scope.replace("production", "stale update");
+        assert_eq!(
+            state.save_declared_scope(1, &stale).unwrap_err(),
+            "scope_conflict"
+        );
+        assert_eq!(state.reports[0].declared_scope.environment, "production");
         assert!(state.save_declared_scope(2, scope).is_err());
         let rendered = export_locale(&state.reports[0], "html", "ja").unwrap();
         assert!(rendered.contains("診断範囲"));
