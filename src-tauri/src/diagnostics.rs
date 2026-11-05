@@ -135,6 +135,21 @@ pub struct DeclaredScope {
     pub exposure: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExposureReview {
+    pub port: u16,
+    pub revision: u64,
+    pub status: String,
+    pub note: String,
+    #[serde(default)]
+    pub reviewer: String,
+    #[serde(default)]
+    pub reviewed_at: String,
+    #[serde(default)]
+    pub next_at: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
@@ -152,6 +167,7 @@ pub struct Report {
     pub findings: Vec<Finding>,
     pub manual_checks: Vec<ManualCheck>,
     pub declared_scope: DeclaredScope,
+    pub exposure_reviews: Vec<ExposureReview>,
 }
 #[derive(Clone, Default, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -159,6 +175,31 @@ pub struct Snapshot {
     pub reports: Vec<Report>,
     pub selected_report: Option<u64>,
     pub selected_finding: Option<String>,
+}
+fn valid_review_date(value: &str) -> bool {
+    if value.is_empty() {
+        return true;
+    }
+    let bytes = value.as_bytes();
+    if bytes.len() != 10
+        || !bytes.iter().enumerate().all(|(i, b)| {
+            if i == 4 || i == 7 {
+                *b == b'-'
+            } else {
+                b.is_ascii_digit()
+            }
+        })
+    {
+        return false;
+    }
+    let year = value[0..4].parse::<i32>().unwrap_or(0);
+    let month = value[5..7].parse::<u8>().unwrap_or(0);
+    let day = value[8..10].parse::<u8>().unwrap_or(0);
+    year > 0
+        && time::Month::try_from(month)
+            .ok()
+            .and_then(|m| time::Date::from_calendar_date(year, m, day).ok())
+            .is_some()
 }
 impl Snapshot {
     pub fn for_ui(&self) -> Self {
@@ -179,6 +220,7 @@ impl Snapshot {
                     comparison_scope: None,
                     manual_checks: r.manual_checks.clone(),
                     declared_scope: r.declared_scope.clone(),
+                    exposure_reviews: r.exposure_reviews.clone(),
                     findings: if Some(r.id) == self.selected_report {
                         r.findings.clone()
                     } else {
@@ -417,6 +459,7 @@ impl Snapshot {
                 comparison_scope,
                 manual_checks: vec![],
                 declared_scope: DeclaredScope::default(),
+                exposure_reviews: vec![],
                 findings,
             },
         );
@@ -557,6 +600,56 @@ impl Snapshot {
         target.declared_scope = entry;
         Ok(())
     }
+    pub fn save_exposure_review(&mut self, report: u64, raw: &str) -> Result<(), String> {
+        if raw.len() > 2048 {
+            return Err("exposure_review_invalid".into());
+        }
+        let mut entry: ExposureReview =
+            serde_json::from_str(raw).map_err(|_| "exposure_review_invalid")?;
+        if !["unknown", "expected", "unexpected"].contains(&entry.status.as_str())
+            || entry.note.len() > 512
+            || entry.reviewer.len() > 128
+            || !valid_review_date(&entry.reviewed_at)
+            || !valid_review_date(&entry.next_at)
+            || entry.note.chars().any(char::is_control)
+            || entry.reviewer.chars().any(char::is_control)
+        {
+            return Err("exposure_review_invalid".into());
+        }
+        let target = self
+            .reports
+            .iter_mut()
+            .find(|r| r.id == report)
+            .ok_or("stale_report")?;
+        if !target
+            .findings
+            .iter()
+            .any(|f| f.category == "service" && f.port == entry.port)
+        {
+            return Err("stale_finding".into());
+        }
+        if let Some(previous) = target
+            .exposure_reviews
+            .iter_mut()
+            .find(|r| r.port == entry.port)
+        {
+            if previous.revision != entry.revision {
+                return Err("exposure_review_conflict".into());
+            }
+            entry.revision = entry
+                .revision
+                .checked_add(1)
+                .ok_or("exposure_review_invalid")?;
+            *previous = entry;
+        } else {
+            if entry.revision != 0 {
+                return Err("exposure_review_conflict".into());
+            }
+            entry.revision = 1;
+            target.exposure_reviews.push(entry);
+        }
+        Ok(())
+    }
     pub fn report(&self, id: u64) -> Result<&Report, String> {
         self.reports
             .iter()
@@ -601,6 +694,7 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
         "address_family",
         "manual_checks_json",
         "declared_scope_json",
+        "exposure_reviews_json",
     ];
     let rows: Vec<Vec<String>> = r
         .findings
@@ -634,6 +728,7 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
                 r.family.clone(),
                 serde_json::to_string(&r.manual_checks).unwrap_or_default(),
                 serde_json::to_string(&r.declared_scope).unwrap_or_default(),
+                serde_json::to_string(&r.exposure_reviews).unwrap_or_default(),
             ]
         })
         .collect();
@@ -658,8 +753,8 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
         return Err("invalid_report_format".into());
     }
     let (lang,title,help,labels) = match locale {
-        "ja" => ("ja","FlowGuard 観測レポート","既存の観測根拠を読み取り専用で評価。未検証・未実施は安全の証明ではありません。セッション内最大20件、ポリシーの自動変更なし。CSVは共通の機械可読コードを使用します。",["対象","インターフェース","レポート","サービス操作","ポート","分類","重要度","確かさ","観測根拠","推奨対応コード","確認時刻（Unix秒）","差分","対応状況","理由","根拠の取得元コード","影響コード","比較元レポート","観測元IP","アドレス種別","手動確認（利用者の申告・JSON）","診断範囲（利用者の申告・JSON）"]),
-        "zh-CN" => ("zh-CN","FlowGuard 观测报告","只读评估已有观测依据。未验证或未执行不代表安全。会话最多20条，不自动更改策略。CSV使用通用机器可读代码。",["目标","接口","报告","服务操作","端口","分类","严重程度","确定性","观测依据","建议代码","确认时间（Unix秒）","差异","处理状态","原因","证据来源代码","影响代码","基准报告","观测来源IP","地址类型","手动检查（用户申报・JSON）","诊断范围（用户申报・JSON）"]),
+        "ja" => ("ja","FlowGuard 観測レポート","既存の観測根拠を読み取り専用で評価。未検証・未実施は安全の証明ではありません。セッション内最大20件、ポリシーの自動変更なし。CSVは共通の機械可読コードを使用します。",["対象","インターフェース","レポート","サービス操作","ポート","分類","重要度","確かさ","観測根拠","推奨対応コード","確認時刻（Unix秒）","差分","対応状況","理由","根拠の取得元コード","影響コード","比較元レポート","観測元IP","アドレス種別","手動確認（利用者の申告・JSON）","診断範囲（利用者の申告・JSON）","公開範囲の確認（利用者の申告・JSON）"]),
+        "zh-CN" => ("zh-CN","FlowGuard 观测报告","只读评估已有观测依据。未验证或未执行不代表安全。会话最多20条，不自动更改策略。CSV使用通用机器可读代码。",["目标","接口","报告","服务操作","端口","分类","严重程度","确定性","观测依据","建议代码","确认时间（Unix秒）","差异","处理状态","原因","证据来源代码","影响代码","基准报告","观测来源IP","地址类型","手动检查（用户申报・JSON）","诊断范围（用户申报・JSON）","公开范围确认（用户申报・JSON）"]),
         _ => ("en","FlowGuard observations","Read-only evidence assessment. Unverified and not-performed checks are not proof of safety. Maximum 20 session reports; no automatic policy changes. CSV uses stable machine-readable codes.",headers),
     };
     // Manual checks are user declarations, separate from observed findings.
@@ -774,19 +869,58 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
             .map(|h| format!("<th scope=\"col\">{}</th>", html(h)))
             .collect::<String>()
     };
+    let (review_title, review_labels, review_statuses) = match locale {
+        "ja" => (
+            "公開範囲の確認",
+            ["ポート", "利用者の申告", "メモ", "確認者", "確認日", "次回確認日"],
+            ["未確認", "想定内", "想定外"],
+        ),
+        "zh-CN" => (
+            "公开范围确认",
+            ["端口", "用户申报", "备注", "确认人", "确认日期", "下次确认日期"],
+            ["未确认", "符合预期", "不符预期"],
+        ),
+        _ => (
+            "Exposure review",
+            ["Port", "User-reported", "Note", "Reviewer", "Reviewed on", "Next review"],
+            ["Unreviewed", "Expected", "Unexpected"],
+        ),
+    };
+    let review_rows = r
+        .findings
+        .iter()
+        .filter(|f| f.category == "service")
+        .map(|f| {
+            let review = r.exposure_reviews.iter().find(|e| e.port == f.port);
+            let status = match review.map(|r| r.status.as_str()) {
+                Some("expected") => 1,
+                Some("unexpected") => 2,
+                _ => 0,
+            };
+            format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                f.port,
+                html(review_statuses[status]),
+                html(review.map_or("", |r| r.note.as_str())),
+                html(review.map_or("", |r| r.reviewer.as_str())),
+                html(review.map_or("", |r| r.reviewed_at.as_str())),
+                html(review.map_or("", |r| r.next_at.as_str()))
+            )
+        })
+        .collect::<String>();
     let finding_rows = rows
         .iter()
         .map(|row| {
             format!(
                 "<tr>{}</tr>",
-                row[..row.len() - 2]
+                row[..row.len() - 3]
                     .iter()
                     .map(|s| format!("<td>{}</td>", html(s)))
                     .collect::<String>()
             )
         })
         .collect::<String>();
-    Ok(format!("<!doctype html><html lang=\"{lang}\"><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>{title}</title><style>body{{font:14px system-ui;line-height:1.5;margin:0;padding:24px;color:#1e3542;background:#f4f8fa}}h1{{margin:0 0 8px;font-size:22px}}h2{{margin:28px 0 4px;font-size:18px}}p{{color:#4d6572;margin:0 0 18px}}.table-wrap{{overflow-x:auto;border:1px solid #cbdde3;border-radius:12px;background:#fff}}td,th{{border-bottom:1px solid #dbe7eb;padding:10px 12px;overflow-wrap:anywhere;text-align:left;vertical-align:top}}th{{background:#edf5f7;color:#31586a;white-space:nowrap}}tbody tr:last-child td{{border-bottom:0}}table{{border-collapse:collapse;width:100%}}</style><h1>{title}</h1><p>{help}</p><div class=\"table-wrap\"><table><thead><tr>{}</tr></thead><tbody>{finding_rows}</tbody></table></div><section><h2>{scope_title}</h2><p>{manual_help}</p><div class=\"table-wrap\"><table><tbody>{scope_rows}</tbody></table></div></section><section><h2>{manual_title}</h2><p>{manual_help}</p><div class=\"table-wrap\"><table><thead><tr>{}</tr></thead><tbody>{manual_rows}</tbody></table></div></section></html>", headings(&labels[..labels.len()-2]), headings(&columns)))
+    Ok(format!("<!doctype html><html lang=\"{lang}\"><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>{title}</title><style>body{{font:14px system-ui;line-height:1.5;margin:0;padding:24px;color:#1e3542;background:#f4f8fa}}h1{{margin:0 0 8px;font-size:22px}}h2{{margin:28px 0 4px;font-size:18px}}p{{color:#4d6572;margin:0 0 18px}}.table-wrap{{overflow-x:auto;border:1px solid #cbdde3;border-radius:12px;background:#fff}}td,th{{border-bottom:1px solid #dbe7eb;padding:10px 12px;overflow-wrap:anywhere;text-align:left;vertical-align:top}}th{{background:#edf5f7;color:#31586a;white-space:nowrap}}tbody tr:last-child td{{border-bottom:0}}table{{border-collapse:collapse;width:100%}}</style><h1>{title}</h1><p>{help}</p><div class=\"table-wrap\"><table><thead><tr>{}</tr></thead><tbody>{finding_rows}</tbody></table></div><section><h2>{scope_title}</h2><p>{manual_help}</p><div class=\"table-wrap\"><table><tbody>{scope_rows}</tbody></table></div></section><section><h2>{review_title}</h2><p>{manual_help}</p><div class=\"table-wrap\"><table><thead><tr>{}</tr></thead><tbody>{review_rows}</tbody></table></div></section><section><h2>{manual_title}</h2><p>{manual_help}</p><div class=\"table-wrap\"><table><thead><tr>{}</tr></thead><tbody>{manual_rows}</tbody></table></div></section></html>", headings(&labels[..labels.len()-3]), headings(&review_labels), headings(&columns)))
 }
 #[cfg(test)]
 mod tests {
@@ -1126,13 +1260,75 @@ mod tests {
         );
         assert_eq!(state.reports[0].declared_scope.environment, "production");
         assert!(state.save_declared_scope(2, scope).is_err());
+        let review = r#"{"port":80,"revision":0,"status":"unexpected","note":"<review>"}"#;
+        state.save_exposure_review(1, review).unwrap();
+        assert_eq!(state.for_ui().reports[0].exposure_reviews[0].revision, 1);
+        assert!(state.reports[0].exposure_reviews[0].reviewer.is_empty());
+        let with_details = r#"{"port":80,"revision":1,"status":"unexpected","note":"<review>","reviewer":"<Alex>","reviewedAt":"2024-02-29"}"#;
+        for invalid in [
+            "2025-02-29",
+            "2024-13-01",
+            "0000-01-01",
+            "2024-2-01",
+            "2024-02-00",
+        ] {
+            assert_eq!(
+                state
+                    .save_exposure_review(1, &with_details.replace("2024-02-29", invalid))
+                    .unwrap_err(),
+                "exposure_review_invalid"
+            );
+        }
+        assert_eq!(
+            state
+                .save_exposure_review(1, &with_details.replace("<Alex>", &"x".repeat(129)))
+                .unwrap_err(),
+            "exposure_review_invalid"
+        );
+        let with_next = with_details.replace("\"reviewedAt\":\"2024-02-29\"", "\"reviewedAt\":\"2024-02-29\",\"nextAt\":\"2025-02-29\"");
+        assert_eq!(state.save_exposure_review(1, &with_next).unwrap_err(), "exposure_review_invalid");
+        let with_next = with_next.replace("2025-02-29", "2028-02-29");
+        state.save_exposure_review(1, &with_next).unwrap();
+        assert_eq!(state.reports[0].exposure_reviews[0].next_at, "2028-02-29");
+        assert_eq!(state.reports[0].exposure_reviews[0].revision, 2);
+        assert_eq!(
+            state.save_exposure_review(1, review).unwrap_err(),
+            "exposure_review_conflict"
+        );
+        assert!(state
+            .save_exposure_review(1, &review.replace("80", "81"))
+            .is_err());
+        assert!(state
+            .save_exposure_review(1, &review.replace("unexpected", "safe"))
+            .is_err());
+        assert_eq!(
+            state.reports[0]
+                .findings
+                .iter()
+                .find(|f| f.category == "service")
+                .unwrap()
+                .certainty,
+            "unverified"
+        );
         let rendered = export_locale(&state.reports[0], "html", "ja").unwrap();
         assert!(rendered.contains("診断範囲"));
+        assert!(rendered.contains("想定外"));
+        assert!(rendered.contains("&lt;review&gt;"));
+        assert!(rendered.contains("&lt;Alex&gt;"));
+        assert!(rendered.contains("2024-02-29"));
+        for locale in ["en", "ja", "zh-CN"] {
+            let output = export_locale(&state.reports[0], "html", locale).unwrap();
+            assert!(output.contains("&lt;Alex&gt;"));
+            assert!(output.contains("2024-02-29"));
+        }
         assert!(rendered.contains("&lt;web&gt;"));
         assert!(!rendered.contains("<web>"));
         let csv = export(&state.reports[0], "csv").unwrap();
         assert!(csv.contains("manual_checks_json"));
         assert!(csv.contains("declared_scope_json"));
+        assert!(csv.contains("exposure_reviews_json"));
+        assert!(csv.contains("unexpected"));
+        assert!(csv.contains("2024-02-29"));
         assert!(csv.contains("production"));
         assert!(csv.contains("Reviewed settings"));
         let html = export_locale(&state.reports[0], "html", "ja").unwrap();
@@ -1150,6 +1346,7 @@ mod tests {
         state.reports[0].manual_checks[0].evidence = "Reviewed settings".into();
         state.assess(&job, 3).unwrap();
         assert!(state.reports[0].manual_checks.is_empty());
+        assert!(state.reports[0].exposure_reviews.is_empty());
         assert_eq!(state.reports[0].declared_scope.revision, 0);
         assert_eq!(
             state.reports[1].manual_checks[0].evidence,
@@ -1172,6 +1369,7 @@ mod tests {
             comparison_scope: None,
             manual_checks: vec![],
             declared_scope: DeclaredScope::default(),
+            exposure_reviews: vec![],
             findings: vec![Finding {
                 id: "f".into(),
                 port: 1,
@@ -1200,7 +1398,7 @@ mod tests {
         assert!(csv.contains("service_observation"));
         assert!(csv.contains("service_unverified"));
         assert!(csv.lines().next().unwrap().ends_with(
-            "\"source_address\",\"address_family\",\"manual_checks_json\",\"declared_scope_json\""
+            "\"source_address\",\"address_family\",\"manual_checks_json\",\"declared_scope_json\",\"exposure_reviews_json\""
         ));
         assert!(csv
             .lines()

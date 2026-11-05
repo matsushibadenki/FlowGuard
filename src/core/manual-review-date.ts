@@ -18,3 +18,8 @@ export function manualReviewDue(entry:Pick<ManualCheck,'status'|'nextAt'>|undefi
  if(!entry||!['confirmed','needs_work'].includes(entry.status)||!validDate(entry.nextAt)||!validDate(today))return null;
  return entry.nextAt<today?'overdue':entry.nextAt===today?'today':null;
 }
+
+export function exposureReviewDue(entry:{status:string;nextAt?:string}|undefined,today:string):'overdue'|'today'|null{
+ if(!entry||!['expected','unexpected'].includes(entry.status)||!entry.nextAt||!validDate(entry.nextAt)||!validDate(today))return null;
+ return entry.nextAt<today?'overdue':entry.nextAt===today?'today':null;
+}

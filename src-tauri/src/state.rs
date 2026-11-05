@@ -1237,6 +1237,10 @@ impl SharedState {
             "declared_scope" => s
                 .diagnostics
                 .save_declared_scope(report, reason.as_deref().ok_or("scope_required")?)?,
+            "exposure_review" => s.diagnostics.save_exposure_review(
+                report,
+                reason.as_deref().ok_or("exposure_review_required")?,
+            )?,
             "manual_check" => s
                 .diagnostics
                 .save_manual_check(report, reason.as_deref().ok_or("manual_check_required")?)?,
@@ -1991,6 +1995,7 @@ mod tests {
                 comparison_scope: None,
                 manual_checks: vec![],
                 declared_scope: crate::diagnostics::DeclaredScope::default(),
+                exposure_reviews: vec![],
                 findings: vec![crate::diagnostics::Finding {
                     id: "443:tls".into(),
                     port: 443,

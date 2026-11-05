@@ -29,6 +29,20 @@ describe('exposure review',()=>{
   expect(html).toContain('TLS verification');
   expect(html).not.toContain('HTTPS redirect');
  });
+ it('shows the user-reported exposure review on the selected port',()=>{
+  const reviewed={...report,exposureReviews:[{port:22,revision:1,status:'unexpected' as const,note:'Review SSH',reviewer:'Alex',reviewedAt:'2026-11-04'}]};
+  const html=renderToStaticMarkup(<DiagnosticScope report={reviewed} locale="ja" native selectedFinding="b" onSelectFinding={()=>{}}/>);
+  expect(html).toContain('申告: 想定外');
+  expect(html).toContain('<span>想定外</span><strong>1</strong>');
+  expect(html).toContain('<span>未確認</span><strong>1</strong>');
+  expect(html).toContain('<span>想定内</span><strong>0</strong>');
+  expect(html).toContain('公開意図の確認 · 22');
+  expect(html).toContain('value="unexpected" selected');
+  expect(html).toContain('value="Review SSH"');
+  expect(html).toContain('value="Alex"');
+  expect(html).toContain('value="2026-11-04"');
+  expect(html).toContain('応答未確認 1');
+ });
  it('keeps missing declarations and sources unknown',()=>{
   const html=renderToStaticMarkup(<DiagnosticScope report={{...report,declaredScope:undefined,sourceAddress:undefined,findings:[]}} locale="en" native onSelectFinding={()=>{}}/>);
   expect(html).toContain('Not recorded');
