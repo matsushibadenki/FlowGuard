@@ -1,4 +1,4 @@
-import {describe,expect,it} from 'vitest';
+import {describe,expect,it,vi} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {DiagnosticScope} from './DiagnosticScope';
 import type {DiagnosticFinding,DiagnosticReport} from '../core/types';
@@ -42,6 +42,17 @@ describe('exposure review',()=>{
   expect(html).toContain('value="Alex"');
   expect(html).toContain('value="2026-11-04"');
   expect(html).toContain('応答未確認 1');
+ });
+ it('counts due reviews from saved port records in each language',()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date(2026,10,6,12));
+  try{
+   const reviewed={...report,exposureReviews:[{port:22,revision:1,status:'unexpected' as const,note:'',nextAt:'2026-11-05'},{port:443,revision:1,status:'expected' as const,note:'',nextAt:'2026-11-06'},{port:999,revision:1,status:'expected' as const,note:'',nextAt:'2026-11-01'}]};
+   for(const [locale,today,overdue] of [['ja','本日確認','確認期限超過'],['en','Review today','Review overdue'],['zh-CN','今日确认','确认已逾期']] as const){
+    const html=renderToStaticMarkup(<DiagnosticScope report={reviewed} locale={locale} native onSelectFinding={()=>{}}/>);
+    expect(html).toContain(`<span>${today}</span><strong>1</strong>`);
+    expect(html).toContain(`<span>${overdue}</span><strong>1</strong>`);
+   }
+  }finally{vi.useRealTimers();}
  });
  it('keeps missing declarations and sources unknown',()=>{
   const html=renderToStaticMarkup(<DiagnosticScope report={{...report,declaredScope:undefined,sourceAddress:undefined,findings:[]}} locale="en" native onSelectFinding={()=>{}}/>);
