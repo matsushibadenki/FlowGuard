@@ -872,17 +872,38 @@ pub fn export_locale(r: &Report, format: &str, locale: &str) -> Result<String, S
     let (review_title, review_labels, review_statuses) = match locale {
         "ja" => (
             "公開範囲の確認",
-            ["ポート", "利用者の申告", "メモ", "確認者", "確認日", "次回確認日"],
+            [
+                "ポート",
+                "利用者の申告",
+                "メモ",
+                "確認者",
+                "確認日",
+                "次回確認日",
+            ],
             ["未確認", "想定内", "想定外"],
         ),
         "zh-CN" => (
             "公开范围确认",
-            ["端口", "用户申报", "备注", "确认人", "确认日期", "下次确认日期"],
+            [
+                "端口",
+                "用户申报",
+                "备注",
+                "确认人",
+                "确认日期",
+                "下次确认日期",
+            ],
             ["未确认", "符合预期", "不符预期"],
         ),
         _ => (
             "Exposure review",
-            ["Port", "User-reported", "Note", "Reviewer", "Reviewed on", "Next review"],
+            [
+                "Port",
+                "User-reported",
+                "Note",
+                "Reviewer",
+                "Reviewed on",
+                "Next review",
+            ],
             ["Unreviewed", "Expected", "Unexpected"],
         ),
     };
@@ -1285,8 +1306,14 @@ mod tests {
                 .unwrap_err(),
             "exposure_review_invalid"
         );
-        let with_next = with_details.replace("\"reviewedAt\":\"2024-02-29\"", "\"reviewedAt\":\"2024-02-29\",\"nextAt\":\"2025-02-29\"");
-        assert_eq!(state.save_exposure_review(1, &with_next).unwrap_err(), "exposure_review_invalid");
+        let with_next = with_details.replace(
+            "\"reviewedAt\":\"2024-02-29\"",
+            "\"reviewedAt\":\"2024-02-29\",\"nextAt\":\"2025-02-29\"",
+        );
+        assert_eq!(
+            state.save_exposure_review(1, &with_next).unwrap_err(),
+            "exposure_review_invalid"
+        );
         let with_next = with_next.replace("2025-02-29", "2028-02-29");
         state.save_exposure_review(1, &with_next).unwrap();
         assert_eq!(state.reports[0].exposure_reviews[0].next_at, "2028-02-29");

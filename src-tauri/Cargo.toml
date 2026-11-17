@@ -1,6 +1,6 @@
 [package]
 name = "flowguard"
-version = "0.1.1"
+version = "0.1.2"
 description = "A visual macOS network observer and firewall rule workbench"
 authors = ["FlowGuard"]
 edition = "2021"
