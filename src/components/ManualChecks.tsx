@@ -21,7 +21,7 @@ export function ManualChecks({report,locale,native}:{report:DiagnosticReport;loc
  const w=words[locale],entries=report.manualChecks??[];
  const [item,setItem]=useState<Item>('mfa'),[drafts,setDrafts]=useState<Record<Item,Draft>>(()=>Object.fromEntries(ids.map(id=>[id,draftFor(id,entries.find(e=>e.item===id))])) as Record<Item,Draft>);
  const [busy,setBusy]=useState(false),[error,setError]=useState(false),[today,setToday]=useState(()=>localReviewDate(new Date()));
- useEffect(()=>{const timer=window.setInterval(()=>setToday(localReviewDate(new Date())),60000);return ()=>window.clearInterval(timer);},[]);
+ useEffect(()=>{const refresh=()=>setToday(localReviewDate(new Date()));const timer=window.setInterval(refresh,60000);window.addEventListener('focus',refresh);document.addEventListener('visibilitychange',refresh);return ()=>{window.clearInterval(timer);window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh);};},[]);
  const remaining=ids.filter(id=>!entries.some(e=>e.item===id&&e.status!=='unknown')).length;
  const conflictFor=(id:Item)=>drafts[id].conflict||(entries.find(e=>e.item===id)?.revision??0)!==(drafts[id].value.revision??0);
  const draft=drafts[item],value=draft.value,conflict=conflictFor(item);

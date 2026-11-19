@@ -20,7 +20,7 @@ export function DiagnosticScope({report,locale,native,selectedFinding,onSelectFi
  const [reviewFilter,setReviewFilter]=useState<'all'|'expected'|'unexpected'|'unknown'>('all');
  const [dueFilter,setDueFilter]=useState<'all'|'today'|'overdue'>('all');
  const [today,setToday]=useState(()=>localReviewDate(new Date()));
- useEffect(()=>{const timer=window.setInterval(()=>setToday(localReviewDate(new Date())),60000);return()=>window.clearInterval(timer);},[]);
+ useEffect(()=>{const refresh=()=>setToday(localReviewDate(new Date()));const timer=window.setInterval(refresh,60000);window.addEventListener('focus',refresh);document.addEventListener('visibilitychange',refresh);return()=>{window.clearInterval(timer);window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh);};},[]);
  const dueLabel=(port:number)=>{const due=exposureReviewDue(report.exposureReviews?.find(r=>r.port===port),today);return due==='today'?w.dueToday:due==='overdue'?w.dueOverdue:'';};
  const conflict=saveConflict||current.revision!==draft.revision;
  const dirty=(['purpose','environment','owner','exposure'] as const).some(field=>draft[field]!==baseline[field]);
